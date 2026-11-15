@@ -174,6 +174,8 @@ Recruitment (ATS)-এ interview: HR তারিখ-সময়, দৈর্�
 
 Candidate-এর ভুল তথ্য (নাম, email, ফোন, source) Recruitment থেকেই ঠিক করা যায়: প্রতিটা candidate-এর পাশে **Edit** (আলাদা অনুমতি Recruitment → **Edit candidate details**, `edit_candidates`, কাউকে আপনাআপনি দেওয়া হয় না; `PUT /api/job-candidates/:id/details`)। Candidate-এর New Joiner Onboarding খোলা থাকলে (draft / submitted / sent back) onboarding রেকর্ডের নাম, email, ফোন আর অস্থায়ী login-এর নামও একসাথে ঠিক হয় — HR-এর review আর "Already on file" যাচাই সেগুলোই দেখে। Joined হয়ে গেলে Employee রেকর্ড বদলায় না (সেটা Employees থেকে)।
 
+Joiner-এর login mail-এ পাঠানো: নতুন joiner খুললে (বা "New password" দিলে) যে "Joiner's login" popup আসে, তাতে Login link (`/?workspace=…&login=ONB-…` — workspace আর Login ID আগে থেকে বসানো), Login ID ও অস্থায়ী password থাকে, আর নিচে **Email it to the joiner** ঘর + **Send email**। Mail-এ link, Login ID, password, মেয়াদ আর "প্রথম login-এ নিজের password দিন" লেখা যায় (`POST /api/hr-ops/joiner-onboarding/:id/email-login`, `OnboardingSelfServiceRoutes.ts`)। Password কোথাও জমা থাকে না, তাই popup নিজের দেখানো password ফেরত পাঠায়; server বর্তমান hash-এর সাথে মিলিয়ে দেখে, মিললেই পাঠায় — "New password"-এর পর পুরোনোটা পাঠানো যায় না (409)। Draft / Sent back ছাড়া অন্য অবস্থায় বন্ধ। কাকে, কখন, কে পাঠাল তা `onboarding_applications.login_emailed_to / _at / _by`-এ থাকে, password নয়। Server-এ mail সেট না থাকলে পরিষ্কার ভুল দেখায় আর HR নিজে Copy করে পাঠায়।
+
 গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি **কর্মী নন** (`all_employees`-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 `ONBOARDING_ONLY`)।
 
 **Sidebar-এ SIM এক জায়গায়:** Self Service → **SIM & ID Card** group: "My SIM & Bill" (আগে My Mobile SIM) আর "Request SIM / ID Card" (আগে SIM & ID Card)। Admin Panel → **SIM Management** group: "SIM & Mobile Bill" (আগে Mobile Bill, module `mobile_bill`) আর "SIM & ID Card Requests" (HR Operations-এর `requisitions` layer)। শুধু নাম আর জায়গা বদলেছে; ঠিকানা আর permission আগের মতো, কোনোটার access না থাকলে group দেখায় না।
@@ -257,6 +259,9 @@ flowchart TD
 - রোস্টারে "Off" বা শিফট দিলে ওই কর্মীর ওই দিনের ছুটি/কর্মদিবস ও দেরির সময় বদলে যায় (`RosterRoutes.ts`)।
 - ভুল উপস্থিতি: কর্মী **সংশোধন আবেদন** দেয় → Approval। In Time ওই দিনের; Out Time In Time-এর আগে দিলে সেটা night shift ধরে পরদিন সকালের সময় হিসেবে যায় (ফর্মে "Next day" লেখা দেখায়)। অন্য তারিখের সময় বা In-এর আগের Out সার্ভার নেয় না।
 - ZK ডিভাইসের PIN কর্মীর সাথে না জুড়লে punch কারো নামে যায় না (Unlinked PINs তালিকা)।
+- **অফিস মেশিনে ডাবল punch** (`zkPunchRule.ts`): মেশিনে In / Out বোতাম নেই — দিনের প্রথম punch In, শেষ punch Out। আসার সময় দুবার চাপলে আগে কয়েক সেকেন্ড পরেই একটা Out বসে যেত, আর অ্যাপ থেকে আসল Out দেওয়া যেত না। এখন মেশিনের punch দিনের In-এর (মেশিন বা অ্যাপ, যেটা আগে) অন্তত **N মিনিট** পরে হলে তবেই Out; তার আগের punch একই আগমন — punch জমা থাকে, শুধু Out হয় না। N ডিফল্টে ৫, Office Attendance → **Double punch** থেকে বদলায় (0 = বন্ধ)। প্রতিটা নিয়মের "কবে থেকে" তারিখ আছে, বদল সবসময় **আজ থেকে**: আগের দিন (বন্ধ মাস, পাঠানো রিপোর্ট) আগের নিয়মেই থাকে, আর প্রথম নিয়মের আগের দিনে পুরোনো আচরণ। একই নিয়ম সব জায়গায়: My Attendance কার্ড, My Attendance তালিকা, Monthly ও Daily রিপোর্ট, Office Attendance রিপোর্ট, HR 360, Site Attendance-এর মেশিন-প্রস্তাব। Salary, Present / Absent আর দেরি Out ব্যবহার করে না, তাই বদলায় না; OT-এর হিসাবে এই নিয়ম লাগানো হয়নি — আসার সময়ের দুই punch-এর মাঝে এক-দুই মিনিট, তাতে কখনো OT হয় না।
+- **মেশিনের Out-এর পর আবার Out:** "Remote Attendance — update Out Time" (`users.can_update_check_out`) যাঁর আছে, তিনি Out মেশিন থেকে এলেও কার্ডে **Set again** পান। নতুন Out এখনকার সময়ে অ্যাপ থেকে বসে আর approval-এ যায়; মেশিনের punch মোছে না — নতুন Out পরে বলে সেটাই দিনের Out (শেষ punch)। অনুমতি না থাকলে আগের মতো।
+- **iPhone Home Screen-এর sign-in:** Home Screen থেকে খোলা অ্যাপ নিজের আলাদা sign-in পায় — ৩০ দিন, ৭ দিন না খুললে sign out (Active Users → Session security)। ৬০ মিনিটের website idle নিয়ম সেখানে খাটে না। আগে থেকে sign in করা Home Screen অ্যাপ একবার sign out করে আবার sign in করলে নতুন নিয়ম পায়।
 
 ---
 
@@ -510,6 +515,14 @@ Chat-এর attachment (voice, ছবি, video, document) ডাটাবেস
 ## Book a Ride: ফোনের প্রথম পাতা
 
 ফোনে (APK বা ছোট পর্দা) পেজের নাম header-এ logo-র জায়গায় বসে, পেজের ভেতরের শিরোনাম, tab আর "1 Route — 2 Ride details" সারি থাকে না; ফোনের Back প্রথমে খোলা তালিকা থেকে booking-এ, তারপর Book a Ride থেকে বের করে। Ride Status, Approved by Me, My Trips, Direct Book (যার যেটা আছে) একটা **My rides** বোতামের ভেতরে, পাশে খোলা ride-এর সংখ্যা। Pickup আর destination একটা card-এ (সবুজ বিন্দু → বেগুনি চৌকো); নিচে chip: Home / Work (save করা জায়গা, switch থাকলে), Projects (মানচিত্রে সব প্রজেক্ট), Map; Recent-এর ৩টা, বাকিগুলো "See all recent"-এ। লেখার সময় একটাই তালিকা: জায়গার প্রস্তাব, মিলে যাওয়া প্রজেক্ট, "Use … as typed" আর "Choose on map"। কম্পিউটারের পেজে মানচিত্রের বাঁ-উপরে **Projects** বোতাম: location দেওয়া সব প্রজেক্ট নামসহ pin হয়ে মানচিত্রে আসে, পাশে খোঁজার ঘরসহ তালিকা (`/api/vehicles/places/projects`); pin বা তালিকায় চাপলে প্রজেক্টের নামেই যেটা সক্রিয় (pickup বা destination) সেটা বসে। Zoom বোতাম ডান-নিচে।
+
+## Dashboard থেকে popup: Book a Ride আর My Asset requisition
+
+কম্পিউটারের Dashboard-এ **Book a Ride** কার্ডের "Where are you going?" চাপলে পাতা বদলায় না — Dashboard-এর ওপরেই liquid-glass popup খোলে (`BookRideCard.tsx`), ভেতরে Self Service → Book a Ride-এর একই দুই ধাপ ("1 Route — 2 Ride details") ও একই request (`POST /api/vehicles/requisitions`)। দুই জায়গার form একটাই component (`RideBookingFlow.tsx`), তাই নিয়ম, সময় যাচাই আর অনুমতি আগের মতোই server-এ। জমা দিলে popup বন্ধ হয় আর `credence:records-changed` event-এ কার্ডে নতুন ride সাথে সাথে আসে; "Ride Status" আগের মতো Vehicle পাতায় নিয়ে যায়। বড় পর্দায় map পাশে, ছোট window-এ ফোনের মতো সাজানো; Esc বা পেছনে চাপলে বন্ধ। **My Asset** কার্ডের "New requisition"-ও এখন Dashboard-এর ওপরেই `NewAssetRequisitionModal` খোলে (`POST /api/assets/requisitions`, আগের মতো); জমা দিলে কার্ডের "Open requests" সাথে সাথে বাড়ে। কার্ড দুটো যাদের আগে দেখাত তাদেরই দেখায় — নতুন কোনো অনুমতি বা API নেই।
+
+## ফোনে বাঁ কিনারা থেকে টেনে side menu
+
+ফোনে (APK বা ছোট পর্দার browser) পর্দার একদম বাঁ কিনারা (৩২px-এর মধ্যে) থেকে আঙুল ডানে টানলে side menu (`GlobalSidebar`-এর drawer) আঙুলের সাথে সাথে বেরিয়ে আসে; এক-তৃতীয়াংশের বেশি টেনে ছাড়লে বা জোরে টানলে পুরো খোলে, কম হলে ফিরে যায়। খোলা menu বা তার পাশের অন্ধকার জায়গা বাঁয়ে টানলে বন্ধ হয় (hamburger, পাশে চাপা — আগের মতোই)। উপর-নিচ টানা হলে page আগের মতো scroll হয়; popup খোলা থাকলে, map-এর ওপর বা `data-no-edge-swipe` দেওয়া জায়গা থেকে শুরু হলে কিছু হয় না; কম্পিউটারে (md-এর বড়) বন্ধ। `src/lib/useEdgeSwipeDrawer.ts`। menu-তে কী দেখাবে তা আগের মতোই অনুমতি অনুযায়ী — নতুন কোনো অনুমতি বা API নেই।
 
 ## Book a Ride: pickup / destination মানচিত্রে বাছাই
 
@@ -1075,3 +1088,9 @@ Attendance Reports module-এর নতুন layer **"Edit attendance (give In 
 - **Employee Directory** (Self Service): শুধু চাকরিতে আছেন এমন কর্মী।
 
 আগে থেকেই active-only ছিল: Department Summary, Late list, Custom Report (Attendance Report Builder), HR Operations-এর Quick reports ও Employee Reports (include_inactive না দিলে), Employee Tracking, Management Dashboard, Admin Dashboard-এর জন্মদিন। ইচ্ছা করে বদলানো হয়নি: **Payroll** (চলে যাওয়া কর্মীরও শেষ মাসের বেতন হয়), আর লেনদেনের ইতিহাস (ছুটির আবেদন, Bill Claim, SIM bill) — সেগুলো যা ঘটেছে তার হিসাব। মাসের মাঝে চলে যাওয়া কারো সেই মাসের হাজিরা দেখতে Status-এ "All" বা "Inactive" বাছুন।
+
+### ফিডব্যাক: স্ক্রিনশট paste, আর Done / Pending
+
+**"Give feedback" popup:** স্ক্রিনশট দেওয়া যায় ফাইল বেছে, ছবি টেনে ফেলে, অথবা কপি করা ছবি **Ctrl+V** দিয়ে — popup-এর ভেতরে কোথায় ফোকাস আছে তা লাগে না (লেখা paste করলে আগের মতো লেখাই বসে)। ৩ MB-র বেশি ছবি (retina স্ক্রিনের কপি প্রায়ই বড় হয়) refuse না করে আপনাআপনি ছোট করে JPEG বানানো হয়; তবু না হলে "too big" বার্তা (`FeedbackPopup.tsx`)।
+
+**Admin Panel -> MIS -> User Feedback:** যে ফিডব্যাকে কিছু করার আছে (প্রতিটা ফিডব্যাক, শুধু "How do you like the app?"-র তারা-রেটিং ছাড়া) তার অবস্থা **Pending** → **Done**। Pending-এ দেখায় কতদিন ধরে পড়ে আছে ("Pending · 5 days"; ৭ দিনে হলুদ, ১৪ দিনে লাল), Done-এ দেখায় কতদিনে হলো, কে করল, কখন, আর নোট। উপরে All / Pending (সংখ্যা) / Done (সংখ্যা), "Longest waiting: …" আর Newest / Oldest first। **Mark done** (নোটসহ popup) আর **Reopen** শুধু ওই module-এর `feedback_resolve` layer যাঁর আছে (ডিফল্টে কারও নেই, Superadmin সবসময়) — না থাকলে বোতাম লুকানো আর `PUT /api/feedback/:id/status` 403। সময় ধরা হয় database ঘড়িতে; একই সময়ে দুজন চাপলে একটাই লাগে (এক UPDATE, দ্বিতীয়টা 409)। রেটিং-শুধু উত্তরের অবস্থা `na`, তাকে Done করা যায় না (400) (`FeedbackRoutes.ts`)।

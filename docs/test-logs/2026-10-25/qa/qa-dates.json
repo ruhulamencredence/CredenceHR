@@ -1,0 +1,118 @@
+{
+ "when": "2026-10-25T19:30:57.011Z",
+ "summary": {
+  "PASS": 15,
+  "FAIL": 0,
+  "INFO": 3
+ },
+ "results": [
+  {
+   "id": "DT-01",
+   "status": "PASS",
+   "name": "Leave across a month end (2027-01-30 → 02-02) counts 4 days",
+   "detail": "200 {\"success\":true,\"id\":1,\"day_count\":4}"
+  },
+  {
+   "id": "DT-02",
+   "status": "INFO",
+   "name": "Leave across a year end (2027-12-30 → 2028-01-02)",
+   "detail": "200 {\"success\":true,\"id\":2,\"day_count\":4} — the whole 4 days come off this year's balance (there is one balance row, no split by leave year)"
+  },
+  {
+   "id": "DT-03",
+   "status": "PASS",
+   "name": "Leave on 29 Feb 2028 (leap year) is accepted, 1 day",
+   "detail": "200 {\"success\":true,\"id\":3,\"day_count\":1}"
+  },
+  {
+   "id": "DT-04",
+   "status": "PASS",
+   "name": "Leave on 29 Feb of a non-leap year is refused",
+   "detail": "400 {\"error\":\"A value isn't in the right format (number or date).\"}"
+  },
+  {
+   "id": "DT-05",
+   "status": "PASS",
+   "name": "Leave ending before it starts is refused",
+   "detail": "400 {\"error\":\"Start Date and End Date are required, and End Date can't be before Start Date.\"}"
+  },
+  {
+   "id": "DT-06",
+   "status": "PASS",
+   "name": "31 April (does not exist) is refused",
+   "detail": "400 {\"error\":\"A value isn't in the right format (number or date).\"}"
+  },
+  {
+   "id": "DT-07",
+   "status": "INFO",
+   "name": "Back-dated leave (40 days ago) with advance notice set to 0",
+   "detail": "200 {\"success\":true,\"id\":4,\"day_count\":1}"
+  },
+  {
+   "id": "DT-08",
+   "status": "PASS",
+   "name": "February 2028 (29 days) fully present pays the full 29,000",
+   "detail": "200 {\"success\":true,\"id\":1,\"net_salary\":29000}; net 29000"
+  },
+  {
+   "id": "DT-09",
+   "status": "PASS",
+   "name": "One absent day in a 31-day month takes 1/31 of the salary",
+   "detail": "200 {\"success\":true,\"id\":2,\"net_salary\":28064.52}; net 28064.52, expected ≈ 28064.52"
+  },
+  {
+   "id": "DT-10",
+   "status": "PASS",
+   "name": "Impossible months (2026-13, 2026-00, 26-09, 2026-9) are refused",
+   "detail": ""
+  },
+  {
+   "id": "DT-11",
+   "status": "PASS",
+   "name": "Night shift: in 22:00, out 06:00 the next morning is accepted",
+   "detail": "201 {\"success\":true,\"id\":1}"
+  },
+  {
+   "id": "DT-12",
+   "status": "PASS",
+   "name": "Out Time earlier than In Time on the same day is refused",
+   "detail": "400 {\"error\":\"Out Time must be after In Time. For a night shift, the Out Time is on the next day.\"}"
+  },
+  {
+   "id": "DT-13",
+   "status": "PASS",
+   "name": "In/Out times on a different date than the day being corrected are refused",
+   "detail": "400 {\"error\":\"In Time must be on 2026-10-21 (the day being corrected).\"}"
+  },
+  {
+   "id": "DT-13b",
+   "status": "PASS",
+   "name": "An In Time of 25:00 is refused",
+   "detail": "400 {\"error\":\"In Time is not a valid time.\"}"
+  },
+  {
+   "id": "DT-14",
+   "status": "PASS",
+   "name": "A correction for tomorrow (Dhaka date) is refused",
+   "detail": "400 {\"error\":\"Can't correct a future date.\"}"
+  },
+  {
+   "id": "DT-15",
+   "status": "PASS",
+   "name": "Turning 14 today is allowed; one day short of 14 is refused",
+   "detail": "201 / 400"
+  },
+  {
+   "id": "DT-16",
+   "status": "PASS",
+   "name": "A claim filed now is dated with the Dhaka date (2026-10-26), whatever the server clock's zone",
+   "detail": "201 {\"success\":true,\"id\":1}; claim_date 2026-10-26; server UTC date 2026-10-25"
+  },
+  {
+   "id": "DT-17",
+   "status": "INFO",
+   "name": "A bill line dated 3 days in the future (claim for today already filed, so this also meets one-claim-a-day)",
+   "detail": "400 {\"error\":\"A claim was already filed today (#1). One claim a day — edit that claim to add or change bills.\",\"today_claim_id\":1}"
+  }
+ ]
+}

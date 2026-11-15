@@ -1,3 +1,4 @@
+import { signInDeviceFields } from '../lib/deviceKind';
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -74,8 +75,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [ownerMode] = useState(() => /^\/system\/?$/i.test(window.location.pathname));
   // The web address can name the workspace (credence.example.com) — then the
   // workspace page is skipped.
-  const [detecting, setDetecting] = useState(() => !readWorkspace());
+  // A link from an email (…/?workspace=credence&login=ONB-0007) names the
+  // workspace and the Login ID too, so a new joiner only types the password.
+  const linkWorkspace = useState(() => new URLSearchParams(window.location.search).get('workspace')?.trim() || '')[0];
+  const [detecting, setDetecting] = useState(() => !readWorkspace() || !!linkWorkspace);
   useEffect(() => {
+    if (linkWorkspace && !/^\/system\/?$/i.test(window.location.pathname)) {
+      lookupWorkspace(linkWorkspace)
+        .then((w) => {
+          saveWorkspace(w);
+          setWorkspace(w);
+        })
+        .catch(() => {})
+        .finally(() => setDetecting(false));
+      return;
+    }
     if (workspace || /^\/system\/?$/i.test(window.location.pathname)) {
       setDetecting(false);
       return;
@@ -95,7 +109,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       .finally(() => setDetecting(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState(() => new URLSearchParams(window.location.search).get('login')?.trim().slice(0, 100) || '');
   const [password, setPassword] = useState('');
   // "Forgot password?" — always offered; the popup shows the ways a
   // Superadmin left on (PasswordResetRoutes.ts).
@@ -230,7 +244,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       // The fingerprint first, then (app) the location the password sign-in
       // also needs — so the phone's fingerprint window opens at once.
       const extra = async () => {
-        const base: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
+        const base: Record<string, any> = { ...(ownerMode ? { system: true } : { workspace: workspace?.code }), ...signInDeviceFields() };
         if (!isNativeApp) return base;
         const device = await appDeviceInfo();
         setLocating(true);
@@ -327,7 +341,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         body: JSON.stringify(
           coords
             ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}), trusted_devices: trustedDeviceTokens() }
-            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens() }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), trusted_devices: trustedDeviceTokens(), ...signInDeviceFields() }
         ),
       });
 

@@ -1,0 +1,2174 @@
+[
+ {
+  "path": "/api/payroll/wizard/attendance-summary",
+  "status": 200,
+  "ms": 24,
+  "kb": 4
+ },
+ {
+  "path": "/api/approvals",
+  "status": 200,
+  "ms": 22,
+  "kb": 17
+ },
+ {
+  "path": "/api/mail/address-book",
+  "status": 200,
+  "ms": 17,
+  "kb": 1
+ },
+ {
+  "path": "/api/user-claims",
+  "status": 200,
+  "ms": 15,
+  "kb": 1
+ },
+ {
+  "path": "/api/tasks/assignable",
+  "status": 200,
+  "ms": 15,
+  "kb": 2
+ },
+ {
+  "path": "/api/admin-dashboard/extras",
+  "status": 200,
+  "ms": 14,
+  "kb": 1
+ },
+ {
+  "path": "/api/my-approvals/history",
+  "status": 200,
+  "ms": 14,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/actions",
+  "status": 200,
+  "ms": 13,
+  "kb": 18
+ },
+ {
+  "path": "/api/leave-balances",
+  "status": 200,
+  "ms": 13,
+  "kb": 3
+ },
+ {
+  "path": "/api/leave-applications",
+  "status": 200,
+  "ms": 13,
+  "kb": 12
+ },
+ {
+  "path": "/api/payroll",
+  "status": 200,
+  "ms": 13,
+  "kb": 165
+ },
+ {
+  "path": "/api/my-approvals",
+  "status": 200,
+  "ms": 12,
+  "kb": 0
+ },
+ {
+  "path": "/api/conveyance-bills/:id",
+  "status": 200,
+  "ms": 12,
+  "kb": 1
+ },
+ {
+  "path": "/api/employee-change-history",
+  "status": 200,
+  "ms": 12,
+  "kb": 4
+ },
+ {
+  "path": "/api/hr-ops/employees",
+  "status": 200,
+  "ms": 12,
+  "kb": 7
+ },
+ {
+  "path": "/api/hr-ops/reports/monthly",
+  "status": 200,
+  "ms": 12,
+  "kb": 3
+ },
+ {
+  "path": "/api/hr-ops/reports/catalog",
+  "status": 200,
+  "ms": 12,
+  "kb": 13
+ },
+ {
+  "path": "/api/active-users",
+  "status": 200,
+  "ms": 11,
+  "kb": 1
+ },
+ {
+  "path": "/api/chat/messages/:id/attachment",
+  "status": 404,
+  "ms": 11,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/log",
+  "status": 200,
+  "ms": 11,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions",
+  "status": 200,
+  "ms": 11,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-policies",
+  "status": 200,
+  "ms": 10,
+  "kb": 1
+ },
+ {
+  "path": "/api/mobile-bill/my",
+  "status": 200,
+  "ms": 10,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/:id",
+  "status": 200,
+  "ms": 10,
+  "kb": 1
+ },
+ {
+  "path": "/api/budgets/:id/submissions",
+  "status": 200,
+  "ms": 9,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/rooms",
+  "status": 200,
+  "ms": 9,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/settings",
+  "status": 200,
+  "ms": 9,
+  "kb": 1
+ },
+ {
+  "path": "/api/exit-requests/:id/dues",
+  "status": 200,
+  "ms": 9,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-cases",
+  "status": 200,
+  "ms": 9,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-applications/report",
+  "status": 200,
+  "ms": 9,
+  "kb": 12
+ },
+ {
+  "path": "/api/mobile-bill/sims/:id(\\\\d+)",
+  "status": 200,
+  "ms": 9,
+  "kb": 2
+ },
+ {
+  "path": "/api/alerts",
+  "status": 200,
+  "ms": 8,
+  "kb": 16
+ },
+ {
+  "path": "/api/chat/directory",
+  "status": 200,
+  "ms": 8,
+  "kb": 2
+ },
+ {
+  "path": "/api/employees",
+  "status": 200,
+  "ms": 8,
+  "kb": 13
+ },
+ {
+  "path": "/api/hr-ops/service-book/:employeeId",
+  "status": 404,
+  "ms": 8,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/p360/:employeeId",
+  "status": 404,
+  "ms": 8,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/limit-history",
+  "status": 200,
+  "ms": 8,
+  "kb": 1
+ },
+ {
+  "path": "/api/material-receive",
+  "status": 200,
+  "ms": 8,
+  "kb": 0
+ },
+ {
+  "path": "/api/office-attendance/unlinked-pins",
+  "status": 200,
+  "ms": 8,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/overview",
+  "status": 200,
+  "ms": 8,
+  "kb": 1
+ },
+ {
+  "path": "/api/users",
+  "status": 200,
+  "ms": 8,
+  "kb": 25
+ },
+ {
+  "path": "/api/assistant/status",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/approval-templates",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/signers",
+  "status": 200,
+  "ms": 7,
+  "kb": 3
+ },
+ {
+  "path": "/api/tracking/status",
+  "status": 200,
+  "ms": 7,
+  "kb": 3
+ },
+ {
+  "path": "/api/entries",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/exit-requests",
+  "status": 200,
+  "ms": 7,
+  "kb": 3
+ },
+ {
+  "path": "/api/exit-requests/pending",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/exit-requests/:id/documents",
+  "status": 200,
+  "ms": 7,
+  "kb": 1
+ },
+ {
+  "path": "/api/hr-ops/onboarding/:employeeId",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/increments/due",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/info-requests",
+  "status": 200,
+  "ms": 7,
+  "kb": 1
+ },
+ {
+  "path": "/api/leave-balance-workflows",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/groups",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/messages",
+  "status": 200,
+  "ms": 7,
+  "kb": 8
+ },
+ {
+  "path": "/api/mail/counts",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/mpr-dispatch/rows",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/material-receive/my-mpr",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/office-attendance",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding",
+  "status": 200,
+  "ms": 7,
+  "kb": 1
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding/:id",
+  "status": 200,
+  "ms": 7,
+  "kb": 2
+ },
+ {
+  "path": "/api/payroll/employee-list",
+  "status": 200,
+  "ms": 7,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/salary-structures",
+  "status": 200,
+  "ms": 7,
+  "kb": 10
+ },
+ {
+  "path": "/api/site-attendance/register",
+  "status": 200,
+  "ms": 7,
+  "kb": 1
+ },
+ {
+  "path": "/api/admin-dashboard/stuck",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/approval-templates/:id",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/requisitions",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/bill-claim-policy",
+  "status": 200,
+  "ms": 6,
+  "kb": 6
+ },
+ {
+  "path": "/api/bill-claim-policy/mine",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/chat/rooms/:id/members",
+  "status": 403,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/messages/:id/reads",
+  "status": 404,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/companies/next-employee-code",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/system/companies",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/conveyance-bills/combined/list",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/employee-documents",
+  "status": 200,
+  "ms": 6,
+  "kb": 4
+ },
+ {
+  "path": "/api/employees/:id/transfers",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/job-edits/mine",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-analytics/summary",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/hr-ops/letters",
+  "status": 200,
+  "ms": 6,
+  "kb": 9
+ },
+ {
+  "path": "/api/hr-ops/my/p360/records/:kind/:id/file",
+  "status": 404,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/my/info-requests",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/reminders/upcoming",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/directory",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/mail/directory/browse",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/mail/analytics",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/mobile-bill/sims",
+  "status": 200,
+  "ms": 6,
+  "kb": 2
+ },
+ {
+  "path": "/api/mpr-dispatch/entries/:id/timeline",
+  "status": 404,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/salary-month",
+  "status": 200,
+  "ms": 6,
+  "kb": 0
+ },
+ {
+  "path": "/api/target-reports",
+  "status": 200,
+  "ms": 6,
+  "kb": 1
+ },
+ {
+  "path": "/api/alerts/unread-count",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/approvals/chain",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/requisitions/:id/history",
+  "status": 200,
+  "ms": 5,
+  "kb": 1
+ },
+ {
+  "path": "/api/bill-claim-policy/history/verify",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/breaks/me",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/breaks/report",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/budgets/:id/items",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/rate-file/summary",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/calls/ice-servers",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/me/about",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/companies/mine",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/system/company-access",
+  "status": 200,
+  "ms": 5,
+  "kb": 3
+ },
+ {
+  "path": "/api/conveyance-bills",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/:id/history",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/mine",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/devices",
+  "status": 200,
+  "ms": 5,
+  "kb": 2
+ },
+ {
+  "path": "/api/esign/my",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/employees/unlinked-users",
+  "status": 200,
+  "ms": 5,
+  "kb": 1
+ },
+ {
+  "path": "/api/tracking/live",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/employees/:id/change-log",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/entries/recycle",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/entries/edit-history",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/job-edits",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/feedback/prompt",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/feedback",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/feedback/:id/screenshot",
+  "status": 404,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/auth/fingerprint",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/disciplinary-actions",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/meta",
+  "status": 200,
+  "ms": 5,
+  "kb": 5
+ },
+ {
+  "path": "/api/hr-ops/letter-templates",
+  "status": 200,
+  "ms": 5,
+  "kb": 9
+ },
+ {
+  "path": "/api/hr-ops/onboarding",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/info-requests/:id/file",
+  "status": 404,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/report-runs",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/status",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/check",
+  "status": 400,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/groups",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/report",
+  "status": 200,
+  "ms": 5,
+  "kb": 2
+ },
+ {
+  "path": "/api/notices",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/access-log",
+  "status": 200,
+  "ms": 5,
+  "kb": 35
+ },
+ {
+  "path": "/api/payroll/dashboard-summary",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/pay-grades",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/pending-bonuses",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-attendance-summary",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/teams",
+  "status": 200,
+  "ms": 5,
+  "kb": 3
+ },
+ {
+  "path": "/api/site-attendance/sheets",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/targets/access",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/tasks/mine",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/tasks/:id(\\\\d+)",
+  "status": 404,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/task-recurrences",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/tasks/report",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/today-overview",
+  "status": 200,
+  "ms": 5,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/requisitions/my",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/:id/history",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/assistant/support/sessions/:id",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/assistant/support/queue",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/auth/me",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/bill-claim-policy/history",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/budgets",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/rate-file/rate-list",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/rate-file/categories",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/delivery-date-conditions",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/jobs",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/jobs/check/:jobNo",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/unread-count",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/rooms/:id/messages",
+  "status": 403,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/rooms/:id/pins",
+  "status": 403,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/companies/assignments",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/platform/workspaces",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/platform/visits",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/:id/file",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/data-import/kinds",
+  "status": 200,
+  "ms": 4,
+  "kb": 12
+ },
+ {
+  "path": "/api/departments",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/employee-documents/people",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/employee-documents/:id/file",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/documents/:id",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/certificate.cer",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/employees/:id/supervisors",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/employees/:id/payment-accounts",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/entries/mpr-usage",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/entries/:id/history",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/exit-requests/:id/settlement",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/grievances",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/approval-steps",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/letter-requests",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/onboarding-tasks",
+  "status": 200,
+  "ms": 4,
+  "kb": 4
+ },
+ {
+  "path": "/api/hr-ops/onboarding/items/:id/attachment",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/p360/documents/:docId/file",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/reports/values",
+  "status": 400,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/saved-reports",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/report-runs/:id",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/companies",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-balances/mine",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-categories",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-applications/approvers",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-applications/relievers",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/leave-applications/mine",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-applications/report/departments",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/leave-year-settings",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/accounts",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/groups/:id/members",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/messages/:id",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/meta",
+  "status": 200,
+  "ms": 4,
+  "kb": 3
+ },
+ {
+  "path": "/api/mobile-bill/policies",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/requests",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/bills",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/notices/recipients",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/notices/active",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding/hired-candidates",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/employees",
+  "status": 200,
+  "ms": 4,
+  "kb": 1
+ },
+ {
+  "path": "/api/payroll/salary-components",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/advances",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/late-summary/:employeeId",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-payslips",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/performance-reviews",
+  "status": 200,
+  "ms": 4,
+  "kb": 3
+ },
+ {
+  "path": "/api/reports/email/recipients",
+  "status": 200,
+  "ms": 4,
+  "kb": 2
+ },
+ {
+  "path": "/api/site-attendance/my-teams",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/sheet",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/history",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/sheets/:id/photo",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/target-updates/:id(\\\\d+)/file",
+  "status": 404,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/tasks/all",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions/awaiting-my-assignment",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/profile/personal-data",
+  "status": 200,
+  "ms": 4,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/my",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/requisitions/awaiting-my-fulfillment",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/available",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/assignment-claims",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assistant/support/access",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assistant/support/mine",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/assistant/support/agents",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/mine",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/corrections/:id/file",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/report/departments",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/break-settings",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mpr-numbers",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/budgets/:id/file",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/budget-items/lookup",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/chat/rooms/:id/profile",
+  "status": 403,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/companies/group",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/companies/:id/logo",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/conveyance-bills/:id/approver-signatures",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/conveyance-bills/available-claims/:userId",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/branches",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/caps",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/documents/:id/signed",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/my-signature",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/documents/:id/events",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/employee-directory",
+  "status": 200,
+  "ms": 3,
+  "kb": 5
+ },
+ {
+  "path": "/api/tracking/notice-report",
+  "status": 400,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/reports/budget-submission-status",
+  "status": 400,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/entries/permanent-delete-log",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/exit-clearance-approvers",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/grievances/people",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/hr-ops/my/letters",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/my/service-book",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/increment-policies",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/p360/:employeeId/section/:section",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/my/p360",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/p360/:employeeId/career",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/name-suggestions",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/reminders/access",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-loans",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/accounts",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/threads/:threadId",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/messages/:id/attachments/:idx",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/settings",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/claims/status",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/claims/mine",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/claims/available",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/claims",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/notices/board",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding/:id/documents/:docId",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/password-requests",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/pay-items",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/adjustments",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/salary-structures/current/:employeeId",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/pay-grades/:id",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/advance-requests",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/late-policy",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/mpr-po/imports",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/job-candidates",
+  "status": 200,
+  "ms": 3,
+  "kb": 2
+ },
+ {
+  "path": "/api/candidate-interviews",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/reports/email/access",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/reports-insights/catalog",
+  "status": 200,
+  "ms": 3,
+  "kb": 6
+ },
+ {
+  "path": "/api/roster/shifts",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/my-roster",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/site-attendance/settings",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/targets/mine",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/targets/team",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/targets/:id(\\\\d+)",
+  "status": 404,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/target-reports/export",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/access-audit",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/access-templates",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/module-permissions",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/module-permission-layers",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/conveyance-claim-departments",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/roster-departments",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/permissions",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/driver-candidates",
+  "status": 200,
+  "ms": 3,
+  "kb": 1
+ },
+ {
+  "path": "/api/vehicles/requisitions/bypass-candidates",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions/ongoing",
+  "status": 200,
+  "ms": 3,
+  "kb": 0
+ },
+ {
+  "path": "/api/holidays",
+  "status": 200,
+  "ms": 3,
+  "kb": 19
+ },
+ {
+  "path": "/api/template-assignments",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/inventory-setting",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/assets/assignment-claims/mine",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/my-projects",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/corrections/mine",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/report/daily",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/bill-claim-categories",
+  "status": 200,
+  "ms": 2,
+  "kb": 1
+ },
+ {
+  "path": "/api/delivery-date-conditions/effective",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/public/workspaces/:code",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/public/workspaces/:code/logo",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/on-behalf/access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/on-behalf/:userId/policy",
+  "status": 403,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/debug/supervisor-resolution",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/sources",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/esign/my-sources",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/claim-signature",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/public/verify/:code",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/tracking/history",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/jobs/next-no",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/exit-dues/access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/my/p360/section/:section",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/my/p360/documents/:docId/file",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/p360/records/:kind/:id/file",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/admin/settings",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/mail/public/signature/:id/:token",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/mobile-bill/access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/zk-devices",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding/access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/hr-ops/joiner-onboarding/by-candidate",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/onboarding/me",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/onboarding/me/documents/:docId",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/auth/forgot/options",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/approval/:month",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/hold-access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-payslips/:id(\\\\d+)",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/performance-cycles",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/performance-goals",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/projects",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/projects/all",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/job-postings",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/tasks/access",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/tracking/stay-report",
+  "status": 400,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/attendance-report-departments",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/users/:id/leave-application-departments",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/available",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/ride-settings",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions/my-trips",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/places/recent",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions/:id/live-location",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/requisitions/:id/trip-details",
+  "status": 404,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-holiday-group",
+  "status": 200,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/profile/photo/:userId?",
+  "status": 204,
+  "ms": 2,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/status",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/report/monthly",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/user-claims/on-behalf/:userId/available-claims",
+  "status": 403,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/approval-access",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/approval/:month/payment-sheet",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/adjustments/reference",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/payroll/status",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/my-late-days",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/attendance/report/late",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/calendar-attendance",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/roster",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/server-profiles",
+  "status": 404,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/session-policy",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/places/search",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/vehicles/places/reverse",
+  "status": 400,
+  "ms": 1,
+  "kb": 0
+ },
+ {
+  "path": "/api/web-push/key",
+  "status": 200,
+  "ms": 1,
+  "kb": 0
+ }
+]

@@ -6,13 +6,14 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { PagerBar } from './PagerBar';
 import { SearchSelect } from './Combobox';
-import { Fingerprint, RefreshCw, LogIn, LogOut, AlertTriangle, Search, X, CheckCircle2, Settings } from 'lucide-react';
+import { Fingerprint, RefreshCw, LogIn, LogOut, AlertTriangle, Search, X, CheckCircle2, Settings, Timer } from 'lucide-react';
 import { OfficeAttendanceRow } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { Spinner } from './Spinner';
 import { UnlinkedPinsModal, UnlinkedPin, PinlessEmployee } from './UnlinkedPinsModal';
 import { ZkMachinesModal } from './ZkMachinesModal';
+import { PunchRuleModal, fetchPunchRule, type PunchRule } from './PunchRuleModal';
 
 interface OfficeAttendancePanelProps {
   token: string;
@@ -56,6 +57,13 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   // Unlinked PINs — only for accounts with the "Link Device PINs" layer
   // (the API answers 403 otherwise, and the button stays hidden).
   const [pinData, setPinData] = useState<{ unlinked: UnlinkedPin[]; employees_without_pin: PinlessEmployee[]; days: number } | null>(null);
+  // Double punch rule (zkPunchRule.ts): shown to everyone here, changed only
+  // with the "Double punch rule" layer.
+  const [punchRule, setPunchRule] = useState<PunchRule | null>(null);
+  const [showPunchRule, setShowPunchRule] = useState(false);
+  useEffect(() => {
+    void fetchPunchRule(token).then(setPunchRule);
+  }, [token]);
   const [showPins, setShowPins] = useState(false);
   const loadPins = useCallback(() => {
     fetch(apiUrl('/api/office-attendance/unlinked-pins?days=30'), { headers: { Authorization: `Bearer ${token}` } })
@@ -294,6 +302,18 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
 
   return (
     <div className="space-y-4">
+      {punchRule && showPunchRule && (
+        <PunchRuleModal
+          token={token}
+          rule={punchRule}
+          onClose={() => setShowPunchRule(false)}
+          onSaved={() => {
+            setShowPunchRule(false);
+            void fetchPunchRule(token).then(setPunchRule);
+            void fetchRows();
+          }}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
@@ -315,6 +335,15 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
             >
               <AlertTriangle className="w-3.5 h-3.5" /> Unlinked PINs
               {pinData.unlinked.length > 0 && <span className="px-1.5 rounded-full bg-amber-500 text-white text-[11px] font-bold">{pinData.unlinked.length}</span>}
+            </button>
+          )}
+          {punchRule && (
+            <button
+              onClick={() => setShowPunchRule(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              title="A second punch soon after the In isn't taken as the Out"
+            >
+              <Timer className="w-3.5 h-3.5" /> Double punch: {punchRule.minutes > 0 ? `${punchRule.minutes} min` : 'off'}
             </button>
           )}
           <button

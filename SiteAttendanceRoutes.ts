@@ -47,6 +47,7 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
 import { loadRoster, lateThresholds } from "./RosterRoutes";
+import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
 import { runsBackgroundJobs } from "./jobRunner";
 
 import { attachPersonInfo } from "./personInfo";
@@ -445,21 +446,24 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
     if (byPin.size) {
       const rows: any[] =
         (await queryDB("SELECT device_user_pin, punch_time FROM zk_attendance_logs WHERE punch_time >= ? AND punch_time < ? + INTERVAL 1 DAY", [date, date]).catch(() => [])) || [];
-      const punches = new Map<number, string[]>();
+      // Office machine double punch: a punch within N minutes of the In isn't the Out.
+      const gap = (await loadPunchGap(queryDB))(date);
+      const punches = new Map<number, { hm: string; at: any }[]>();
       for (const r of rows) {
         const id = byPin.get(String(r.device_user_pin).trim());
         const d = r.punch_time instanceof Date ? r.punch_time.toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }) : String(r.punch_time).slice(0, 10);
         const t = hhmmOf(r.punch_time);
         if (!id || d !== date || !t) continue;
-        punches.set(id, [...(punches.get(id) || []), t]);
+        punches.set(id, [...(punches.get(id) || []), { hm: t, at: r.punch_time }]);
       }
-      for (const [id, ts] of punches) {
-        ts.sort();
+      for (const [id, list] of punches) {
+        list.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime() || a.hm.localeCompare(b.hm));
         const x = slot(id);
         x.device = true;
-        x.ins.push(ts[0]);
+        x.ins.push(list[0].hm);
         // One punch so far is only an In.
-        if (ts.length > 1) x.outs.push(ts[ts.length - 1]);
+        const last = list[list.length - 1];
+        if (list.length > 1 && farEnoughFromIn(gap, list[0].at, last.at)) x.outs.push(last.hm);
       }
     }
     if (!acc.size) return out;

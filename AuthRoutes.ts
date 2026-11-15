@@ -6,6 +6,7 @@
 // Sign-in routes (/api/auth/register, /api/auth/login, /api/auth/me), moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { isAppleMobile } from "./clientDevice";
 import { checkInProjectsFor } from "./AttendanceProjects";
 import { checkWorkspaceLogin } from "./CompanyRoutes";
 import { sessionLifetimeSeconds } from "./SessionSecurity";
@@ -247,11 +248,15 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
     }
   }
 
+  // The iPhone / iPad "Add to Home Screen" app says so at sign-in; it gets its
+  // own, longer sign-in (Session security -> Home Screen). Only believed from
+  // an iPhone / iPad browser (clientDevice.ts), never from a computer.
+  const isPwaClient = !isAppClient && req.body?.platform === "pwa" && isAppleMobile(req);
   const token = jwt.sign(
-    { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, cl: isAppClient ? "app" : "web", iat_ms: Date.now(), ...(deviceRowId ? { dev: deviceRowId } : {}), ...(isOnboarding ? { onb: 1 } : {}) },
+    { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, cl: isAppClient ? "app" : isPwaClient ? "pwa" : "web", iat_ms: Date.now(), ...(deviceRowId ? { dev: deviceRowId } : {}), ...(isOnboarding ? { onb: 1 } : {}) },
     JWT_SECRET,
     // Admin Panel -> Active Users -> Session security (SessionSecurity.ts).
-    { expiresIn: await sessionLifetimeSeconds(queryDB, isAppClient) }
+    { expiresIn: await sessionLifetimeSeconds(queryDB, isAppClient ? "app" : isPwaClient ? "pwa" : "web") }
   );
   // The account's default company — its Module Access below is that company's.
   // (The system owner signing in through another group's workspace starts inside it.)

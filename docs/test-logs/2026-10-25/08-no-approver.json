@@ -1,0 +1,85 @@
+{
+ "when": "2026-10-25T15:36:03.520Z",
+ "observations": [
+  {
+   "id": "1.1",
+   "what": "Rafiq Head submits a Leave",
+   "result": "200 {\"success\":true,\"id\":1,\"day_count\":1}"
+  },
+  {
+   "id": "1.2",
+   "what": "Leave: its own status, and the approval request",
+   "result": "leave_applications.status = pending; approval_requests: status=pending awaiting_approver=1 steps=1"
+  },
+  {
+   "id": "2.1",
+   "what": "Rafiq Head submits a Conveyance Bill Claim",
+   "result": "201 {\"success\":true,\"id\":1}"
+  },
+  {
+   "id": "2.2",
+   "what": "Conveyance Bill Claim: its own status, and the approval request",
+   "result": "user_claims.status = pending; approval_requests: status=pending awaiting_approver=1 steps=1"
+  },
+  {
+   "id": "3.1",
+   "what": "Rafiq Head submits a Timesheet correction",
+   "result": "201 {\"success\":true,\"id\":1}"
+  },
+  {
+   "id": "3.2",
+   "what": "Timesheet correction: its own status, and the approval request",
+   "result": "attendance_corrections.status = pending; approval_requests: status=pending awaiting_approver=1 steps=1"
+  },
+  {
+   "id": "4.1",
+   "what": "What the employee sees on their own pages",
+   "result": "Leave: pending (waiting on: null); Claim: pending; Timesheet: pending"
+  },
+  {
+   "id": "4.2",
+   "what": "\"No approver set\" alerts sent",
+   "result": "Superadmin: 3, HR (Approvals module): 3"
+  },
+  {
+   "id": "4.3",
+   "what": "What the alert to HR says",
+   "result": "Rafiq Head's Leave Application is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there, or decide it yourself in Approvals."
+  },
+  {
+   "id": "5.1",
+   "what": "Superadmin: Self Service \"My Approvals\" / Admin Panel → Approvals",
+   "result": "My Approvals: 0 of 3; Admin Panel → Approvals: 3 of 3 (marked \"No approver set yet\")"
+  },
+  {
+   "id": "5.2",
+   "what": "HR: Self Service \"My Approvals\" / Admin Panel → Approvals",
+   "result": "My Approvals: 0; Admin Panel → Approvals: 3 of 3 (UI shows no Approve button for them)"
+  },
+  {
+   "id": "5.3",
+   "what": "HR tries to approve the leave from Admin Panel → Approvals",
+   "result": "403 {\"error\":\"This request isn't waiting on you yet.\"}"
+  },
+  {
+   "id": "5.4",
+   "what": "HR tries the old direct Leave decision",
+   "result": "400 {\"error\":\"This Leave Application is routed through the Approval Workflow — use the Approvals queue (or your Pending Approvals on the Dashboard) instead.\"}"
+  },
+  {
+   "id": "5.5",
+   "what": "Superadmin approves the leave from Admin Panel → Approvals",
+   "result": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":1}; leave now approved"
+  },
+  {
+   "id": "6.1",
+   "what": "Superadmin later adds a Conveyance Template (Layer 1 = HR) — the waiting claim moves?",
+   "result": "template 201; request now awaiting_approver=0 template=1; in HR's My Approvals: true; HR alerted \"Approval waiting on you\": 1"
+  },
+  {
+   "id": "6.2",
+   "what": "Superadmin later sets a Direct Supervisor (Karim MD) — the waiting timesheet correction moves?",
+   "result": "request now awaiting_approver=0 supervisor_step=137; in Karim's My Approvals: true"
+  }
+ ]
+}

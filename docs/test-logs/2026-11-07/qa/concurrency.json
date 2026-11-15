@@ -1,0 +1,63 @@
+{
+ "when": "2026-11-07T09:04:22.969Z",
+ "summary": {
+  "PASS": 9,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "C1",
+   "status": "PASS",
+   "name": "The same leave sent 5 times at once is created once",
+   "detail": "created 1; answers 200,409,409,409,409; casual balance now 9.0"
+  },
+  {
+   "id": "C2",
+   "status": "PASS",
+   "name": "Two Layer-1 approvers at once: the request moves to Layer 2 once (Layer 2 is not skipped)",
+   "detail": "answers 200,409; request pending step 2/2; actions recorded 1"
+  },
+  {
+   "id": "C3",
+   "status": "PASS",
+   "name": "A double-click on the final Approve counts once",
+   "detail": "answers 409,200,409; actions 2; balance 9.0"
+  },
+  {
+   "id": "C4",
+   "status": "PASS",
+   "name": "Payroll run 5 times at once makes one salary (others refused, no server error)",
+   "detail": "rows 1; answers 400,400,400,400,200"
+  },
+  {
+   "id": "C5",
+   "status": "PASS",
+   "name": "Pay pressed 3 times at once: paid once, the loan installment recovered once",
+   "detail": "sheet steps 200,200,201,200 -> approved; answers 200,409,409; loan recovered 2000.00 (should be 2000); 'paid' events 1"
+  },
+  {
+   "id": "C6",
+   "status": "PASS",
+   "name": "Three Conveyance claims for today sent at once: one is kept (one claim a day)",
+   "detail": "rows 1; answers 201,400,400"
+  },
+  {
+   "id": "C7",
+   "status": "PASS",
+   "name": "A bill disbursed 3 times at once is paid out once",
+   "detail": "claim approved; bill #1; answers 200,409,409; bill now 1 PV-1-20261107"
+  },
+  {
+   "id": "C8",
+   "status": "PASS",
+   "name": "A loan request sent 3 times at once is filed once",
+   "detail": "requests 1; answers 201,400,400"
+  },
+  {
+   "id": "C9",
+   "status": "PASS",
+   "name": "The loan approved 3 times at once is given once",
+   "detail": "loans given 1; answers 409,200,409; Payroll decision afterwards 200"
+  }
+ ]
+}

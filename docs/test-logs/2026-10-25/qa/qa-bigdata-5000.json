@@ -1,0 +1,106 @@
+{
+ "when": "2026-10-25T20:53:00.750Z",
+ "N": 5000,
+ "seeded": {
+  "employees": "5005",
+  "users": "1672",
+  "attendance": "43342",
+  "leave": "417"
+ },
+ "summary": {
+  "PASS": 15,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "BD-01",
+   "status": "PASS",
+   "name": "Employees list (5000 employees)",
+   "detail": "median 166 ms, 5002 KB, status 200"
+  },
+  {
+   "id": "BD-02",
+   "status": "PASS",
+   "name": "Employee Directory (5000 employees)",
+   "detail": "median 43 ms, 1878 KB, status 200"
+  },
+  {
+   "id": "BD-03",
+   "status": "PASS",
+   "name": "Payroll: employee picker (5000 employees)",
+   "detail": "median 31 ms, 531 KB, status 200"
+  },
+  {
+   "id": "BD-04",
+   "status": "PASS",
+   "name": "Payroll: Salary Structures (5000 employees)",
+   "detail": "median 77 ms, 2092 KB, status 200"
+  },
+  {
+   "id": "BD-05",
+   "status": "PASS",
+   "name": "Payroll wizard: attendance summary for 2026-09 (5000 employees)",
+   "detail": "median 567 ms, 2113 KB, status 200"
+  },
+  {
+   "id": "BD-06",
+   "status": "PASS",
+   "name": "Leave applications (5000 employees)",
+   "detail": "median 24 ms, 298 KB, status 200"
+  },
+  {
+   "id": "BD-07",
+   "status": "PASS",
+   "name": "Admin Dashboard extras (5000 employees)",
+   "detail": "median 22 ms, 1 KB, status 200"
+  },
+  {
+   "id": "BD-08",
+   "status": "PASS",
+   "name": "Approvals (5000 employees)",
+   "detail": "median 17 ms, 0 KB, status 200"
+  },
+  {
+   "id": "BD-09",
+   "status": "PASS",
+   "name": "Payroll for the whole month (5000 employees) in one run",
+   "detail": "5000/5000 made in 24 s (5 ms each)"
+  },
+  {
+   "id": "BD-10",
+   "status": "PASS",
+   "name": "Total net salary of the month adds up",
+   "detail": "308750000 vs expected 308750000"
+  },
+  {
+   "id": "BD-11",
+   "status": "PASS",
+   "name": "Payroll list for 2026-09 (5000 employees)",
+   "detail": "median 199 ms, 5017 KB, status 200"
+  },
+  {
+   "id": "BD-11b",
+   "status": "PASS",
+   "name": "Payroll: Employee Salary Profiles for 2026-09 (5000 employees)",
+   "detail": "median 152 ms, 2151 KB, status 200"
+  },
+  {
+   "id": "BD-12",
+   "status": "PASS",
+   "name": "Payroll dashboard summary (5000 employees)",
+   "detail": "median 62 ms, 1 KB, status 200"
+  },
+  {
+   "id": "BD-13",
+   "status": "PASS",
+   "name": "/admin/employees opens with 5000 employees and search narrows the list",
+   "detail": "shown in 2184 ms; search 1104 ms"
+  },
+  {
+   "id": "BD-14",
+   "status": "PASS",
+   "name": "/admin/payroll opens with 5000 employees",
+   "detail": "shown in 561 ms"
+  }
+ ]
+}

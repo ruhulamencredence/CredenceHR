@@ -14,6 +14,10 @@
 //   app_days           an app sign-in ends this many days after it began
 //   app_idle_days      ...or after this many days without the app being
 //                      opened. 0 = off.
+//   pwa_days           the iPhone / iPad "Add to Home Screen" app: a sign-in
+//                      ends this many days after it began
+//   pwa_idle_days      ...or after this many days without it being opened.
+//                      0 = off. (Safari in a normal tab stays a website.)
 //
 // A sign-in can also be ended early: Logout ends that one sign-in, a
 // Superadmin can sign out any sign-in from Active Users, a changed password
@@ -33,15 +37,19 @@ export interface SessionPolicy {
   web_idle_minutes: number;
   app_days: number;
   app_idle_days: number;
+  pwa_days: number;
+  pwa_idle_days: number;
 }
-export const DEFAULT_SESSION_POLICY: SessionPolicy = { web_hours: 12, web_idle_minutes: 60, app_days: 7, app_idle_days: 3 };
+export const DEFAULT_SESSION_POLICY: SessionPolicy = { web_hours: 12, web_idle_minutes: 60, app_days: 7, app_idle_days: 3, pwa_days: 30, pwa_idle_days: 7 };
 const LIMITS: Record<keyof SessionPolicy, [number, number]> = {
   web_hours: [1, 168],
   web_idle_minutes: [0, 1440],
   // user_sessions rows are cleared after 30 days without use, so an app
   // sign-in can't outlive what is remembered about it.
   app_days: [1, 30],
-  app_idle_days: [0, 30]
+  app_idle_days: [0, 30],
+  pwa_days: [1, 30],
+  pwa_idle_days: [0, 30]
 };
 
 export type SessionEnd = "expired" | "idle" | "signed_out" | "password";
@@ -60,6 +68,11 @@ export const sessionKeyOf = (token: string) => crypto.createHash("sha1").update(
 export const isAppSession = (user: any, req?: any) =>
   user?.cl === "app" || (!user?.cl && (!!user?.dev || /;\s*wv\)/.test(String(req?.headers?.["user-agent"] || ""))));
 
+// app = the Android app; pwa = the iPhone / iPad Home Screen app (cl: "pwa",
+// given at sign-in, see AuthRoutes.ts); web = everything else.
+export type SessionClient = "app" | "pwa" | "web";
+export const sessionClientOf = (user: any, req?: any): SessionClient => (isAppSession(user, req) ? "app" : user?.cl === "pwa" ? "pwa" : "web");
+
 export async function ensureSessionSecuritySchema(queryDB: QueryDB) {
   await queryDB(`CREATE TABLE IF NOT EXISTS session_policy (
     id INT PRIMARY KEY,
@@ -75,7 +88,10 @@ export async function ensureSessionSecuritySchema(queryDB: QueryDB) {
     ["user_sessions", "revoked_reason", "VARCHAR(20) NULL"],
     // The sign-in a password was changed from keeps working (endAllSessions).
     ["user_sessions", "kept_after", "DATETIME(3) NULL"],
-    ["users", "sessions_valid_after", "DATETIME(3) NULL"]
+    ["users", "sessions_valid_after", "DATETIME(3) NULL"],
+    // The iPhone / iPad Home Screen app's own sign-in length.
+    ["session_policy", "pwa_days", `INT NOT NULL DEFAULT ${DEFAULT_SESSION_POLICY.pwa_days}`],
+    ["session_policy", "pwa_idle_days", `INT NOT NULL DEFAULT ${DEFAULT_SESSION_POLICY.pwa_idle_days}`]
   ]) {
     try {
       // Only when missing — queryDB logs every failed query, so don't lean on ER_DUP_FIELDNAME.
@@ -99,7 +115,9 @@ export async function loadSessionPolicy(queryDB: QueryDB): Promise<SessionPolicy
         web_hours: Number(r.web_hours),
         web_idle_minutes: Number(r.web_idle_minutes),
         app_days: Number(r.app_days),
-        app_idle_days: Number(r.app_idle_days)
+        app_idle_days: Number(r.app_idle_days),
+        pwa_days: r.pwa_days != null ? Number(r.pwa_days) : DEFAULT_SESSION_POLICY.pwa_days,
+        pwa_idle_days: r.pwa_idle_days != null ? Number(r.pwa_idle_days) : DEFAULT_SESSION_POLICY.pwa_idle_days
       }
     : { ...DEFAULT_SESSION_POLICY };
   policyCache = { at: Date.now(), policy };
@@ -107,9 +125,10 @@ export async function loadSessionPolicy(queryDB: QueryDB): Promise<SessionPolicy
 }
 
 /** jwt.sign expiresIn, in seconds, for a new sign-in. */
-export async function sessionLifetimeSeconds(queryDB: QueryDB, app: boolean): Promise<number> {
+export async function sessionLifetimeSeconds(queryDB: QueryDB, client: boolean | SessionClient): Promise<number> {
   const p = await loadSessionPolicy(queryDB);
-  return app ? p.app_days * 86400 : p.web_hours * 3600;
+  const c: SessionClient = client === true ? "app" : client === false ? "web" : client;
+  return c === "app" ? p.app_days * 86400 : c === "pwa" ? p.pwa_days * 86400 : p.web_hours * 3600;
 }
 
 // session key -> what is known about that sign-in, so most requests never
@@ -151,11 +170,11 @@ export async function checkSession(queryDB: QueryDB, token: string, user: any, r
   const now = Date.now();
   // iat_ms (set at sign-in) is exact; older tokens only have whole seconds.
   const issued = Number(user?.iat_ms) || Number(user?.iat) * 1000 || now;
-  const app = isAppSession(user, req);
+  const client = sessionClientOf(user, req);
   const policy = await loadSessionPolicy(queryDB);
 
   // A shorter lifetime set after this sign-in began applies to it too.
-  const maxMs = app ? policy.app_days * 86400000 : policy.web_hours * 3600000;
+  const maxMs = client === "app" ? policy.app_days * 86400000 : client === "pwa" ? policy.pwa_days * 86400000 : policy.web_hours * 3600000;
   if (now - issued > maxMs) return "expired";
 
   const key = sessionKeyOf(token);
@@ -196,7 +215,7 @@ export async function checkSession(queryDB: QueryDB, token: string, user: any, r
   const after = await validAfterOf(queryDB, userId);
   if (after && issued < after && s.keptAfter < after) return "password";
 
-  const idleMs = app ? policy.app_idle_days * 86400000 : policy.web_idle_minutes * 60000;
+  const idleMs = client === "app" ? policy.app_idle_days * 86400000 : client === "pwa" ? policy.pwa_idle_days * 86400000 : policy.web_idle_minutes * 60000;
   if (idleMs > 0 && now - s.lastSeen > idleMs) {
     await endSession(queryDB, key, userId, "idle");
     return "idle";
@@ -267,11 +286,12 @@ export function registerSessionSecurityRoutes(app: Express, deps: SessionSecurit
   // itself only for the Superadmin.
   app.get("/api/session-policy", authenticateToken, async (req: any, res) => {
     const policy = await loadSessionPolicy(queryDB);
-    const app = isAppSession(req.user, req);
+    const client = sessionClientOf(req.user, req);
     res.json({
-      client: app ? "app" : "web",
-      // The app is watched by the server alone (it runs in the background for tracking).
-      idle_minutes: app ? 0 : policy.web_idle_minutes,
+      client,
+      // The app and the Home Screen app are watched by the server alone (in
+      // days); only the website signs itself out after minutes unused.
+      idle_minutes: client === "web" ? policy.web_idle_minutes : 0,
       ...(req.user.role === "superadmin" ? { policy, defaults: DEFAULT_SESSION_POLICY, limits: LIMITS } : {})
     });
   });
@@ -279,17 +299,19 @@ export function registerSessionSecurityRoutes(app: Express, deps: SessionSecurit
   app.put("/api/session-policy", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
       const next: any = {};
+      const current = await loadSessionPolicy(queryDB);
       for (const k of Object.keys(LIMITS) as (keyof SessionPolicy)[]) {
-        const n = Number(req.body?.[k]);
+        // A page from before the Home Screen fields existed doesn't send them: kept as they are.
+        const n = req.body?.[k] === undefined && k.startsWith("pwa_") ? current[k] : Number(req.body?.[k]);
         const [lo, hi] = LIMITS[k];
         if (!Number.isInteger(n) || n < lo || n > hi) return res.status(400).json({ error: `${k.replace(/_/g, " ")} must be a whole number from ${lo} to ${hi}.` });
         next[k] = n;
       }
       await queryDB(
-        `/*unscoped*/ INSERT INTO session_policy (id, web_hours, web_idle_minutes, app_days, app_idle_days, updated_by) VALUES (1, ?, ?, ?, ?, ?)
+        `/*unscoped*/ INSERT INTO session_policy (id, web_hours, web_idle_minutes, app_days, app_idle_days, pwa_days, pwa_idle_days, updated_by) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE web_hours = VALUES(web_hours), web_idle_minutes = VALUES(web_idle_minutes), app_days = VALUES(app_days),
-           app_idle_days = VALUES(app_idle_days), updated_by = VALUES(updated_by)`,
-        [next.web_hours, next.web_idle_minutes, next.app_days, next.app_idle_days, Number(req.user.id)]
+           app_idle_days = VALUES(app_idle_days), pwa_days = VALUES(pwa_days), pwa_idle_days = VALUES(pwa_idle_days), updated_by = VALUES(updated_by)`,
+        [next.web_hours, next.web_idle_minutes, next.app_days, next.app_idle_days, next.pwa_days, next.pwa_idle_days, Number(req.user.id)]
       );
       policyCache = null;
       res.json({ success: true, policy: await loadSessionPolicy(queryDB) });

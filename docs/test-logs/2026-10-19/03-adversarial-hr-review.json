@@ -1,0 +1,499 @@
+[
+ {
+  "id": "SEC-01",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Wrong password and unknown user both refused",
+  "detail": ""
+ },
+ {
+  "id": "SEC-02",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Same message for wrong password and unknown user (no account enumeration)",
+  "detail": ""
+ },
+ {
+  "id": "SEC-03",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "Repeated wrong passwords are throttled / the account locked (25 attempts)",
+  "detail": "statuses 400; the right password still logs in: 200"
+ },
+ {
+  "id": "SEC-04",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "SQL injection in login refused",
+  "detail": ""
+ },
+ {
+  "id": "SEC-05",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Tampered token refused",
+  "detail": ""
+ },
+ {
+  "id": "SEC-06",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Unsigned (alg=none) token refused",
+  "detail": ""
+ },
+ {
+  "id": "SEC-07",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "Password \"111111\" is refused by the password policy",
+  "detail": "accepted: 200 {\"success\":true,\"id\":138,\"name\":\"Weak Pw\",\"email\":\"weak.pw@credence.test\",\"role\":\"user\"} — the only rule is \"at least 6 characters\""
+ },
+ {
+  "id": "SEC-08",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "User list does not return password hashes",
+  "detail": ""
+ },
+ {
+  "id": "SEC-09",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Passwords stored as bcrypt hashes",
+  "detail": ""
+ },
+ {
+  "id": "SEC-10",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "After a password change the old token stops working",
+  "detail": "change 200; old token /auth/me → 200"
+ },
+ {
+  "id": "SEC-11",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "API does not allow any website to call it (CORS)",
+  "detail": "Access-Control-Allow-Origin: *"
+ },
+ {
+  "id": "SEC-12",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "Standard security headers present (CSP, X-Frame-Options, HSTS, nosniff)",
+  "detail": "missing: content-security-policy, x-frame-options, strict-transport-security, x-content-type-options"
+ },
+ {
+  "id": "SEC-13",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "No hard-coded fallback JWT secret in code",
+  "detail": "server.ts falls back to a fixed secret when JWT_SECRET is not set"
+ },
+ {
+  "id": "SEC-14",
+  "area": "Security — accounts & sessions",
+  "status": "PASS",
+  "name": "Oversized request refused",
+  "detail": ""
+ },
+ {
+  "id": "SEC-15",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "Malformed JSON gives a clean JSON error (not an HTML error page)",
+  "detail": "400 \"<!DOCTYPE html>\\n<html lang=\\\"en\\\">\\n<head>\\n<meta charset=\\\"utf-8\\\">\\n<title>Error</title>\\n</head>\\n<body>\\n<pre>"
+ },
+ {
+  "id": "SEC-16",
+  "area": "Security — accounts & sessions",
+  "status": "FAIL",
+  "name": "An unknown /api path answers 404 (not the web page with 200)",
+  "detail": "status 200, html=true"
+ },
+ {
+  "id": "SEC-17",
+  "area": "Security — stored XSS / notices",
+  "status": "FAIL",
+  "name": "Notice HTML is cleaned on the server before it reaches employees",
+  "detail": "script / onerror reached the employee unchanged — rendered with dangerouslySetInnerHTML in NoticeBoard, NoticePopup, TrackingNoticeCard"
+ },
+ {
+  "id": "SEC-18",
+  "area": "Security — stored XSS / notices",
+  "status": "PASS",
+  "name": "Admin without the Notices module cannot post a notice (only the Employees module)",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/users",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/employees",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/payroll?month_year=2026-10",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/hr-analytics/summary",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/approval-templates",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "INFO",
+  "name": "/api/companies is not an API route here (HTML page returned)",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "INFO",
+  "name": "/api/departments/manage is not an API route here (HTML page returned)",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-01",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot open /api/exit-requests/pending",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot POST /api/notices",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot PUT /api/leave-balances/bulk",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot POST /api/holidays",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot POST /api/payroll/generate",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot POST /api/employees",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot PUT /api/users/137/module-permissions",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-02",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot POST /api/users",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-03",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "Employee cannot raise their own role through the profile API (mass assignment)",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-04",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "A limited Admin cannot give themselves more modules",
+  "detail": ""
+ },
+ {
+  "id": "AUTHZ-05",
+  "area": "Authorization & privacy",
+  "status": "PASS",
+  "name": "HR Admin without Payroll module cannot read payroll",
+  "detail": ""
+ },
+ {
+  "id": "PRIV-01",
+  "area": "Authorization & privacy",
+  "status": "INFO",
+  "name": "Fields the Employees module returns for every employee",
+  "detail": "sensitive keys present: nid"
+ },
+ {
+  "id": "PRIV-02",
+  "area": "Authorization & privacy",
+  "status": "INFO",
+  "name": "What every employee can see in the Employee Directory",
+  "detail": "keys present: phone, mobile (status 200)"
+ },
+ {
+  "id": "LEAVE-01",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "End date before start date refused",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-02",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "Purpose is required",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-03",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "Unknown leave type refused",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-04a",
+  "area": "Leave policy",
+  "status": "INFO",
+  "name": "First application accepted",
+  "detail": "200 {\"success\":true,\"id\":1,\"day_count\":2}"
+ },
+ {
+  "id": "LEAVE-04",
+  "area": "Leave policy",
+  "status": "FAIL",
+  "name": "Applying again for the same dates is refused (no double booking)",
+  "detail": "200 {\"success\":true,\"id\":2,\"day_count\":2}"
+ },
+ {
+  "id": "LEAVE-05",
+  "area": "Leave policy",
+  "status": "FAIL",
+  "name": "A different leave overlapping an existing application is refused",
+  "detail": "200 {\"success\":true,\"id\":3,\"day_count\":3}"
+ },
+ {
+  "id": "LEAVE-06",
+  "area": "Leave policy",
+  "status": "FAIL",
+  "name": "Three identical applications sent at once create only one record",
+  "detail": "3 created"
+ },
+ {
+  "id": "LEAVE-07",
+  "area": "Leave policy",
+  "status": "INFO",
+  "name": "Balances a new employee starts with",
+  "detail": "[{\"user_id\":136,\"user_name\":\"Bob Review\",\"user_role\":\"user\",\"casual_leave\":8,\"sick_leave\":14,\"leave_without_pay\":0,\"updated_at\":\"2026-10-19 19:11:11\",\"custom_leaves\":[]}]"
+ },
+ {
+  "id": "LEAVE-08",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "Casual leave longer than the balance (61 days) is refused",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-09",
+  "area": "Leave policy",
+  "status": "INFO",
+  "name": "A leave dated more than a year in the past",
+  "detail": "200 {\"success\":true,\"id\":7,\"day_count\":2}"
+ },
+ {
+  "id": "LEAVE-10",
+  "area": "Leave policy",
+  "status": "INFO",
+  "name": "Client-sent day_count is ignored / recomputed",
+  "detail": "200 {\"success\":true,\"id\":8,\"day_count\":1}"
+ },
+ {
+  "id": "LEAVE-11",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "An employee's leave list does not show a colleague's applications (privacy)",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-12",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "An employee cannot approve their own leave",
+  "detail": ""
+ },
+ {
+  "id": "LEAVE-13",
+  "area": "Leave policy",
+  "status": "PASS",
+  "name": "A colleague who is not the approver cannot approve it",
+  "detail": ""
+ },
+ {
+  "id": "EMP-01",
+  "area": "Employee master data",
+  "status": "PASS",
+  "name": "Duplicate login email refused",
+  "detail": ""
+ },
+ {
+  "id": "EMP-02",
+  "area": "Employee master data",
+  "status": "FAIL",
+  "name": "Invalid email address refused",
+  "detail": "201 {\"id\":47,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}"
+ },
+ {
+  "id": "EMP-03",
+  "area": "Employee master data",
+  "status": "INFO",
+  "name": "Joining date set 13 months in the future",
+  "detail": "201 {\"id\":48,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}"
+ },
+ {
+  "id": "EMP-04",
+  "area": "Employee master data",
+  "status": "FAIL",
+  "name": "An employee born in 2015 (age 11) is refused (minimum working age)",
+  "detail": "201 {\"id\":49,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}"
+ },
+ {
+  "id": "EMP-05",
+  "area": "Employee master data",
+  "status": "PASS",
+  "name": "Name is required",
+  "detail": ""
+ },
+ {
+  "id": "EMP-06",
+  "area": "Employee master data",
+  "status": "INFO",
+  "name": "Employee name containing HTML is stored as text (React escapes it on screen)",
+  "detail": "201 {\"id\":50,\"user_id\":null,\"project_ids\":[],\"module_keys\":[]}"
+ },
+ {
+  "id": "EMP-07",
+  "area": "Employee master data",
+  "status": "INFO",
+  "name": "Employee IDs (count, distinct)",
+  "detail": "0\t0"
+ },
+ {
+  "id": "PAY-01",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "A negative basic salary is refused",
+  "detail": ""
+ },
+ {
+  "id": "PAY-02a",
+  "area": "Payroll controls",
+  "status": "INFO",
+  "name": "Salary structure for the test employee",
+  "detail": "200 {\"success\":true,\"id\":1,\"gross_salary\":50000}"
+ },
+ {
+  "id": "PAY-02",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "The same employee/month cannot be paid twice",
+  "detail": ""
+ },
+ {
+  "id": "PAY-03",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "Net pay = 50,000 gross − 500 tax − 1,500 PF = 48,000",
+  "detail": ""
+ },
+ {
+  "id": "PAY-04",
+  "area": "Payroll controls",
+  "status": "FAIL",
+  "name": "Present days greater than working days (40 of 26) refused",
+  "detail": "200 {\"success\":true,\"id\":2,\"net_salary\":48000}"
+ },
+ {
+  "id": "PAY-05",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "Salary for a month before the joining date (2024-01) is refused",
+  "detail": ""
+ },
+ {
+  "id": "PAY-06",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "An employee cannot open a payroll record by id",
+  "detail": ""
+ },
+ {
+  "id": "PAY-07",
+  "area": "Payroll controls",
+  "status": "PASS",
+  "name": "An employee's payslip list never contains someone else's pay",
+  "detail": ""
+ },
+ {
+  "id": "PAY-08",
+  "area": "Payroll controls",
+  "status": "INFO",
+  "name": "Superadmin can submit and approve the same month (segregation of duties)",
+  "detail": "submit 200, approve 200"
+ },
+ {
+  "id": "NEW-01",
+  "area": "Recent features",
+  "status": "INFO",
+  "name": "Employee asks for /api/measurement-sheets",
+  "detail": "403 {\"error\":\"Admin access required\"}"
+ },
+ {
+  "id": "NEW-01",
+  "area": "Recent features",
+  "status": "INFO",
+  "name": "Employee asks for /api/mpr-dispatch",
+  "detail": "200 \"<!doctype html>\\n<html lang=\\\"en\\\">\\n  <head>\\n    <script type=\\\"module\\\">import { injectIntoGlobalHook } from \\\"/@react-refresh\\\";\\ninjectIntoGlobalHook(window);\\nwindow.$RefreshReg$ = () => {};\\nw"
+ },
+ {
+  "id": "NEW-01",
+  "area": "Recent features",
+  "status": "INFO",
+  "name": "Employee asks for /api/dispatch-material",
+  "detail": "200 \"<!doctype html>\\n<html lang=\\\"en\\\">\\n  <head>\\n    <script type=\\\"module\\\">import { injectIntoGlobalHook } from \\\"/@react-refresh\\\";\\ninjectIntoGlobalHook(window);\\nwindow.$RefreshReg$ = () => {};\\nw"
+ }
+]

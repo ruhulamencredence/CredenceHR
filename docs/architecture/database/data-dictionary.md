@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬২টি টেবিল, ২৮৩৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৩টি টেবিল, ২৮৫৩টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -26,6 +26,10 @@ Notice, Chat (রুম, মেসেজ, reaction, pin), Credence Mail (মে�
 | `user_agent` | varchar(255) | হ্যাঁ |  | |
 | `source` | varchar(10) | না | default 'button' | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `status` | varchar(10) | না | default 'pending' | |
+| `resolved_at` | datetime | হ্যাঁ |  | |
+| `resolved_by` | int(11) | হ্যাঁ |  | |
+| `resolve_note` | varchar(500) | হ্যাঁ |  | |
 
 ### `assistant_learned`
 
@@ -951,6 +955,9 @@ Unique: `uniq_hr_reminder`(company_id,kind,employee_id,ref_key,ref_date,lead_day
 | `expires_at` | datetime | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `login_emailed_to` | varchar(255) | হ্যাঁ |  | |
+| `login_emailed_at` | datetime | হ্যাঁ |  | |
+| `login_emailed_by` | int(11) | হ্যাঁ |  | |
 
 Unique: `uq_onb_code`(onb_code)
 
@@ -1571,6 +1578,16 @@ Unique: `uq_zk_device_employee`(device_id,employee_id), `uq_zk_device_pin`(devic
 
 Unique: `unique_device_ip_port`(ip_address,port)
 
+### `zk_punch_rules`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `double_punch_minutes` | int(11) | না |  | |
+| `effective_from` | date | না |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ## A. Accounts, Access & Security
 
 লগইন অ্যাকাউন্ট (`users`), সেশন, ডিভাইস, Module Access (কে কোন মডিউল/layer পাবে), পাসওয়ার্ড রিসেট, লগইন চেষ্টার লক। পুরো সিস্টেমের কেন্দ্র `users` টেবিল।
@@ -1800,6 +1817,8 @@ Unique: `unique_employee_request_type`(employee_user_id,request_type)
 | `app_idle_days` | int(11) | না | default 3 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `pwa_days` | int(11) | না | default 30 | |
+| `pwa_idle_days` | int(11) | না | default 7 | |
 
 ### `sso_login_logs`
 

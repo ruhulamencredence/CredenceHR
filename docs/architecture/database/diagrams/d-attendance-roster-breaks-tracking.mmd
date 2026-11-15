@@ -288,6 +288,11 @@ erDiagram
     tinyint is_active
     timestamp last_synced_at
   }
+  zk_punch_rules {
+    int id PK
+    int double_punch_minutes
+    date effective_from
+  }
   all_employees {
     int id PK
   }

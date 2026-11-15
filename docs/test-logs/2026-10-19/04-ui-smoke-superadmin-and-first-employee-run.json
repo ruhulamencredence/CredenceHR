@@ -1,0 +1,1121 @@
+[
+ {
+  "label": "superadmin-desktop",
+  "url": "/",
+  "ms": 3552,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/dashboard",
+  "ms": 7382,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/reports-insights",
+  "ms": 2566,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/data-import",
+  "ms": 2542,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/projects",
+  "ms": 2526,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/branches",
+  "ms": 2533,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mprs",
+  "ms": 2554,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/imports",
+  "ms": 2531,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/reports",
+  "ms": 2537,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/users",
+  "ms": 2526,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/employees",
+  "ms": 2572,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/departments",
+  "ms": 2605,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/attendance",
+  "ms": 2526,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/attendance-reports",
+  "ms": 2473,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/leave-applications",
+  "ms": 2485,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/office-attendance",
+  "ms": 2516,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/tracking",
+  "ms": 2535,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/recycle",
+  "ms": 2677,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/editlog",
+  "ms": 2545,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/notices",
+  "ms": 2475,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/claims",
+  "ms": 2530,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/approvals",
+  "ms": 2515,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/conveyance",
+  "ms": 2564,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/bill-claim-policy",
+  "ms": 2502,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/disbursement",
+  "ms": 2522,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/holidays",
+  "ms": 2516,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/asset-management",
+  "ms": 2491,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/vehicle-management",
+  "ms": 2603,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/permanent-delete-log",
+  "ms": 2530,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/companies",
+  "ms": 2465,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/devices",
+  "ms": 2489,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/active-users",
+  "ms": 2487,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/exit-offboarding",
+  "ms": 2489,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/performance-management",
+  "ms": 2538,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/recruitment",
+  "ms": 2533,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/grievance-disciplinary",
+  "ms": 2644,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/hr-analytics",
+  "ms": 2529,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/document-vault",
+  "ms": 2531,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/hr-operations",
+  "ms": 2478,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/task-management",
+  "ms": 2511,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mobile-bill",
+  "ms": 2499,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/target-reports",
+  "ms": 2548,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mail-admin",
+  "ms": 2527,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/duty-roster",
+  "ms": 2511,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/measurement-sheet",
+  "ms": 2703,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/leave-management",
+  "ms": 3428,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/timesheet",
+  "ms": 2694,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/approve-applications",
+  "ms": 2502,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/payroll",
+  "ms": 2508,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/employee-directory",
+  "ms": 2518,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/resignation",
+  "ms": 2495,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/asset-management",
+  "ms": 2470,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/vehicle-management",
+  "ms": 2478,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-cases",
+  "ms": 2501,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-letters",
+  "ms": 2517,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/team-attendance",
+  "ms": 2472,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-tasks",
+  "ms": 2433,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-mobile-sim",
+  "ms": 2485,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-loans",
+  "ms": 2538,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-targets",
+  "ms": 2508,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/mail",
+  "ms": 2431,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/duty-roster",
+  "ms": 2681,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/material-receive",
+  "ms": 2556,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/documents-to-sign",
+  "ms": 2517,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/payslips",
+  "ms": 2529,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/",
+  "ms": 3373,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/leave-management",
+  "ms": 2751,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/timesheet",
+  "ms": 2745,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/approve-applications",
+  "ms": 2585,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payroll",
+  "ms": 2650,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/employee-directory",
+  "ms": 2630,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/resignation",
+  "ms": 2620,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/asset-management",
+  "ms": 2699,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/vehicle-management",
+  "ms": 2695,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-cases",
+  "ms": 2669,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-letters",
+  "ms": 2692,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/team-attendance",
+  "ms": 2710,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-tasks",
+  "ms": 2715,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-mobile-sim",
+  "ms": 2654,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-loans",
+  "ms": 2599,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-targets",
+  "ms": 2632,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/mail",
+  "ms": 2554,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/duty-roster",
+  "ms": 2615,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/material-receive",
+  "ms": 2647,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/documents-to-sign",
+  "ms": 2581,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payslips",
+  "ms": 2752,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/",
+  "ms": 3404,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/leave-management",
+  "ms": 2714,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/timesheet",
+  "ms": 2703,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/approve-applications",
+  "ms": 2693,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/payroll",
+  "ms": 2636,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/employee-directory",
+  "ms": 2651,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/resignation",
+  "ms": 2632,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/asset-management",
+  "ms": 2587,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/vehicle-management",
+  "ms": 2600,
+  "errors": [
+   "Cannot read properties of null (reading 'id')",
+   "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+  ],
+  "api4xx5xx": [
+   "401 /api/session-policy",
+   "401 /api/auth/me",
+   "401 /api/companies/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/",
+  "ms": 3361,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/employees",
+  "ms": 2669,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/payroll",
+  "ms": 2456,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/leave-applications",
+  "ms": 2634,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/measurement-sheet",
+  "ms": 2542,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/users",
+  "ms": 2471,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ }
+]

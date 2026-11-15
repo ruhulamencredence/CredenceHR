@@ -3,10 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useLiveTick } from '../lib/liveRefresh';
+import { useLiveTick, RECORDS_CHANGED_EVENT } from '../lib/liveRefresh';
 import { useCachedState } from '../lib/screenCache';
 import React, { useEffect, useState } from 'react';
-import { Car, MapPin, ChevronRight } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Car, MapPin, ChevronRight, X } from 'lucide-react';
+import { RideBookingFlow } from './RideBookingFlow';
+import { useWideWeb } from '../lib/useWideWeb';
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';
 
@@ -103,10 +106,22 @@ const RideMap: React.FC = () => (
 );
 
 // Web Dashboard quick access to Book a Ride (VehicleManagement.tsx): a
-// "Where are you going?" shortcut plus this account's own current ride, if
+// "Where are you going?" shortcut — it opens the booking in a popup right
+// here (RideBookingFlow.tsx, the same two steps as the page) — plus this account's own current ride, if
 // any, so its status is one glance away.
 export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpen, className = '' }) => {
   const active = (useActiveRides(token, userId) || []).slice(0, 2);
+  const [booking, setBooking] = useState(false);
+  // Map beside the form on a computer; stacked in a narrow window.
+  const wide = useWideWeb();
+
+  // Esc closes the popup.
+  useEffect(() => {
+    if (!booking) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setBooking(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [booking]);
 
   return (
     <div className={`relative bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
@@ -126,7 +141,7 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
       <div className="relative p-5 pt-1 sm:px-6 space-y-3 flex-1">
         <button
           type="button"
-          onClick={() => onOpen('book')}
+          onClick={() => setBooking(true)}
           className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl bg-white/80 backdrop-blur-sm border border-slate-200 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.18)] text-left hover:border-blue-300 hover:bg-white transition-colors"
         >
           <MapPin className="w-5 h-5 text-red-500 shrink-0" />
@@ -160,6 +175,51 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
           ))
         )}
       </div>
+
+      {booking &&
+        // Portal: a glass card's backdrop-filter would trap a fixed popup.
+        createPortal(
+          <div className="liquid-glass-backdrop fixed inset-0 z-[90] flex items-center justify-center p-3 sm:p-6" onClick={() => setBooking(false)}>
+            <div className={`w-full ${wide ? 'max-w-[1180px]' : 'max-w-xl'} max-h-[94dvh] flex`} onClick={(e) => e.stopPropagation()}>
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Book a Ride"
+                className="liquid-glass liquid-glass-in rounded-[32px] w-full flex flex-col overflow-hidden"
+              >
+                <div className="flex items-center gap-3 px-5 pt-4 pb-3 sm:px-6">
+                  <span className="liquid-glass-inset w-9 h-9 rounded-xl flex items-center justify-center">
+                    <Car className="w-5 h-5 text-[color:var(--g-accent)]" />
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900">Book a Ride</h2>
+                  <button
+                    type="button"
+                    onClick={() => setBooking(false)}
+                    aria-label="Close"
+                    className="liquid-glass-chip ml-auto w-9 h-9 rounded-full flex items-center justify-center text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="px-4 pb-4 sm:px-6 sm:pb-6 overflow-y-auto">
+                  <RideBookingFlow
+                    wide={wide}
+                    showSteps
+                    inPopup
+                    onSubmitted={() => {
+                      setBooking(false);
+                      // The card (and anything else showing rides) reloads now.
+                      window.dispatchEvent(
+                        new CustomEvent(RECORDS_CHANGED_EVENT, { detail: { type: 'vehicle_requisition', related_type: 'vehicle_requisition', related_id: null } })
+                      );
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

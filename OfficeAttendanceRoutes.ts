@@ -10,6 +10,7 @@ import { syncAllZkDevices } from "./zkSync";
 import { syncZkDevice } from "./zkSync";
 import type { Express } from "express";
 import { loadRoster, lateThresholds, nightShiftCheckIn } from "./RosterRoutes";
+import { loadPunchGap, farEnoughFromIn, loadPunchRuleRows, forgetPunchRules, MAX_DOUBLE_PUNCH_MINUTES } from "./zkPunchRule";
 
 export interface RegisterOfficeAttendanceRoutesDeps {
   authenticateToken: any;
@@ -18,13 +19,58 @@ export interface RegisterOfficeAttendanceRoutesDeps {
   requireAdmin: any;
   requireModule: any;
   requireModuleLayer: any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   todayInDhaka: any;
 }
 
 import { parsePlaceholderPin, placeholderPin, repointEmployeePunches } from "./zkMachines";
 
 export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOfficeAttendanceRoutesDeps) {
-  const { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka } = deps;
+  const { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, todayInDhaka } = deps;
+
+  // Office machine double punch rule (zkPunchRule.ts): read by anyone with
+  // Office Attendance; changed only with its "Double punch rule" layer
+  // (explicit only). A change always starts today — past days keep the
+  // rule they had, so a closed month or a sent report never changes.
+  app.get("/api/office-attendance/punch-rule", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
+    try {
+      const rows = await loadPunchRuleRows(queryDB);
+      const today = todayInDhaka();
+      const current = [...rows].reverse().find((r) => r.effective_from <= today) || null;
+      const ids = [...new Set(rows.map((r) => r.created_by).filter((v): v is number => v != null))];
+      const users: any[] = ids.length ? (await queryDB(`SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [] : [];
+      const nameOf = new Map(users.map((u: any) => [Number(u.id), u.name]));
+      res.json({
+        minutes: current ? current.double_punch_minutes : 0,
+        effective_from: current ? current.effective_from : null,
+        history: [...rows].reverse().slice(0, 10).map((r) => ({ minutes: r.double_punch_minutes, effective_from: r.effective_from, by: r.created_by != null ? nameOf.get(r.created_by) || null : null, at: r.created_at })),
+        max_minutes: MAX_DOUBLE_PUNCH_MINUTES,
+        can_edit: await hasModuleLayer(req.user, "office_attendance", "punch_rules")
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // { minutes } — 0 turns it off. From today on.
+  app.put("/api/office-attendance/punch-rule", authenticateToken, requireAdmin, requireModuleLayer("office_attendance", "punch_rules"), async (req: any, res) => {
+    try {
+      const raw = req.body?.minutes;
+      const minutes = Number(raw);
+      if (raw === undefined || raw === null || raw === "" || !Number.isInteger(minutes) || minutes < 0 || minutes > MAX_DOUBLE_PUNCH_MINUTES) {
+        return res.status(400).json({ error: `Minutes must be a whole number from 0 to ${MAX_DOUBLE_PUNCH_MINUTES} (0 = off).` });
+      }
+      const today = todayInDhaka();
+      // Changed again the same day: that day's row is corrected, not stacked.
+      const r: any = await queryDB("/*unscoped*/ UPDATE zk_punch_rules SET double_punch_minutes = ?, created_by = ?, created_at = NOW() WHERE effective_from = ?", [minutes, req.user.id, today]);
+      if (!Number(r?.affectedRows)) {
+        await queryDB("/*unscoped*/ INSERT INTO zk_punch_rules (double_punch_minutes, effective_from, created_by) VALUES (?, ?, ?)", [minutes, today, req.user.id]);
+      }
+      forgetPunchRules();
+      res.json({ success: true, minutes, effective_from: today });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
   // 2b-2. Office Attendance (ZKTeco) — raw biometric punches pulled automatically
   // off the office terminals by zkSync.ts every 5 minutes, kept in
   // zk_attendance_logs and mapped to the company roster via
@@ -417,6 +463,8 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
         policies
           .filter((p: any) => String(p.effective_date || "").slice(0, 10) <= `${date.slice(0, 7)}-01`)
           .sort((a: any, b: any) => String(b.effective_date).localeCompare(String(a.effective_date)) || Number(b.id) - Number(a.id))[0] || null;
+      // Office machine double punch: a punch within N minutes of the In isn't the Out.
+      const punchGap = await loadPunchGap(queryDB);
       const rows = Array.from(groups.values())
         .map(({ meta, kept }) => {
           const date = String(meta.attendance_date).slice(0, 10);
@@ -440,7 +488,8 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
             // must report check_out_at as NULL rather than repeating the
             // Check In time.
             check_in_at: checkIn,
-            check_out_at: kept.length > 1 && kept[kept.length - 1] !== checkIn ? kept[kept.length - 1] : null,
+            check_out_at:
+              kept.length > 1 && kept[kept.length - 1] !== checkIn && farEnoughFromIn(punchGap(date), checkIn, kept[kept.length - 1]) ? kept[kept.length - 1] : null,
             punch_count: kept.length,
             shift: shift ? { name: shift.name, code: shift.code, start: shift.start_time.slice(0, 5), end: shift.end_time.slice(0, 5), color: shift.color } : null,
             roster_off: !!rosterDay?.is_off,

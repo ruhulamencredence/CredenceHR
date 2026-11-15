@@ -1,0 +1,11 @@
+const B = 'http://127.0.0.1:3200';
+const login = async (id) => (await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: id, password: 'ProbePass123', workspace: 'credence' }) })).json()).token;
+const H = (t) => ({ 'content-type': 'application/json', authorization: 'Bearer ' + t });
+const cid = Number(process.argv[2]);
+let pass = 0, n = 0; const ok = (name, c, x = '') => { n++; if (c) pass++; console.log(c ? 'PASS' : 'FAIL', name, x); };
+const flag = async (who) => (await (await fetch(B + '/api/admin-dashboard/extras', { headers: H(await login(who)) })).json()).attendance_corrections.find((x) => x.id === cid)?.approve;
+ok('module holder (relink01) may approve it', (await flag('relink01'))?.via === 'correction', JSON.stringify(await flag('relink01')));
+ok('Superadmin may approve it', (await flag('admin@credence.test'))?.via === 'correction');
+const d = await fetch(B + `/api/attendance/corrections/${cid}/decision`, { method: 'POST', headers: H(await login('relink01')), body: JSON.stringify({ action: 'approve' }) });
+ok('relink01 approves it through the decision endpoint', d.status === 200, `${d.status} ${await d.text()}`);
+console.log(`${pass}/${n}`);

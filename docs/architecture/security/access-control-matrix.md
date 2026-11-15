@@ -17,7 +17,7 @@
 | Remote Attendance | `attendance` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Monthly Attendance Report | `attendance_reports` | `read` Attendance Reports<br>🔒`late_list` Late list (who came late)<br>`dept_summary` Department Summary (present / absent / leave / delay by department)<br>`custom_report` Custom Report (Attendance Report Builder)<br>🔒`attendance_edit` Edit attendance (give In / Out, with remarks) |
 | Monthly Leave Application | `leave_applications` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs |
+| Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs<br>🔒`punch_rules` Double punch rule |
 | Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow<br>🔒`tracking_schedule` Tracking Schedule |
 | Check In/Out | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf |
@@ -46,4 +46,4 @@
 | Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups |
 | Duty Roster | `duty_roster` | `read` See shifts and roster<br>🔒`roster_manage` Set shifts and roster<br>🔒`ot_approve` OT Approval<br>🔒`guard_posts` Guard posts & relief |
 | Break Time | `break_time` | `read` See break report<br>🔒`break_manage` Break rules, end forgotten breaks |
-| User Feedback | `user_feedback` | শুধু মডিউলের অনুমতি (layer নেই) |
+| User Feedback | `user_feedback` | `read` See feedback<br>🔒`feedback_resolve` Mark feedback Done / Pending |

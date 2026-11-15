@@ -12,6 +12,7 @@ import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
+import { ensurePunchRuleSchema } from "./zkPunchRule";
 import { ensureZkMachinesSchema, registerZkPushRoutes, checkZkMachinesOffline } from "./zkMachines";
 import { autoLinkByEmployeeId, backfillEmployeeLoginIds } from "./EmployeeLoginId";
 import { ensureRequisitionSchema, registerRequisitionRoutes } from "./RequisitionRoutes";
@@ -358,6 +359,8 @@ async function initDB() {
     // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
     await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
+    // Office machine double punch rule, from today on (zkPunchRule.ts).
+    await ensurePunchRuleSchema(dbPool, todayInDhaka());
     // Several ZKTeco machines: office, LAN / internet push, own PIN numbers (zkMachines.ts).
     await ensureZkMachinesSchema(dbPool);
     // Remote Attendance: the Projects each account may check in at, with
@@ -417,7 +420,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -467,7 +470,8 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history", "sim_inventory"] as con
 // Office Attendance: "read" = the module as it was; "link_pins" = Unlinked
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
-const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
+// "punch_rules" = change the office machine double punch rule (zkPunchRule.ts).
+const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins", "punch_rules"] as const;
 // Notices: who has read a notice (report, send again), sending it by
 // email, and adding / removing animations in the shared Animation library
 // (using one from it only needs the module) — all only when ticked
@@ -525,6 +529,8 @@ const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage", "ot_approve", "guard_po
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const BREAK_LAYER_KEYS = ["read", "break_manage"] as const;
+// User Feedback: "feedback_resolve" = mark a piece of feedback Done / Pending again.
+const FEEDBACK_LAYER_KEYS = ["read", "feedback_resolve"] as const;
 // Management Dashboard: one layer per part of the page, so an account sees
 // only the parts it is given (ManagementDashboardRoutes.ts leaves the rest
 // out of the reply). "md_money" (Salary cost, Money out) is explicit-only;
@@ -604,6 +610,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
   break_time: BREAK_LAYER_KEYS,
+  user_feedback: FEEDBACK_LAYER_KEYS,
   management_dashboard: MANAGEMENT_DASHBOARD_LAYER_KEYS,
   recruitment: RECRUITMENT_LAYER_KEYS,
   vehicle_management: VEHICLE_LAYER_KEYS,
@@ -3174,7 +3181,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3203,7 +3210,7 @@ async function startServer() {
             ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
           : moduleKey === "employees"
             ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3243,7 +3250,7 @@ async function startServer() {
         ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
       : moduleKey === "employees"
         ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3526,7 +3533,7 @@ async function startServer() {
   registerTrackingScheduleRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Office Attendance (ZKTeco) routes live in OfficeAttendanceRoutes.ts.
-  registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
+  registerOfficeAttendanceRoutes(app, { authenticateToken, dbPool, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, todayInDhaka });
   // Check In/Out routes live in MovementClaimRoutes.ts.
   registerMovementClaimRoutes(app, { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString });
 
@@ -4017,7 +4024,7 @@ async function startServer() {
   registerRequisitionRoutes(app, { authenticateToken, requireModuleLayer, hasModuleLayer, queryDB });
 
   // Self Service -> Give feedback; Admin Panel -> User Feedback (FeedbackRoutes.ts).
-  registerFeedbackRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB });
+  registerFeedbackRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
 
   // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
   // JSON too (ApiErrors.ts). After every route, before the web app.

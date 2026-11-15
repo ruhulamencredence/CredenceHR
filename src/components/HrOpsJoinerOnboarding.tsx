@@ -57,9 +57,12 @@ interface HiredCandidate {
   department: string | null;
 }
 interface Credentials {
+  id: number;
   name: string;
   login_id: string;
   password: string;
+  // The joiner's email when HR already has it (shown ready to send to).
+  email?: string;
 }
 
 const STATUS: Record<Application['status'], { label: string; cls: string }> = {
@@ -110,9 +113,36 @@ const ListSkeleton: React.FC = () => (
   </div>
 );
 
-const CredentialsCard: React.FC<{ creds: Credentials; onClose: () => void }> = ({ creds, onClose }) => {
+// The workspace HR is signed in to, so the joiner's link opens the right sign-in.
+const workspaceCode = (): string => {
+  try {
+    return JSON.parse(localStorage.getItem('credence_workspace') || 'null')?.code || '';
+  } catch {
+    return '';
+  }
+};
+
+const CredentialsCard: React.FC<{ token: string; creds: Credentials; onClose: () => void }> = ({ token, creds, onClose }) => {
+  const api = useHrApi(token);
   const [copied, setCopied] = useState(false);
-  const text = `Login ID: ${creds.login_id}\nTemporary password: ${creds.password}`;
+  const [email, setEmail] = useState(creds.email || '');
+  const [sending, setSending] = useState(false);
+  const [mailMsg, setMailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // The login page link: the workspace is filled in and so is the Login ID.
+  const link = `${window.location.origin}/?${workspaceCode() ? `workspace=${encodeURIComponent(workspaceCode())}&` : ''}login=${encodeURIComponent(creds.login_id)}`;
+  const text = `Login link: ${link}\nLogin ID: ${creds.login_id}\nTemporary password: ${creds.password}`;
+  const sendEmail = async () => {
+    setMailMsg(null);
+    setSending(true);
+    try {
+      const r = await api.post<{ emailed_to: string }>(`/api/hr-ops/joiner-onboarding/${creds.id}/email-login`, { email: email.trim(), password: creds.password });
+      setMailMsg({ ok: true, text: `Sent to ${r.emailed_to}.` });
+    } catch (e: any) {
+      setMailMsg({ ok: false, text: e.message });
+    } finally {
+      setSending(false);
+    }
+  };
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -141,6 +171,10 @@ const CredentialsCard: React.FC<{ creds: Credentials; onClose: () => void }> = (
       </p>
       <div className="liquid-glass-inset rounded-2xl mt-3 px-4 py-3 space-y-2 font-mono text-sm">
         <div className="flex justify-between gap-3">
+          <span className="text-slate-500 shrink-0">Login link</span>
+          <span className="font-bold text-slate-900 select-all break-all text-right text-xs">{link}</span>
+        </div>
+        <div className="flex justify-between gap-3">
           <span className="text-slate-500">Login ID</span>
           <span className="font-bold text-slate-900 select-all">{creds.login_id}</span>
         </div>
@@ -150,6 +184,24 @@ const CredentialsCard: React.FC<{ creds: Credentials; onClose: () => void }> = (
         </div>
       </div>
       <p className="text-xs text-amber-700 mt-3">This password is not shown again. If it's lost, use "New password" on the application.</p>
+      <div className="mt-4">
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1" htmlFor="joiner-login-email">Email it to the joiner</label>
+        <div className="flex gap-2">
+          <input
+            id="joiner-login-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="joiner@gmail.com"
+            className="liquid-glass-inset flex-1 min-w-0 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+          />
+          <button type="button" onClick={sendEmail} disabled={sending || !email.trim()} className="liquid-glass-button rounded-full px-4 py-2 text-sm font-semibold disabled:opacity-40 shrink-0">
+            {sending ? 'Sending…' : 'Send email'}
+          </button>
+        </div>
+        {mailMsg && <p className={`text-xs mt-2 ${mailMsg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{mailMsg.text}</p>}
+        <p className="text-[11px] text-slate-400 mt-2">The email has the link, Login ID and this temporary password.</p>
+      </div>
     </GlassModal>
   );
 };
@@ -196,13 +248,13 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; candidateId?: nu
     if (!f.joining_date) return setError('Joining date is required.');
     setSaving(true);
     try {
-      const r = await api.post<{ login_id: string; password: string }>('/api/hr-ops/joiner-onboarding', {
+      const r = await api.post<{ id: number; login_id: string; password: string }>('/api/hr-ops/joiner-onboarding', {
         ...f,
         candidate_id: candidateId || null,
         department_id: f.department_id ? Number(f.department_id) : null,
         branch_id: f.branch_id ? Number(f.branch_id) : null
       });
-      onCreated({ name: f.name.trim(), login_id: r.login_id, password: r.password });
+      onCreated({ id: r.id, name: f.name.trim(), login_id: r.login_id, password: r.password, email: f.email?.trim() || undefined });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -302,7 +354,7 @@ export const StartJoinerOnboarding: React.FC<{ token: string; candidateId: numbe
   useEffect(() => {
     api.get<HrOpsMeta>('/api/hr-ops/meta').then(setMeta).catch((e) => setError(e.message));
   }, [api]);
-  if (creds) return <CredentialsCard creds={creds} onClose={onClose} />;
+  if (creds) return <CredentialsCard token={token} creds={creds} onClose={onClose} />;
   if (error)
     return (
       <GlassModal title="New joiner" onClose={onClose}>
@@ -643,7 +695,7 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
     if (!(await confirmDialog(`Make a new temporary password for ${a.name}? The old one stops working and they are signed out.`, { title: 'New password', confirmLabel: 'Make new password', tone: 'default' }))) return;
     try {
       const r = await api.post<{ login_id: string; password: string }>(`/api/hr-ops/joiner-onboarding/${a.id}/reset-password`);
-      setCreds({ name: a.name, login_id: r.login_id, password: r.password });
+      setCreds({ id: a.id, name: a.name, login_id: r.login_id, password: r.password, email: a.email || undefined });
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
     }
@@ -756,7 +808,7 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
           }}
         />
       )}
-      {creds && <CredentialsCard creds={creds} onClose={() => setCreds(null)} />}
+      {creds && <CredentialsCard token={token} creds={creds} onClose={() => setCreds(null)} />}
       {letterFor && employees && (
         <LetterComposer
           token={token}

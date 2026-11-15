@@ -1,0 +1,51 @@
+# npm audit report
+
+body-parser  <1.20.9
+Severity: high
+body-parser vulnerable to Denial of Service via trailing bytes after a compressed request body - https://github.com/advisories/GHSA-27r3-jxmh-p828
+fix available via `npm audit fix`
+node_modules/body-parser
+
+ip-address  <=10.7.3
+Severity: moderate
+ip-address: Address6 matches a zone identifier in quadratic time ahead of its length limit, allowing a single long string to stall the process - https://github.com/advisories/GHSA-rxp7-6hxx-x8q5
+fix available via `npm audit fix`
+node_modules/ip-address
+
+node-forge  *
+Severity: high
+node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements - https://github.com/advisories/GHSA-86w9-cpqp-85rv
+No fix available
+node_modules/node-forge
+  @signpdf/signer-p12  *
+  Depends on vulnerable versions of node-forge
+  node_modules/@signpdf/signer-p12
+
+nodemailer  3.0.0 - 10.1.3
+Severity: moderate
+Nodemailer: A nested comment ends early in addressparser, releasing the rest of the comment as a recipient - https://github.com/advisories/GHSA-8c8m-p3m8-cjg8
+Nodemailer: A ";" inside a quoted string or comment ends an address group early in addressparser, turning display text into a recipient - https://github.com/advisories/GHSA-m943-m63m-w62w
+Nodemailer: A ">" inside a quoted local part ends an angle-addr early in addressparser, delivering to a domain the header does not name - https://github.com/advisories/GHSA-85x2-q946-cp5h
+fix available via `npm audit fix`
+node_modules/nodemailer
+  mailparser  2.3.1 - 3.9.42
+  Depends on vulnerable versions of nodemailer
+  node_modules/mailparser
+
+vite  <=6.4.3
+Severity: high
+launch-editor: escapeCmdArgs() omits % escaping on Windows - https://github.com/advisories/GHSA-698v-4r3x-3vcv
+launch-editor: Editor CLI flag misinterpretation causing arbitrary command execution for some editors - https://github.com/advisories/GHSA-r825-w8mm-5pxw
+launch-editor: `fs.existsSync()` existence check can be bypassed on Windows - https://github.com/advisories/GHSA-587h-7wmj-h5pm
+Vite: Cross origin script execution through Vite custom middleware - https://github.com/advisories/GHSA-9jrq-w75r-8gcw
+Vite: Files outside `server.fs.allow` could be served when project paths match system paths on non-Windows machine - https://github.com/advisories/GHSA-rq7h-c2jc-7f22
+fix available via `npm audit fix`
+node_modules/vite
+
+7 vulnerabilities (3 moderate, 4 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+Some issues need review, and may require choosing
+a different dependency.

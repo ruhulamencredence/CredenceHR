@@ -1,0 +1,245 @@
+{
+ "when": "2026-10-25T15:24:02.759Z",
+ "summary": {
+  "PASS": 36,
+  "FAIL": 0
+ },
+ "results": [
+  {
+   "id": "",
+   "status": "STEP",
+   "name": "Setup: Selim Supervisor supervises Mitu Team Member (201); Selim Supervisor has no supervisor; department has no Department Supervisor"
+  },
+  {
+   "id": "",
+   "status": "STEP",
+   "name": "Template \"leave\": Layer 1 = Layer One (HR Manager), Layer 2 = Layer Two (Director) (201)"
+  },
+  {
+   "id": "",
+   "status": "STEP",
+   "name": "Template \"conveyance\": Layer 1 = Layer One (HR Manager), Layer 2 = Layer Two (Director) (201)"
+  },
+  {
+   "id": "",
+   "status": "STEP",
+   "name": "Template \"timesheet\": Layer 1 = Layer One (HR Manager), Layer 2 = Layer Two (Director) (201)"
+  },
+  {
+   "id": "A1.1",
+   "status": "PASS",
+   "name": "Selim Supervisor submits a Leave",
+   "detail": "200 {\"success\":true,\"id\":1,\"day_count\":1}"
+  },
+  {
+   "id": "A1.2",
+   "status": "PASS",
+   "name": "Leave: no Supervisor step, the 2 Template layers only",
+   "detail": "steps=2 supervisor_step=none template=1 awaiting=0"
+  },
+  {
+   "id": "A1.3",
+   "status": "PASS",
+   "name": "Leave: not in Selim Supervisor's own queue (can't approve it himself)",
+   "detail": ""
+  },
+  {
+   "id": "A1.4",
+   "status": "PASS",
+   "name": "Leave: waiting on Layer 1 (Layer One (HR Manager)), not yet on Layer 2",
+   "detail": ""
+  },
+  {
+   "id": "A1.5",
+   "status": "PASS",
+   "name": "Leave: Layer 1 approves → moves to Layer 2, still pending",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}; status pending"
+  },
+  {
+   "id": "A1.6",
+   "status": "PASS",
+   "name": "Leave: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":2}; status approved"
+  },
+  {
+   "id": "A2.1",
+   "status": "PASS",
+   "name": "Selim Supervisor submits a Conveyance Bill Claim",
+   "detail": "201 {\"success\":true,\"id\":1}"
+  },
+  {
+   "id": "A2.2",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: no Supervisor step, the 2 Template layers only",
+   "detail": "steps=2 supervisor_step=none template=2 awaiting=0"
+  },
+  {
+   "id": "A2.3",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: not in Selim Supervisor's own queue (can't approve it himself)",
+   "detail": ""
+  },
+  {
+   "id": "A2.4",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: waiting on Layer 1 (Layer One (HR Manager)), not yet on Layer 2",
+   "detail": ""
+  },
+  {
+   "id": "A2.5",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Layer 1 approves → moves to Layer 2, still pending",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}; status pending"
+  },
+  {
+   "id": "A2.6",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":2,\"bill_id\":1,\"bill_item_id\":1}; status approved"
+  },
+  {
+   "id": "A3.1",
+   "status": "PASS",
+   "name": "Selim Supervisor submits a Timesheet correction",
+   "detail": "201 {\"success\":true,\"id\":1}"
+  },
+  {
+   "id": "A3.2",
+   "status": "PASS",
+   "name": "Timesheet correction: no Supervisor step, the 2 Template layers only",
+   "detail": "steps=2 supervisor_step=none template=3 awaiting=0"
+  },
+  {
+   "id": "A3.3",
+   "status": "PASS",
+   "name": "Timesheet correction: not in Selim Supervisor's own queue (can't approve it himself)",
+   "detail": ""
+  },
+  {
+   "id": "A3.4",
+   "status": "PASS",
+   "name": "Timesheet correction: waiting on Layer 1 (Layer One (HR Manager)), not yet on Layer 2",
+   "detail": ""
+  },
+  {
+   "id": "A3.5",
+   "status": "PASS",
+   "name": "Timesheet correction: Layer 1 approves → moves to Layer 2, still pending",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}; status pending"
+  },
+  {
+   "id": "A3.6",
+   "status": "PASS",
+   "name": "Timesheet correction: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":2}; status approved"
+  },
+  {
+   "id": "B1.1",
+   "status": "PASS",
+   "name": "Mitu Team Member submits a Leave",
+   "detail": "200 {\"success\":true,\"id\":2,\"day_count\":1}"
+  },
+  {
+   "id": "B1.2",
+   "status": "PASS",
+   "name": "Leave: Supervisor step + 2 Template layers",
+   "detail": "steps=3 supervisor_step=135 template=1 awaiting=0"
+  },
+  {
+   "id": "B1.3",
+   "status": "PASS",
+   "name": "Leave: waiting on Selim Supervisor first",
+   "detail": ""
+  },
+  {
+   "id": "B1.4",
+   "status": "PASS",
+   "name": "Leave: Supervisor approves → Layer 1",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}"
+  },
+  {
+   "id": "B1.5",
+   "status": "PASS",
+   "name": "Leave: Layer 1 approves → Layer 2",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":3}"
+  },
+  {
+   "id": "B1.6",
+   "status": "PASS",
+   "name": "Leave: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":3}; status approved"
+  },
+  {
+   "id": "B2.1",
+   "status": "PASS",
+   "name": "Mitu Team Member submits a Conveyance Bill Claim",
+   "detail": "201 {\"success\":true,\"id\":2}"
+  },
+  {
+   "id": "B2.2",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Supervisor step + 2 Template layers",
+   "detail": "steps=3 supervisor_step=135 template=2 awaiting=0"
+  },
+  {
+   "id": "B2.3",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: waiting on Selim Supervisor first",
+   "detail": ""
+  },
+  {
+   "id": "B2.4",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Supervisor approves → Layer 1",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}"
+  },
+  {
+   "id": "B2.5",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Layer 1 approves → Layer 2",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":3}"
+  },
+  {
+   "id": "B2.6",
+   "status": "PASS",
+   "name": "Conveyance Bill Claim: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":3,\"bill_id\":2,\"bill_item_id\":2}; status approved"
+  },
+  {
+   "id": "B3.1",
+   "status": "PASS",
+   "name": "Mitu Team Member submits a Timesheet correction",
+   "detail": "201 {\"success\":true,\"id\":2}"
+  },
+  {
+   "id": "B3.2",
+   "status": "PASS",
+   "name": "Timesheet correction: Supervisor step + 2 Template layers",
+   "detail": "steps=3 supervisor_step=135 template=3 awaiting=0"
+  },
+  {
+   "id": "B3.3",
+   "status": "PASS",
+   "name": "Timesheet correction: waiting on Selim Supervisor first",
+   "detail": ""
+  },
+  {
+   "id": "B3.4",
+   "status": "PASS",
+   "name": "Timesheet correction: Supervisor approves → Layer 1",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":2}"
+  },
+  {
+   "id": "B3.5",
+   "status": "PASS",
+   "name": "Timesheet correction: Layer 1 approves → Layer 2",
+   "detail": "200 {\"success\":true,\"status\":\"pending\",\"current_step\":3}"
+  },
+  {
+   "id": "B3.6",
+   "status": "PASS",
+   "name": "Timesheet correction: Layer 2 approves → Approved",
+   "detail": "200 {\"success\":true,\"status\":\"approved\",\"current_step\":3}; status approved"
+  }
+ ]
+}

@@ -1694,6 +1694,7 @@ export default function App() {
         variant="overlay"
         open={globalSidebarOpen}
         onClose={() => setGlobalSidebarOpen(false)}
+        onOpen={() => setGlobalSidebarOpen(true)}
         activeKey={computeSidebarActiveKey('mobile')}
         {...sidebarNavProps}
       />

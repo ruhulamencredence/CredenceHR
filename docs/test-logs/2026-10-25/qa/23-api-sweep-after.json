@@ -1,0 +1,1431 @@
+{
+ "unauth": [
+  {
+   "file": "MailRoutes.ts",
+   "method": "GET",
+   "path": "/api/mail/public/signature/:id/:token",
+   "mw": " async (req: any, res: any) => {",
+   "got": 404,
+   "snip": ""
+  }
+ ],
+ "user": [
+  {
+   "file": "AiAssistantRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/status",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 148,
+   "snip": "{\"enabled\":true,\"engine\":\"local\",\"suggestions\":[\"আমার ছুটি কত বাকি?\",\"এই মাসে কয়দিন দেরি করেছি?\",\"Password কীভাবে বদলাব?\",\"সামনের ছুটির দিন কবে?\"]}"
+  },
+  {
+   "file": "Alerts.ts",
+   "method": "GET",
+   "path": "/api/alerts",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "Alerts.ts",
+   "method": "GET",
+   "path": "/api/alerts/unread-count",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 11,
+   "snip": "{\"count\":0}"
+  },
+  {
+   "file": "ApprovalRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-approvals",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ApprovalRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-approvals/history",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 73,
+   "snip": "{\"summary\":{\"total\":0,\"approved\":0,\"rejected\":0,\"by_type\":{}},\"items\":[]}"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/my",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/requisitions/my",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/requisitions/awaiting-my-fulfillment",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/available",
+   "mw": " authenticateToken, async (_req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/assignment-claims/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 29,
+   "snip": "{\"enabled\":false,\"claims\":[]}"
+  },
+  {
+   "file": "AssistantSupportRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/support/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"is_agent\":false,\"waiting\":0}"
+  },
+  {
+   "file": "AssistantSupportRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/support/mine",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"session\":null,\"messages\":[]}"
+  },
+  {
+   "file": "AuthRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/me",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1222,
+   "snip": "{\"id\":135,\"name\":\"QA Plain User\",\"email\":\"qa.user@credence.test\",\"role\":\"user\",\"created_at\":\"2026-10-25 17:44:44\",\"can_edit_delivery_date\":true,\"can_job_edit\":f"
+  },
+  {
+   "file": "BillClaimPolicy.ts",
+   "method": "GET",
+   "path": "/api/bill-claim-categories",
+   "mw": " authenticateToken, async (_req: any, res) => {",
+   "got": 200,
+   "len": 711,
+   "snip": "[{\"id\":1,\"name\":\"Transport\",\"description\":null,\"is_active\":true,\"sort_order\":1,\"max_per_bill\":null,\"monthly_limit\":null,\"receipt_required\":false},{\"id\":2,\"name\""
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/mpr-numbers",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budgets",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budgets/:id/items",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budget-items/lookup",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 20,
+   "snip": "{\"description\":null}"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/jobs",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/jobs/check/:jobNo",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 16,
+   "snip": "{\"exists\":false}"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/directory",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 587,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\",\"email\":\"farhana.r@credence.test\",\"username\":null,\"role\":\"user\"},{\"id\":134,\"name\":\"Plain Roster\",\"email\":\"plain.r@credence.tes"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/rooms",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/unread-count",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 11,
+   "snip": "{\"count\":0}"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/me/about",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 12,
+   "snip": "{\"about\":\"\"}"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 393,
+   "snip": "{\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"group_id\":1,\"name\":\"Credence Housing Limited"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/next-employee-code",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 34,
+   "snip": "{\"code\":\"CHL-0001\",\"prefix\":\"CHL\"}"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/group",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 80,
+   "snip": "[{\"id\":1,\"name\":\"Credence Housing Limited\",\"short_code\":\"CHL\",\"is_mother\":true}]"
+  },
+  {
+   "file": "DepartmentsAndBranches.ts",
+   "method": "GET",
+   "path": "/api/branches",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "DepartmentsAndBranches.ts",
+   "method": "GET",
+   "path": "/api/departments",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 802,
+   "snip": "[{\"id\":5,\"name\":\"Admin\",\"supervisor_user_id\":null,\"supervisor_name\":null,\"include_supervisor_approval\":true,\"is_active\":true,\"created_at\":\"2026-10-15 21:44:12\"}"
+  },
+  {
+   "file": "DocumentVaultRoutes.ts",
+   "method": "GET",
+   "path": "/api/employee-documents",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ESignRoutes.ts",
+   "method": "GET",
+   "path": "/api/claim-signature",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"enabled\":false,\"image\":null}"
+  },
+  {
+   "file": "EmployeeDirectoryRoutes.ts",
+   "method": "GET",
+   "path": "/api/employee-directory",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1796,
+   "snip": "[{\"id\":36,\"employee_id\":null,\"name\":\"Farhana Akter\",\"designation\":\"Accounts Officer\",\"department\":\"Finance\",\"department_id\":1,\"email\":\"farhana@company.com\",\"pho"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/entries",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/entries/mpr-usage",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/job-edits/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ExitOffboardingRoutes.ts",
+   "method": "GET",
+   "path": "/api/exit-requests",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "FingerprintRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/fingerprint",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"allowed\":false,\"devices\":[]}"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/grievances",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/grievances/people",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 171,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\"},{\"id\":134,\"name\":\"Plain Roster\"},{\"id\":136,\"name\":\"QA Admin No Modules\"},{\"id\":133,\"name\":\"Roster HR\"},{\"id\":132,\"name\":\"Tanv"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-cases",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 56,
+   "snip": "{\"raised\":[],\"named\":[],\"assigned\":[],\"disciplinary\":[]}"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/disciplinary-actions",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "HROperationsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/letters",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 28,
+   "snip": "{\"letters\":[],\"requests\":[]}"
+  },
+  {
+   "file": "HROperationsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/service-book",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 29,
+   "snip": "{\"employee\":null,\"events\":[]}"
+  },
+  {
+   "file": "HrOpsInfoRequestsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/info-requests",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 33,
+   "snip": "{\"items\":[],\"open\":0,\"family\":[]}"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-balances/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 155,
+   "snip": "[{\"user_id\":135,\"user_name\":\"QA Plain User\",\"user_role\":\"user\",\"casual_leave\":0,\"sick_leave\":0,\"leave_without_pay\":0,\"updated_at\":null,\"custom_leaves\":[]}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-balances",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 155,
+   "snip": "[{\"user_id\":135,\"user_name\":\"QA Plain User\",\"user_role\":\"user\",\"casual_leave\":0,\"sick_leave\":0,\"leave_without_pay\":0,\"updated_at\":null,\"custom_leaves\":[]}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-categories",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 57,
+   "snip": "[{\"id\":1,\"key\":\"custom_earn_leave\",\"label\":\"Earn Leave\"}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-policies",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1088,
+   "snip": "[{\"category_key\":\"casual\",\"min_advance_notice_days\":0,\"reliever_required\":true,\"max_consecutive_days\":null,\"require_paid_leave_exhausted\":false,\"min_service_mon"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-applications/approvers",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 102,
+   "snip": "[{\"id\":136,\"name\":\"QA Admin No Modules\"},{\"id\":133,\"name\":\"Roster HR\"},{\"id\":1,\"name\":\"System Admin\"}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-applications/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "MailRoutes.ts",
+   "method": "GET",
+   "path": "/api/mail/status",
+   "mw": "",
+   "got": 200,
+   "len": 107,
+   "snip": "{\"enabled\":false,\"serverReady\":true,\"ourDomains\":[],\"canDirectory\":false,\"canMyGroups\":false,\"accounts\":[]}"
+  },
+  {
+   "file": "MobileBillRoutes.ts",
+   "method": "GET",
+   "path": "/api/mobile-bill/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 116,
+   "snip": "{\"hr\":false,\"self\":false,\"limit_history\":false,\"operators\":[\"Grameenphone\",\"Robi\",\"Airtel\",\"Banglalink\",\"Teletalk\"]}"
+  },
+  {
+   "file": "NoticeRoutes.ts",
+   "method": "GET",
+   "path": "/api/notices/active",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "NoticeRoutes.ts",
+   "method": "GET",
+   "path": "/api/notices/board",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "PasswordResetRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/forgot/options",
+   "mw": " async (_req, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"email\":false,\"request\":true}"
+  },
+  {
+   "file": "PayrollRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-attendance-summary",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 39,
+   "snip": "{\"linked\":false,\"month_year\":\"2026-10\"}"
+  },
+  {
+   "file": "ProjectRoutes.ts",
+   "method": "GET",
+   "path": "/api/projects",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ProjectRoutes.ts",
+   "method": "GET",
+   "path": "/api/projects/all",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ReportEmailRoutes.ts",
+   "method": "GET",
+   "path": "/api/reports/email/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 31,
+   "snip": "{\"allowed\":false,\"mailer\":true}"
+  },
+  {
+   "file": "SessionSecurity.ts",
+   "method": "GET",
+   "path": "/api/session-policy",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 34,
+   "snip": "{\"client\":\"web\",\"idle_minutes\":60}"
+  },
+  {
+   "file": "SiteAttendanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/site-attendance/my-teams",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 184,
+   "snip": "{\"today\":\"2026-10-25\",\"teams\":[],\"settings\":{\"id\":null,\"require_approval\":false,\"require_photo\":false,\"require_location\":false,\"backdate_days\":2,\"reminder_time\""
+  },
+  {
+   "file": "TargetRoutes.ts",
+   "method": "GET",
+   "path": "/api/targets/access",
+   "mw": " authenticateToken, (req: any, res: any) =>",
+   "got": 200,
+   "len": 87,
+   "snip": "{\"enabled\":false,\"supervisor\":false,\"team_size\":0,\"reports\":false,\"today\":\"2026-10-25\"}"
+  },
+  {
+   "file": "TaskRoutes.ts",
+   "method": "GET",
+   "path": "/api/tasks/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 367,
+   "snip": "{\"hr\":false,\"my_tasks\":false,\"hod\":false,\"departments\":[],\"request_types\":[{\"key\":\"employment_certificate\",\"label\":\"Employment Certificate\"},{\"key\":\"id_card\",\"l"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions/awaiting-my-assignment",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/available",
+   "mw": " authenticateToken, async (_req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/driver-candidates",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 205,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\"},{\"id\":134,\"name\":\"Plain Roster\"},{\"id\":136,\"name\":\"QA Admin No Modules\"},{\"id\":135,\"name\":\"QA Plain User\"},{\"id\":133,\"name\":\""
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions/my-trips",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/places/search",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/places/recent",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "WebPushService.ts",
+   "method": "GET",
+   "path": "/api/web-push/key",
+   "mw": " authenticateToken, (_req: any, res) => {",
+   "got": 200,
+   "len": 103,
+   "snip": "{\"publicKey\":\"BEDeJTExVrePpnuWJPM2JtO11WztqkUrAkcj7K4OcsXw74ljcS_A-lMWRq5ifxvzs6HMFuD09dYmUb7NGUx3JoQ\"}"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/holidays",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-holiday-group",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 28,
+   "snip": "{\"applies_to\":\"head_office\"}"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/today-overview",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 94,
+   "snip": "{\"today\":\"2026-10-25\",\"today_off\":null,\"next_off\":null,\"on_leave_today\":[],\"on_leave_count\":0}"
+  },
+  {
+   "file": "profileRoutes.ts",
+   "method": "GET",
+   "path": "/api/profile/personal-data",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 177,
+   "snip": "{\"first_name\":\"QA\",\"last_name\":\"Plain User\",\"date_of_birth\":null,\"country\":null,\"state\":null,\"city\":null,\"full_address\":null,\"has_photo\":false,\"position\":null,\""
+  },
+  {
+   "file": "profileRoutes.ts",
+   "method": "GET",
+   "path": "/api/profile/photo/:userId?",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 204,
+   "len": 0,
+   "snip": ""
+  }
+ ],
+ "admin0": [
+  {
+   "file": "AdminDashboardRoutes.ts",
+   "method": "GET",
+   "path": "/api/admin-dashboard/extras",
+   "mw": " authenticateToken, gate, async (req: any, res) => {",
+   "got": 200,
+   "len": 151,
+   "snip": "{\"today\":\"2026-10-25\",\"birthdays\":[],\"attendance_approvals\":[],\"attendance_corrections\":[],\"documents\":[],\"status_effective\":[],\"tasks\":[],\"alerts\":[]}"
+  },
+  {
+   "file": "AdminDashboardRoutes.ts",
+   "method": "GET",
+   "path": "/api/admin-dashboard/stuck",
+   "mw": " authenticateToken, gate, async (req: any, res) => {",
+   "got": 200,
+   "len": 44,
+   "snip": "{\"days\":3,\"total\":0,\"by_kind\":[],\"items\":[]}"
+  },
+  {
+   "file": "AiAssistantRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/status",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 204,
+   "snip": "{\"enabled\":true,\"engine\":\"local\",\"suggestions\":[\"HR Dashboard-এর সারসংক্ষেপ দাও\",\"কী কী অপেক্ষায় আছে?\",\"আমার ছুটি কত বাকি?\",\"এই মাসে কয়দিন দেরি করেছি?\",\"Passw"
+  },
+  {
+   "file": "Alerts.ts",
+   "method": "GET",
+   "path": "/api/alerts",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "Alerts.ts",
+   "method": "GET",
+   "path": "/api/alerts/unread-count",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 11,
+   "snip": "{\"count\":0}"
+  },
+  {
+   "file": "ApprovalRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-approvals",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ApprovalRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-approvals/history",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 73,
+   "snip": "{\"summary\":{\"total\":0,\"approved\":0,\"rejected\":0,\"by_type\":{}},\"items\":[]}"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/my",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/requisitions/my",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/requisitions/awaiting-my-fulfillment",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/available",
+   "mw": " authenticateToken, async (_req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "AssetManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/assets/assignment-claims/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 29,
+   "snip": "{\"enabled\":false,\"claims\":[]}"
+  },
+  {
+   "file": "AssistantSupportRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/support/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"is_agent\":false,\"waiting\":0}"
+  },
+  {
+   "file": "AssistantSupportRoutes.ts",
+   "method": "GET",
+   "path": "/api/assistant/support/mine",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"session\":null,\"messages\":[]}"
+  },
+  {
+   "file": "AuthRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/me",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1231,
+   "snip": "{\"id\":136,\"name\":\"QA Admin No Modules\",\"email\":\"qa.admin0@credence.test\",\"role\":\"admin\",\"created_at\":\"2026-10-25 17:44:44\",\"can_edit_delivery_date\":true,\"can_jo"
+  },
+  {
+   "file": "BillClaimPolicy.ts",
+   "method": "GET",
+   "path": "/api/bill-claim-categories",
+   "mw": " authenticateToken, async (_req: any, res) => {",
+   "got": 200,
+   "len": 711,
+   "snip": "[{\"id\":1,\"name\":\"Transport\",\"description\":null,\"is_active\":true,\"sort_order\":1,\"max_per_bill\":null,\"monthly_limit\":null,\"receipt_required\":false},{\"id\":2,\"name\""
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/mpr-numbers",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budgets",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budgets/:id/items",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/budget-items/lookup",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 20,
+   "snip": "{\"description\":null}"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/jobs",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "BudgetImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/jobs/check/:jobNo",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 16,
+   "snip": "{\"exists\":false}"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/directory",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 578,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\",\"email\":\"farhana.r@credence.test\",\"username\":null,\"role\":\"user\"},{\"id\":134,\"name\":\"Plain Roster\",\"email\":\"plain.r@credence.tes"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/rooms",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/unread-count",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 11,
+   "snip": "{\"count\":0}"
+  },
+  {
+   "file": "ChatRoutes.ts",
+   "method": "GET",
+   "path": "/api/chat/me/about",
+   "mw": " authenticateToken, requireChat, async (req: any, res) => {",
+   "got": 200,
+   "len": 12,
+   "snip": "{\"about\":\"\"}"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 393,
+   "snip": "{\"group\":{\"id\":1,\"name\":\"Credence Group\",\"short_name\":\"Credence\",\"workspace_code\":\"credence\"},\"companies\":[{\"id\":1,\"group_id\":1,\"name\":\"Credence Housing Limited"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/next-employee-code",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 34,
+   "snip": "{\"code\":\"CHL-0001\",\"prefix\":\"CHL\"}"
+  },
+  {
+   "file": "CompanyRoutes.ts",
+   "method": "GET",
+   "path": "/api/companies/group",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 80,
+   "snip": "[{\"id\":1,\"name\":\"Credence Housing Limited\",\"short_code\":\"CHL\",\"is_mother\":true}]"
+  },
+  {
+   "file": "DataImportRoutes.ts",
+   "method": "GET",
+   "path": "/api/data-import/kinds",
+   "mw": " authenticateToken, requireAdmin, async (req: any, res) => {",
+   "got": 200,
+   "len": 28,
+   "snip": "{\"max_rows\":5000,\"kinds\":[]}"
+  },
+  {
+   "file": "DepartmentsAndBranches.ts",
+   "method": "GET",
+   "path": "/api/branches",
+   "mw": " authenticateToken, async (req, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "DepartmentsAndBranches.ts",
+   "method": "GET",
+   "path": "/api/departments",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 802,
+   "snip": "[{\"id\":5,\"name\":\"Admin\",\"supervisor_user_id\":null,\"supervisor_name\":null,\"include_supervisor_approval\":true,\"is_active\":true,\"created_at\":\"2026-10-15 21:44:12\"}"
+  },
+  {
+   "file": "DocumentVaultRoutes.ts",
+   "method": "GET",
+   "path": "/api/employee-documents",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ESignRoutes.ts",
+   "method": "GET",
+   "path": "/api/claim-signature",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"enabled\":false,\"image\":null}"
+  },
+  {
+   "file": "EmployeeDirectoryRoutes.ts",
+   "method": "GET",
+   "path": "/api/employee-directory",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1796,
+   "snip": "[{\"id\":36,\"employee_id\":null,\"name\":\"Farhana Akter\",\"designation\":\"Accounts Officer\",\"department\":\"Finance\",\"department_id\":1,\"email\":\"farhana@company.com\",\"pho"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/entries",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/entries/mpr-usage",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "EntriesRoutes.ts",
+   "method": "GET",
+   "path": "/api/job-edits/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ExitOffboardingRoutes.ts",
+   "method": "GET",
+   "path": "/api/exit-requests",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "FingerprintRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/fingerprint",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"allowed\":false,\"devices\":[]}"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/grievances",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/grievances/people",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 165,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\"},{\"id\":134,\"name\":\"Plain Roster\"},{\"id\":135,\"name\":\"QA Plain User\"},{\"id\":133,\"name\":\"Roster HR\"},{\"id\":132,\"name\":\"Tanvir Log"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-cases",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 56,
+   "snip": "{\"raised\":[],\"named\":[],\"assigned\":[],\"disciplinary\":[]}"
+  },
+  {
+   "file": "GrievanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/disciplinary-actions",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "HROperationsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/letters",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 28,
+   "snip": "{\"letters\":[],\"requests\":[]}"
+  },
+  {
+   "file": "HROperationsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/service-book",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 29,
+   "snip": "{\"employee\":null,\"events\":[]}"
+  },
+  {
+   "file": "HrOpsInfoRequestsRoutes.ts",
+   "method": "GET",
+   "path": "/api/hr-ops/my/info-requests",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 33,
+   "snip": "{\"items\":[],\"open\":0,\"family\":[]}"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-balances/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 162,
+   "snip": "[{\"user_id\":136,\"user_name\":\"QA Admin No Modules\",\"user_role\":\"admin\",\"casual_leave\":0,\"sick_leave\":0,\"leave_without_pay\":0,\"updated_at\":null,\"custom_leaves\":[]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-balances",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 162,
+   "snip": "[{\"user_id\":136,\"user_name\":\"QA Admin No Modules\",\"user_role\":\"admin\",\"casual_leave\":0,\"sick_leave\":0,\"leave_without_pay\":0,\"updated_at\":null,\"custom_leaves\":[]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-categories",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 57,
+   "snip": "[{\"id\":1,\"key\":\"custom_earn_leave\",\"label\":\"Earn Leave\"}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-policies",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 1088,
+   "snip": "[{\"category_key\":\"casual\",\"min_advance_notice_days\":0,\"reliever_required\":true,\"max_consecutive_days\":null,\"require_paid_leave_exhausted\":false,\"min_service_mon"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-applications/approvers",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 102,
+   "snip": "[{\"id\":136,\"name\":\"QA Admin No Modules\"},{\"id\":133,\"name\":\"Roster HR\"},{\"id\":1,\"name\":\"System Admin\"}]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-applications/mine",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "LeaveRoutes.ts",
+   "method": "GET",
+   "path": "/api/leave-applications",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "MailRoutes.ts",
+   "method": "GET",
+   "path": "/api/mail/status",
+   "mw": "",
+   "got": 200,
+   "len": 107,
+   "snip": "{\"enabled\":false,\"serverReady\":true,\"ourDomains\":[],\"canDirectory\":false,\"canMyGroups\":false,\"accounts\":[]}"
+  },
+  {
+   "file": "MobileBillRoutes.ts",
+   "method": "GET",
+   "path": "/api/mobile-bill/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 116,
+   "snip": "{\"hr\":false,\"self\":false,\"limit_history\":false,\"operators\":[\"Grameenphone\",\"Robi\",\"Airtel\",\"Banglalink\",\"Teletalk\"]}"
+  },
+  {
+   "file": "NoticeRoutes.ts",
+   "method": "GET",
+   "path": "/api/notices/active",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "NoticeRoutes.ts",
+   "method": "GET",
+   "path": "/api/notices/board",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "PasswordResetRoutes.ts",
+   "method": "GET",
+   "path": "/api/auth/forgot/options",
+   "mw": " async (_req, res) => {",
+   "got": 200,
+   "len": 30,
+   "snip": "{\"email\":false,\"request\":true}"
+  },
+  {
+   "file": "PayrollRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-attendance-summary",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 39,
+   "snip": "{\"linked\":false,\"month_year\":\"2026-10\"}"
+  },
+  {
+   "file": "ProjectRoutes.ts",
+   "method": "GET",
+   "path": "/api/projects",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ProjectRoutes.ts",
+   "method": "GET",
+   "path": "/api/projects/all",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "ReportEmailRoutes.ts",
+   "method": "GET",
+   "path": "/api/reports/email/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 31,
+   "snip": "{\"allowed\":false,\"mailer\":true}"
+  },
+  {
+   "file": "ReportsInsightsRoutes.ts",
+   "method": "GET",
+   "path": "/api/reports-insights/catalog",
+   "mw": " authenticateToken, requireAdmin, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 108,
+   "snip": "{\"categories\":[],\"reports\":[],\"departments\":[\"Admin\",\"Finance\",\"HR\",\"MIS\",\"Transport\"],\"today\":\"2026-10-25\"}"
+  },
+  {
+   "file": "SessionSecurity.ts",
+   "method": "GET",
+   "path": "/api/session-policy",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 34,
+   "snip": "{\"client\":\"web\",\"idle_minutes\":60}"
+  },
+  {
+   "file": "SiteAttendanceRoutes.ts",
+   "method": "GET",
+   "path": "/api/site-attendance/my-teams",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 184,
+   "snip": "{\"today\":\"2026-10-25\",\"teams\":[],\"settings\":{\"id\":null,\"require_approval\":false,\"require_photo\":false,\"require_location\":false,\"backdate_days\":2,\"reminder_time\""
+  },
+  {
+   "file": "TargetRoutes.ts",
+   "method": "GET",
+   "path": "/api/targets/access",
+   "mw": " authenticateToken, (req: any, res: any) =>",
+   "got": 200,
+   "len": 87,
+   "snip": "{\"enabled\":false,\"supervisor\":false,\"team_size\":0,\"reports\":false,\"today\":\"2026-10-25\"}"
+  },
+  {
+   "file": "TaskRoutes.ts",
+   "method": "GET",
+   "path": "/api/tasks/access",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 367,
+   "snip": "{\"hr\":false,\"my_tasks\":false,\"hod\":false,\"departments\":[],\"request_types\":[{\"key\":\"employment_certificate\",\"label\":\"Employment Certificate\"},{\"key\":\"id_card\",\"l"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions/awaiting-my-assignment",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/available",
+   "mw": " authenticateToken, async (_req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/driver-candidates",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 205,
+   "snip": "[{\"id\":131,\"name\":\"Farhana Login\"},{\"id\":134,\"name\":\"Plain Roster\"},{\"id\":136,\"name\":\"QA Admin No Modules\"},{\"id\":135,\"name\":\"QA Plain User\"},{\"id\":133,\"name\":\""
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/requisitions/my-trips",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/places/search",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "VehicleManagementRoutes.ts",
+   "method": "GET",
+   "path": "/api/vehicles/places/recent",
+   "mw": " authenticateToken, async (req: any, res: any) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "WebPushService.ts",
+   "method": "GET",
+   "path": "/api/web-push/key",
+   "mw": " authenticateToken, (_req: any, res) => {",
+   "got": 200,
+   "len": 103,
+   "snip": "{\"publicKey\":\"BEDeJTExVrePpnuWJPM2JtO11WztqkUrAkcj7K4OcsXw74ljcS_A-lMWRq5ifxvzs6HMFuD09dYmUb7NGUx3JoQ\"}"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/holidays",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 2,
+   "snip": "[]"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/my-holiday-group",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 28,
+   "snip": "{\"applies_to\":\"head_office\"}"
+  },
+  {
+   "file": "holidayRoutes.ts",
+   "method": "GET",
+   "path": "/api/today-overview",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 94,
+   "snip": "{\"today\":\"2026-10-25\",\"today_off\":null,\"next_off\":null,\"on_leave_today\":[],\"on_leave_count\":0}"
+  },
+  {
+   "file": "profileRoutes.ts",
+   "method": "GET",
+   "path": "/api/profile/personal-data",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 200,
+   "len": 183,
+   "snip": "{\"first_name\":\"QA\",\"last_name\":\"Admin No Modules\",\"date_of_birth\":null,\"country\":null,\"state\":null,\"city\":null,\"full_address\":null,\"has_photo\":false,\"position\":"
+  },
+  {
+   "file": "profileRoutes.ts",
+   "method": "GET",
+   "path": "/api/profile/photo/:userId?",
+   "mw": " authenticateToken, async (req: any, res) => {",
+   "got": 204,
+   "len": 0,
+   "snip": ""
+  }
+ ],
+ "fuzz": [],
+ "slow": []
+}
