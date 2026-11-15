@@ -399,6 +399,17 @@ render at page level (`createPortal` to `document.body`) in the house liquid-gla
 - `scripts/approval-template-popup.cjs` (Light, Light Glass, Dark Glass): **15/15** — the editor's backdrop is a child
   of `<body>`, covers the whole window, and the editor is fully visible; Manage Chain likewise (15/15 with it).
 
+## Departments: table scrolls in its own box, header stays; search and filters
+
+Admin Panel → Departments: the list scrolled with the whole page and its header went off the top. Now (computer) the
+table scrolls inside its own box (to the bottom of the screen) with the header sticky on top; the Add Department
+form stays in place. New: search (department, Head, team, supervisor), Status (Active / Inactive), Setup (No Head /
+No teams / A team without Supervisor), "N of M" count and Clear.
+
+- `scripts/departments-table.cjs` (30 test departments added, then removed): **17/17** — in Light, Light Glass and
+  Dark Glass the box scrolls (710 px of 1720 px), the header stays at its top drawn over the rows, the page doesn't
+  move; search, Inactive, No Head, "N of M" and Clear work; no page errors.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
