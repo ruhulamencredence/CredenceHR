@@ -115,10 +115,39 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
   );
 };
 
-const Card: React.FC<{ label: string; value: string; cls?: string }> = ({ label, value, cls }) => (
-  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-    <div className="text-[11px] font-semibold text-slate-500">{label}</div>
-    <div className={`text-xl font-bold ${cls || 'text-slate-900'}`}>{value}</div>
+const Card: React.FC<{ label: string; value: string; cls?: string; onClick?: () => void; on?: boolean; hint?: string }> = ({ label, value, cls, onClick, on, hint }) => {
+  const body = (
+    <>
+      <div className="text-[11px] font-semibold text-slate-500">{label}</div>
+      <div className={`text-xl font-bold ${cls || 'text-slate-900'}`}>{value}</div>
+    </>
+  );
+  // A card that filters the table below it ("Not given to anyone" -> the stock SIMs).
+  return onClick ? (
+    <button type="button" onClick={onClick} title={hint} aria-pressed={!!on}
+      className={`text-left rounded-2xl bg-white border px-4 py-3 hover:border-teal-400 ${on ? 'border-teal-500 ring-2 ring-teal-500/20' : 'border-slate-200'}`}>
+      {body}
+    </button>
+  ) : (
+    <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">{body}</div>
+  );
+};
+
+// A SIM's department: its holder's, else (a spare SIM) the duty location it was put to.
+const simDept = (x: { employee?: { department?: string | null } | null; employee_id?: number | null; duty_location?: string | null }) =>
+  x.employee?.department || (x.employee_id ? '' : x.duty_location || '');
+const deptList = (rows: any[] | null) => [...new Set((rows || []).map(simDept).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const NO_DEPT = '__none__';
+const deptMatch = (want: string, row: any) => !want || (want === NO_DEPT ? !simDept(row) : simDept(row) === want);
+const DeptFilter: React.FC<{ value: string; onChange: (v: string) => void; options: string[]; cls?: string }> = ({ value, onChange, options, cls }) => (
+  <div className="min-w-[200px] sm:min-w-[260px]" title={value && value !== NO_DEPT ? value : undefined}>
+    <SearchSelect className={cls || filterCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— All departments —</option>
+      {options.map((d) => (
+        <option key={d} value={d}>{d}</option>
+      ))}
+      <option value={NO_DEPT}>(No department)</option>
+    </SearchSelect>
   </div>
 );
 
@@ -147,6 +176,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
   const [month, setMonth] = useState(thisMonth());
   const [rows, setRows] = useState<BillRow[] | null>(null);
   const [operator, setOperator] = useState('');
+  const [dept, setDept] = useState('');
   const [q, setQ] = useState('');
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
@@ -169,9 +199,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     return (rows || []).filter(
       (r) =>
         (!operator || r.operator === operator) &&
+        deptMatch(dept, r) &&
         (!s || [r.phone_number, r.employee?.name, r.employee?.employee_code, r.employee?.department, r.duty_location].some((v) => String(v || '').toLowerCase().includes(s)))
     );
-  }, [rows, operator, q]);
+  }, [rows, operator, dept, q]);
   const billed = shown.filter((r) => r.amount != null);
   const sum = (k: 'amount' | 'payable' | 'excess') => billed.reduce((a, r) => a + Number(r[k] || 0), 0);
   const unpaid = billed.filter((r) => !r.paid_at).length;
@@ -274,6 +305,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
               <option key={o}>{o}</option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className={labelCls}>Department</label>
+          <DeptFilter value={dept} onChange={setDept} options={deptList(rows)} cls={inputCls} />
         </div>
         <div className="flex-1 min-w-[180px] relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -683,6 +718,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
   const [q, setQ] = useState('');
   const [operator, setOperator] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive' | 'unassigned' | ''>('active');
+  const [dept, setDept] = useState('');
   const [editing, setEditing] = useState<MbSim | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
   // "From Employees": office SIMs from Employees -> Contact No.
@@ -708,18 +744,19 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       (x) =>
         (!operator || x.operator === operator) &&
         (!status || (status === 'unassigned' ? !x.employee_id && x.status === 'active' : x.status === status)) &&
+        deptMatch(dept, x) &&
         (!s || [x.phone_number, x.employee?.name, x.employee?.employee_code, x.employee?.department, x.duty_location].some((v) => String(v || '').toLowerCase().includes(s)))
     );
-  }, [sims, q, operator, status]);
+  }, [sims, q, operator, status, dept]);
   const active = (sims || []).filter((s) => s.status === 'active');
   const holders = new Set(active.filter((s) => s.employee_id).map((s) => s.employee_id));
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Card label="Active SIMs" value={sims ? String(active.length) : '–'} />
+        <Card label="Active SIMs" value={sims ? String(active.length) : '–'} onClick={() => setStatus('active')} on={status === 'active'} hint="Show all active SIMs" />
         <Card label="Employees holding SIMs" value={sims ? String(holders.size) : '–'} />
-        <Card label="Not given to anyone" value={sims ? String(active.filter((s) => !s.employee_id).length) : '–'} cls="text-amber-600" />
+        <Card label="Not given to anyone" value={sims ? String(active.filter((s) => !s.employee_id).length) : '–'} cls="text-amber-600" onClick={() => setStatus('unassigned')} on={status === 'unassigned'} hint="Show only the SIMs in stock (not given to anyone)" />
         <Card label="Total monthly limit" value={sims ? tk(active.reduce((a, s) => a + s.limit_amount, 0)) : '–'} cls="text-teal-700" />
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -733,9 +770,10 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
             <option key={o}>{o}</option>
           ))}
         </select>
+        <DeptFilter value={dept} onChange={setDept} options={deptList(sims)} />
         <select className={filterCls} value={status} onChange={(e) => setStatus(e.target.value as any)}>
           <option value="active">Active</option>
-          <option value="unassigned">Not given to anyone</option>
+          <option value="unassigned">Not given to anyone (stock)</option>
           <option value="inactive">Turned off</option>
           <option value="">All</option>
         </select>
@@ -823,6 +861,52 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                 </tr>
               ))}
             </tbody>
+            {/* The rows shown (after search / filters), summed — stays at the bottom while scrolling. */}
+            {shown.length > 0 &&
+              (() => {
+                const given = shown.filter((x) => x.employee_id);
+                const people = new Set(given.map((x) => x.employee_id)).size;
+                const billed = shown.filter((x) => x.last_bill);
+                const over = billed.filter((x) => x.last_bill!.amount > x.last_bill!.limit_amount);
+                return (
+                  <tfoot className="sticky bottom-0 bg-slate-50 border-t-2 border-slate-200 text-slate-700 shadow-[0_-1px_0_rgba(15,23,42,0.08)]">
+                    <tr>
+                      <td className="px-3 py-2.5 font-bold whitespace-nowrap">
+                        {shown.length} SIM{shown.length === 1 ? '' : 's'}
+                        {shown.length !== (sims || []).length && <span className="font-normal text-slate-500"> of {(sims || []).length}</span>}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <b>{people}</b> {people === 1 ? 'person' : 'people'} · <span className="text-amber-700 font-semibold">{shown.length - given.length} not given</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
+                        {(() => {
+                          const ops = new Map<string, number>();
+                          for (const x of shown) ops.set(x.operator, (ops.get(x.operator) || 0) + 1);
+                          return [...ops.entries()].map(([o, n]) => `${o} ${n}`).join(' · ');
+                        })()}
+                      </td>
+                      <td />
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <div className="font-bold">{tk(shown.reduce((a, x) => a + Number(x.limit_amount || 0), 0))}</div>
+                        <div className="text-[10px] text-slate-400">total limit</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        {billed.length ? (
+                          <>
+                            <div className="font-bold">{tk(billed.reduce((a, x) => a + Number(x.last_bill!.amount || 0), 0))}</div>
+                            <div className={`text-[10px] ${over.length ? 'text-rose-600 font-semibold' : 'text-slate-400'}`}>
+                              last bills{over.length ? ` · ${over.length} over limit` : ''}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
           </table>
         </div>
       )}
