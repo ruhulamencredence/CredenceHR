@@ -290,6 +290,20 @@ with slate text, a grey group line, a light hover and the accent tint on the pic
   rgb(51,65,85) on white, contrast 10.4:1; Light 10.5:1 and Dark Glass 6.0:1 as before. (The minimized column's
   popup gets the same CSS; not opened in this test.)
 
+## Employee Tracking: one person's path, laid out for a phone
+
+On a phone the path view's controls wrapped into a jumble: a second "Employee Tracking" title under the page
+header, unlabelled blank date/time boxes split across lines, Apply / points / rough / View Report / Stay Report
+scattered. Now (EmployeeTrackingPanel.tsx): the person's name · movement path; Live Follow and Back to Live side by
+side, same size; From/To date and From/To time as a labelled 2 x 2 grid (4 in a row on a computer) with a line
+saying blank = every day / the whole day; full-width Apply; the points / rough / fake-GPS line; View Report and
+Stay Report side by side. Same actions, same permissions (Live Follow / Stay Report layers as before).
+
+- `scripts/tracking-path-phone.cjs` (a few location pings seeded for the Superadmin; Pixel 7 + 1440 wide):
+  **16/16** — path view opens; fields labelled; no sideways overflow; Apply spans the card; the two report buttons
+  and the Live Follow / Back to Live pair sit side by side; no duplicate title on the phone; Apply loads the points;
+  View Report opens; no page errors.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

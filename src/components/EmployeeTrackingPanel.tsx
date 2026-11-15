@@ -770,26 +770,38 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
   return (
     <div className="space-y-4">
+      {/* One person's path: who, Live Follow / Back to Live, then the date and
+          time range and the reports. Laid out for a phone first (the page
+          header already says "Employee Tracking"): labelled 2 x 2 fields,
+          full-width Apply, the two reports side by side. */}
       {selectedUser && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="hidden sm:flex text-lg font-semibold text-slate-900 items-center gap-2">
               <Navigation className="w-5 h-5 text-emerald-600" /> Employee Tracking
             </h3>
-            <p className="text-sm text-slate-500 mt-0.5">Showing {selectedUser.name}'s movement path</p>
+            <p className="text-[15px] sm:text-sm font-semibold sm:font-normal text-slate-900 sm:text-slate-500 sm:mt-0.5 flex items-center gap-2 min-w-0">
+              <Navigation className="sm:hidden w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="truncate">
+                <span className="hidden sm:inline">Showing </span>
+                {selectedUser.name}
+                <span className="sm:hidden font-normal text-slate-500"> · movement path</span>
+                <span className="hidden sm:inline">'s movement path</span>
+              </span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className={`grid ${canLive ? 'grid-cols-2' : 'grid-cols-1'} sm:flex items-center gap-2`}>
             {canLive && (
               <button
                 onClick={() => setFollowing(selectedUser)}
-                className="liquid-glass-button rounded-full flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold"
+                className="liquid-glass-button rounded-full flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 text-sm font-semibold"
               >
                 <Radio className="w-3.5 h-3.5" /> Live Follow
               </button>
             )}
             <button
               onClick={() => { setSelectedUser(null); setHistory([]); }}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-2 text-sm font-medium rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:bg-slate-50"
             >
               <X className="w-3.5 h-3.5" /> Back to Live
             </button>
@@ -798,58 +810,80 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       )}
 
       {selectedUser && (
-        <div className="flex flex-wrap items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-          <span className="text-xs font-medium text-violet-700">Date range:</span>
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs text-slate-400">to</span>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs font-medium text-violet-700 ml-2">Time range:</span>
-          <input type="time" value={fromTime} onChange={e => setFromTime(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs text-slate-400">to</span>
-          <input type="time" value={toTime} onChange={e => setToTime(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <button
-            onClick={() => fetchHistory(selectedUser.id)}
-            className="text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
-          >
-            Apply
-          </button>
-          {historyLoading && <span className="text-xs text-slate-400">Loading…</span>}
-          {!historyLoading && (
-            <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 flex-wrap">
-              {cleaned.route.length} point{cleaned.route.length === 1 ? '' : 's'}
-              {cleaned.rough.length - mockCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowRough((v) => !v)}
-                  className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${showRough ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                  title={`Rough fixes (worse than ± ${MAX_ACCURACY_M} m — Wi-Fi / mobile-tower guesses, not GPS) and jumps out of line are left out of the route. Tap to show them in grey.`}
-                >
-                  {showRough ? 'Hide' : 'Show'} {cleaned.rough.length - mockCount} rough
-                </button>
-              )}
-              {mockCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold" title="The phone said these locations came from a mock-location (fake GPS) app.">
-                  {mockCount} fake GPS
-                </span>
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-3 sm:p-4 space-y-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5">
+            {(
+              [
+                ['From date', 'date', fromDate, setFromDate],
+                ['To date', 'date', toDate, setToDate],
+                ['From time', 'time', fromTime, setFromTime],
+                ['To time', 'time', toTime, setToTime]
+              ] as const
+            ).map(([label, type, value, set]) => (
+              <label key={label} className="block min-w-0">
+                <span className="block text-[11px] font-semibold text-violet-700 mb-1">{label}</span>
+                <input
+                  type={type}
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                  className="w-full min-w-0 h-10 text-sm bg-white border border-slate-200 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.10),0_1px_2px_rgba(15,23,42,0.06)] rounded-xl px-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 -mt-1">Leave a date blank for every day, a time blank for the whole day.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <button
+              onClick={() => fetchHistory(selectedUser.id)}
+              className="w-full sm:w-auto h-10 px-5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700"
+            >
+              Apply
+            </button>
+            <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 flex-wrap justify-center sm:justify-start">
+              {historyLoading ? (
+                'Loading…'
+              ) : (
+                <>
+                  <span className="font-semibold text-slate-700">
+                    {cleaned.route.length} point{cleaned.route.length === 1 ? '' : 's'}
+                  </span>
+                  {cleaned.rough.length - mockCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRough((v) => !v)}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${showRough ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      title={`Rough fixes (worse than ± ${MAX_ACCURACY_M} m — Wi-Fi / mobile-tower guesses, not GPS) and jumps out of line are left out of the route. Tap to show them in grey.`}
+                    >
+                      {showRough ? 'Hide' : 'Show'} {cleaned.rough.length - mockCount} rough
+                    </button>
+                  )}
+                  {mockCount > 0 && (
+                    <span className="px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold" title="The phone said these locations came from a mock-location (fake GPS) app.">
+                      {mockCount} fake GPS
+                    </span>
+                  )}
+                </>
               )}
             </span>
-          )}
-          <button
-            onClick={() => setShowReport(true)}
-            disabled={history.length === 0}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed ml-auto"
-          >
-            <FileText className="w-3.5 h-3.5" /> View Report
-          </button>
-          {canStayReport && (
-            <button
-              onClick={() => setShowStay(true)}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
-              title="How long at each place, day by day, inside the time range"
-            >
-              <Timer className="w-3.5 h-3.5" /> Stay Report
-            </button>
-          )}
+            <div className={`grid ${canStayReport ? 'grid-cols-2' : 'grid-cols-1'} gap-2 sm:flex sm:ml-auto`}>
+              <button
+                onClick={() => setShowReport(true)}
+                disabled={history.length === 0}
+                className="flex items-center justify-center gap-1.5 h-10 text-sm font-semibold px-3.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <FileText className="w-4 h-4" /> View Report
+              </button>
+              {canStayReport && (
+                <button
+                  onClick={() => setShowStay(true)}
+                  className="flex items-center justify-center gap-1.5 h-10 text-sm font-semibold px-3.5 rounded-xl bg-white border border-violet-300 text-violet-700 hover:bg-violet-50"
+                  title="How long at each place, day by day, inside the time range"
+                >
+                  <Timer className="w-4 h-4" /> Stay Report
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {showSchedule && canSchedule && <TrackingScheduleSheet token={token} onClose={() => setShowSchedule(false)} />}
