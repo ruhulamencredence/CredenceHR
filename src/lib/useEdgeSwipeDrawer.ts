@@ -3,15 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Phone: drag from the left edge of the screen to the right and the side
-// menu (GlobalSidebar's overlay drawer) follows the finger out; drag it back
+// Phone: drag from the left edge of the screen to the right — on the home
+// screen (Dashboard) from anywhere on it — and the side menu
+// (GlobalSidebar's overlay drawer) follows the finger out; drag it back
 // to the left (on the menu or the dim area beside it) and it goes away.
 // Let go past a third of the way (or with a quick flick) and it finishes
 // opening / closing, otherwise it springs back.
 //
 // Only below the md breakpoint (the computer has the menu as a column). Not
 // started when a popup is open, or on a map / anything marked
-// data-no-edge-swipe, so it doesn't fight their own dragging. A mostly
+// data-no-edge-swipe, so it doesn't fight their own dragging; away from the
+// edge also not in a text field or a sideways-scrolling strip. A mostly
 // up-and-down move is left to scrolling.
 
 import { useEffect, useRef, useState } from 'react';
@@ -30,6 +32,20 @@ const blocked = (target: EventTarget | null) => {
   return !!document.querySelector('.liquid-glass-backdrop, [role="dialog"][aria-modal="true"]');
 };
 
+// Away from the edge: a field (selecting text) or a strip that scrolls
+// sideways keeps the finger.
+const ownsSideways = (target: EventTarget | null) => {
+  let el = target as HTMLElement | null;
+  if (el?.closest?.('input, textarea, select, [contenteditable="true"]')) return true;
+  for (; el && el !== document.body; el = el.parentElement) {
+    if (el.scrollWidth > el.clientWidth + 1) {
+      const ox = getComputedStyle(el).overflowX;
+      if (ox === 'auto' || ox === 'scroll') return true;
+    }
+  }
+  return false;
+};
+
 /**
  * Returns how far the drawer is dragged out right now, in px (0 = shut,
  * width = fully out), or null while no drag is going on. `drawerRef` is
@@ -37,16 +53,18 @@ const blocked = (target: EventTarget | null) => {
  */
 export function useEdgeSwipeDrawer(opts: {
   enabled: boolean;
+  // The home screen: a drag may start anywhere, not only at the edge.
+  anywhere?: boolean;
   open: boolean;
   onOpen?: () => void;
   onClose: () => void;
   drawerRef: React.RefObject<HTMLElement | null>;
 }): number | null {
-  const { enabled, open, onOpen, onClose, drawerRef } = opts;
+  const { enabled, anywhere = false, open, onOpen, onClose, drawerRef } = opts;
   const [dragX, setDragX] = useState<number | null>(null);
   // Kept in a ref so the listeners (added once) see the latest values.
-  const live = useRef({ open, onOpen, onClose });
-  live.current = { open, onOpen, onClose };
+  const live = useRef({ open, onOpen, onClose, anywhere });
+  live.current = { open, onOpen, onClose, anywhere };
 
   useEffect(() => {
     if (!enabled || !onOpen) return;
@@ -71,7 +89,8 @@ export function useEdgeSwipeDrawer(opts: {
       const t = e.touches[0];
       const isOpen = live.current.open;
       if (!isOpen) {
-        if (t.clientX > EDGE || blocked(e.target)) return;
+        if (blocked(e.target)) return;
+        if (t.clientX > EDGE && !(live.current.anywhere && !ownsSideways(e.target))) return;
       } else {
         // Open: a drag on the drawer or the dim area beside it may close it.
         const el = e.target as Element | null;

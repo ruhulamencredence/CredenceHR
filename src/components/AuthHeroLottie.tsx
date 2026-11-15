@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Lottie, useLottieJson } from './LazyLottie';
 // Fetched by itself when the login screen shows (not with the app's code),
 // and kept on the device after the first time (lib/authHeroAsset.ts).
@@ -10,8 +10,15 @@ import { loadAuthHero } from '../lib/authHeroAsset';
 // instead of blocking the very first paint the boot spinner is covering for.
 // Purely decorative, so a brief blank box while this chunk loads (see the
 // Suspense fallback in AuthScreen.tsx) is not a problem.
-const AuthHeroLottie: React.FC<{ className?: string }> = ({ className }) => {
+// onReady: the animation is drawn — AuthScreen then hides its still picture.
+const AuthHeroLottie: React.FC<{ className?: string; onReady?: () => void }> = ({ className, onReady }) => {
   const authHeroAnimation = useLottieJson(loadAuthHero);
+  // Two frames after the data arrives the player has drawn its first frame.
+  useEffect(() => {
+    if (!authHeroAnimation || !onReady) return;
+    let id = requestAnimationFrame(() => (id = requestAnimationFrame(() => onReady())));
+    return () => cancelAnimationFrame(id);
+  }, [authHeroAnimation, onReady]);
   return authHeroAnimation ? <Lottie src={authHeroAnimation} autoplay loop className={className} /> : <span className={className} />;
 };
 

@@ -134,7 +134,7 @@ export const DashboardListSheet: React.FC<{
           {selectable.length > 0 && (
             <label className="mx-4 sm:mx-6 mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700 select-none cursor-pointer">
               <input type="checkbox" checked={allPicked} onChange={() => onToggleAll?.()} className="w-4 h-4 accent-[var(--g-accent)]" />
-              Select all you can approve ({selectable.length})
+              Select all you can approve or reject ({selectable.length})
             </label>
           )}
 

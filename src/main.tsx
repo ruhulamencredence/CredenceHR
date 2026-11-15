@@ -1,10 +1,8 @@
 import './lib/polyfills.ts';
 import {StrictMode, Suspense, lazy, useCallback, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import App, { dashboardCodeReady } from './App.tsx';
-import ChatStandalone from './ChatStandalone.tsx';
-import PrivacyPolicy from './components/PrivacyPolicy.tsx';
-import VerifyPage from './components/VerifyPage.tsx';
+import { AuthScreen } from './components/AuthScreen.tsx';
+import { clearScreenCache } from './lib/screenCache.ts';
 import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
 import type { User } from './types.ts';
 import { applyBackgroundTheme, applyHeaderGlow, getSavedBackgroundTheme, getSavedHeaderGlow } from './lib/backgroundTheme.ts';
@@ -12,9 +10,64 @@ import { Capacitor } from '@capacitor/core';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
 import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
-import { installChunkReload } from './lib/chunkReload.ts';
+import { installChunkReload, retryImport } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
 import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
+
+// The whole app (App.tsx: sidebar, chat, calls…) is its own download. A
+// visitor who isn't signed in on the website gets only the sign-in screen
+// first (WebSignIn below) — the app's code follows once they start typing
+// or sign in — so the sign-in page opens fast (PageSpeed). Signed in, or in
+// the Android / iOS app, it starts downloading at once, as before.
+const loadApp = (() => {
+  let p: Promise<typeof import('./App.tsx')> | null = null;
+  return () => (p ||= retryImport(() => import('./App.tsx'))().catch((err) => {
+    p = null;
+    throw err;
+  }));
+})();
+const App = lazy(loadApp);
+const ChatStandalone = lazy(retryImport(() => import('./ChatStandalone.tsx')));
+const PrivacyPolicy = lazy(retryImport(() => import('./components/PrivacyPolicy.tsx')));
+const VerifyPage = lazy(retryImport(() => import('./components/VerifyPage.tsx')));
+const hasSession = () => {
+  try {
+    return !!localStorage.getItem('mpr_token');
+  } catch {
+    return false;
+  }
+};
+
+// Website, not signed in: only the sign-in screen. On success it does what
+// App.tsx's own sign-in does (save the session, nothing from an earlier
+// sign-in shown), waits for the app's code, then hands over to <App freshLogin>.
+function WebSignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  useEffect(() => {
+    // Typing / tapping on the page: fetch the app meanwhile.
+    const warm = () => void loadApp().catch(() => undefined);
+    const evs = ['pointerdown', 'keydown', 'focusin'] as const;
+    evs.forEach((e) => window.addEventListener(e, warm, { once: true, passive: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, warm));
+  }, []);
+  return (
+    <AuthScreen
+      onLoginSuccess={(newToken: string, newUser: User) => {
+        clearScreenCache();
+        localStorage.setItem('mpr_token', newToken);
+        localStorage.setItem('mpr_user', JSON.stringify(newUser));
+        // A new joiner's temporary login opens only My Onboarding.
+        if (newUser?.is_onboarding) {
+          window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+          return;
+        }
+        void loadApp()
+          .then((m) => m.dashboardCodeReady(1500))
+          .catch(() => undefined)
+          .then(onSignedIn);
+      }}
+    />
+  );
+}
 
 // Multi-company: every /api call carries the picked company (src/lib/company.ts).
 installCompanyHeader();
@@ -113,6 +166,9 @@ function Root() {
   const [intro, setIntro] = useState(bootIntroDue);
   const endIntro = useCallback(() => setIntro(false), []);
   const [onb, setOnb] = useState(onboardingSession);
+  // Website without a session: the light sign-in screen until signed in.
+  const [signedIn, setSignedIn] = useState(() => Capacitor.isNativePlatform() || hasSession());
+  const [freshLogin, setFreshLogin] = useState(false);
   useEffect(() => {
     const check = () => setOnb(onboardingSession());
     window.addEventListener(SESSION_CHANGED_EVENT, check);
@@ -124,7 +180,20 @@ function Root() {
   }, []);
   return (
     <>
-      {onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />}
+      {onb ? (
+        <OnboardingShell token={onb.token} user={onb.user} />
+      ) : signedIn ? (
+        <Suspense fallback={null}>
+          <App freshLogin={freshLogin} />
+        </Suspense>
+      ) : (
+        <WebSignIn
+          onSignedIn={() => {
+            setFreshLogin(true);
+            setSignedIn(true);
+          }}
+        />
+      )}
       {intro && <BootIntroAnimation onDone={endIntro} />}
     </>
   );
@@ -148,12 +217,20 @@ const render = () =>
           <Suspense fallback={null}>
             <SsoConsume token={ssoToken} />
           </Suspense>
-        ) : isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
+        ) : isPrivacyPolicy || isVerify || isStandaloneChat ? (
+          <Suspense fallback={null}>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : <ChatStandalone />}</Suspense>
+        ) : (
+          <Root />
+        )}
       </AppErrorBoundary>
     </StrictMode>,
   );
 // Signed in: keep index.html's "Loading…" screen up until the Dashboard's
 // code is ready (from the phone's cache that is a fraction of a second; never
 // more than 1.5 s), then draw — no skeleton flash on every open.
-if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession()) void dashboardCodeReady(1500).then(render);
+if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession() && (Capacitor.isNativePlatform() || hasSession()))
+  void loadApp()
+    .then((m) => m.dashboardCodeReady(1500))
+    .catch(() => undefined)
+    .then(render);
 else render();

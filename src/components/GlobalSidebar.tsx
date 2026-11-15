@@ -62,6 +62,8 @@ interface GlobalSidebarProps {
   // Overlay only: lets a drag from the screen's left edge open the drawer
   // (useEdgeSwipeDrawer.ts). Left out, only the hamburger opens it.
   onOpen?: () => void;
+  // The home screen is showing: the drag may start anywhere on it.
+  swipeAnywhere?: boolean;
   // 'overlay' (default) — the original mobile drawer: fixed, slides in over
   // a backdrop, closable via the X button / backdrop tap / selecting an item.
   // 'persistent' — desktop web: a permanent left column sitting beside the
@@ -131,13 +133,13 @@ interface GlobalSidebarProps {
 // granted, side by side. Visual language (profile header, violet glass
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
-  open, onClose, onOpen, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
+  open, onClose, onOpen, swipeAnywhere = false, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
   // Phone: the drawer follows a finger dragged from the left edge (or back).
   const drawerRef = useRef<HTMLElement>(null);
-  const dragX = useEdgeSwipeDrawer({ enabled: !isPersistent, open, onOpen, onClose, drawerRef });
+  const dragX = useEdgeSwipeDrawer({ enabled: !isPersistent, anywhere: swipeAnywhere, open, onOpen, onClose, drawerRef });
   const dragging = !isPersistent && dragX != null;
   // One group open at a time (tap another and the first closes); the group
   // holding the page on screen opens by itself (see the effect further down).
