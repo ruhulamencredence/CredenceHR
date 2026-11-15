@@ -190,6 +190,8 @@
   "branches",
   "companies",
   "company_groups",
+  "department_team_auto",
+  "department_team_auto_done",
   "department_team_members",
   "department_teams",
   "departments",

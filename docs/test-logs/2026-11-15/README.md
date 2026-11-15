@@ -23,3 +23,23 @@ employees), a stranger with no match.
   claim 1) + access rows apart; picking MRG-904 by hand ticks it; "Keep the employee login's" access and password;
   red confirm; "3 merged."; access stays "tasks", role "user", import password works; records still moved;
   Sumon merged into MRG-904 with the email; History lists the merges; no page errors.
+
+## Departments → team: add people by project, from any department, new joiners by themselves
+
+One Supervisor can lead people from several projects (work stations) and departments. Edit Department → a team →
+**Add people by project**: pick a Department (this one, all, or another), one or more Work stations, tick or Select all,
+"Add N to team". Members are grouped by work station; "Remove all" per work station. A rule adds new joiners at those
+work stations (in that Department, or any) to the team by themselves.
+
+Test data: `scripts/teams-seed.cjs` — Inventory QA (3 at Gulshan Tower, 2 at Banani Site, 1 at Uttara Project),
+Accounts QA (Faruk at Gulshan Tower, in an Accounts team).
+
+- `scripts/teams-by-project-api.sh`: **19/19** — the pool has every department's people with work station, department
+  and current team; a team saved with Faruk (Accounts) + two rules; Faruk left the Accounts team; his Supervisor resolves
+  to this team's; new joiners: Gulshan + Inventory added, Gulshan + Accounts not (rule is Inventory only), Uttara + any
+  department added, Banani not (no rule), an older Uttara employee not; one taken out by hand is not re-added; an unchanged
+  rule keeps its date; a removed rule is gone; an unknown employee id → 400.
+- `scripts/teams-by-project-ui.cjs`: **11/11** — work stations with counts; Gulshan + Banani → 5; Select all → added,
+  grouped 3 + 2; rule chips; "All departments" shows Faruk "now in Accounts QA team"; warnings (another department,
+  moves from another team); his chip names his department; one taken out; Save → members and both rules stored, Faruk
+  out of the Accounts team; no page errors.

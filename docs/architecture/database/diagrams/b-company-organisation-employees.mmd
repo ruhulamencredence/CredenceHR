@@ -35,6 +35,16 @@ erDiagram
     varchar workspace_code
     varchar tagline
   }
+  department_team_auto {
+    int id PK
+    int team_id FK
+    int department_id FK
+    varchar branch
+  }
+  department_team_auto_done {
+    int rule_id PK
+    int employee_id PK,FK
+  }
   department_team_members {
     int id PK
     int team_id FK
@@ -211,6 +221,9 @@ erDiagram
   users ||--o{ all_employees : "user_id"
   projects ||--o{ branches : "project_id"
   company_groups ||--o{ companies : "group_id"
+  department_teams ||--o{ department_team_auto : "team_id"
+  departments ||..o{ department_team_auto : "department_id"
+  all_employees ||..o{ department_team_auto_done : "employee_id"
   department_teams ||--o{ department_team_members : "team_id"
   all_employees ||..o{ department_team_members : "employee_id"
   departments ||--o{ department_teams : "department_id"
