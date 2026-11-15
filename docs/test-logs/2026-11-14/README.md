@@ -410,6 +410,15 @@ No teams / A team without Supervisor), "N of M" count and Clear.
   Dark Glass the box scrolls (710 px of 1720 px), the header stays at its top drawn over the rows, the page doesn't
   move; search, Inactive, No Head, "N of M" and Clear work; no page errors.
 
+## SIM Import list: a spare SIM without a limit is accepted
+
+Same rule as the SIM form (above): a row with no Emp. ID and no Official Ceiling used to fail with "No limit given and
+no type/default limit set" when no default limit is set; now it goes in as a spare SIM with limit 0 (MobileBillRoutes
+`/api/mobile-bill/sims/import`). Found while preparing HR's official SIM list (569 SIMs) for import: the prepared
+file's dry run through the app's own Import list read all 569 rows (number / Emp. ID / limit / duty location /
+operator columns found; 233 Grameenphone, 336 Robi); the 102 spare / department SIMs pass, the rest only lack their
+employees in the test database (they exist on the live site).
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

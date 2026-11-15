@@ -737,6 +737,8 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         if (lim != null && (!Number.isFinite(lim) || lim < 0)) out.errors.push("Limit is not a number");
         out.limit_source = lim != null ? "custom" : "type";
         out.limit_amount = lim != null ? money(lim) : typeLimit(pols, emp?.employee_type || null);
+        // A spare SIM (no Emp. ID): no limit needed yet — 0 until it is given (like the SIM form).
+        if (out.limit_amount == null && !emp && !code) out.limit_amount = 0;
         if (out.limit_amount == null) out.errors.push("No limit given and no type/default limit set");
         out.duty_location = str(row.duty_location, 150) || null;
         out.employee_id = emp?.id || null;
