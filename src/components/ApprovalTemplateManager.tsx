@@ -1,5 +1,6 @@
 import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
 } from 'lucide-react';
@@ -744,8 +745,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
 
       {/* --- Template editor modal --- */}
       {showEditor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        createPortal(
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-bold text-slate-900">{editingId ? 'Edit Template' : 'New Template'}</h3>
@@ -1057,7 +1059,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )
       )}
     </div>
   );

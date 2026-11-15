@@ -390,6 +390,15 @@ muster for that Project lists the relief guard (tagged) and can mark them.
   usual map confirm; no page errors.
 - Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
 
+## Approval Chain: "New Template" popup clipped inside the card
+
+The template editor (and Manage Chain on the Queue tab) was a `fixed` popup inside the page card; with the glass
+appearances the card's backdrop-filter traps fixed children, so the popup was cut to the card's size. Both now
+render at page level (`createPortal` to `document.body`) in the house liquid-glass style.
+
+- `scripts/approval-template-popup.cjs` (Light, Light Glass, Dark Glass): **9/9** — the editor's backdrop is a child
+  of `<body>`, covers the whole window, and the editor is fully visible.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
