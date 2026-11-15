@@ -182,6 +182,20 @@ New Requisition popup moved to the liquid-glass house style. No new API or permi
 - 1280x720 and 820-wide windows: popup fits, no sideways scroll; narrow windows get the phone-style picker.
 - Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
 
+## Phone: drag from the left edge to open the side menu
+
+On a phone (APK or a narrow browser), a finger dragged right from the left edge (within 32 px) pulls the side
+menu out with it; past a third, or with a quick flick, it opens, otherwise it springs back. Dragging the open menu
+(or the dim area) to the left closes it. Up/down moves still scroll; nothing happens with a popup open, on a map,
+or on a computer. `src/lib/useEdgeSwipeDrawer.ts`, wired into `GlobalSidebar` (overlay drawer only).
+
+- `scripts/edge-swipe-menu.cjs` (Pixel 7 emulation, touch events): **11/11** — starts closed; follows the finger
+  mid-drag; opens on release; drag back closes; short slow drag springs back; a 50 px flick opens; tapping the dim
+  area closes; a drag from mid-screen does nothing; an up/down move from the edge doesn't open it and the page
+  scrolls; with a popup open nothing happens; no page errors.
+- Note: Android's own Back gesture also starts at the screen edge; a drag starting a little in from the very
+  edge is the one the app gets. On iPhone Safari the browser's own edge-swipe (Back) comes first.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

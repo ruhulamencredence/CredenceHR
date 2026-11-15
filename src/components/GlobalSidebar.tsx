@@ -1,4 +1,5 @@
 import { setNavEntries } from '../lib/navRegistry';
+import { useEdgeSwipeDrawer } from '../lib/useEdgeSwipeDrawer';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -58,6 +59,9 @@ interface NavItem {
 interface GlobalSidebarProps {
   open: boolean;
   onClose: () => void;
+  // Overlay only: lets a drag from the screen's left edge open the drawer
+  // (useEdgeSwipeDrawer.ts). Left out, only the hamburger opens it.
+  onOpen?: () => void;
   // 'overlay' (default) — the original mobile drawer: fixed, slides in over
   // a backdrop, closable via the X button / backdrop tap / selecting an item.
   // 'persistent' — desktop web: a permanent left column sitting beside the
@@ -127,10 +131,14 @@ interface GlobalSidebarProps {
 // granted, side by side. Visual language (profile header, violet glass
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
-  open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
+  open, onClose, onOpen, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
+  // Phone: the drawer follows a finger dragged from the left edge (or back).
+  const drawerRef = useRef<HTMLElement>(null);
+  const dragX = useEdgeSwipeDrawer({ enabled: !isPersistent, open, onOpen, onClose, drawerRef });
+  const dragging = !isPersistent && dragX != null;
   // One group open at a time (tap another and the first closes); the group
   // holding the page on screen opens by itself (see the effect further down).
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -1105,9 +1113,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       {!isPersistent && (
         <div
           onClick={onClose}
-          className={`fixed inset-0 z-[1100] bg-slate-900/40 transition-opacity duration-300 ${
+          data-gsidebar-backdrop
+          className={`fixed inset-0 z-[1100] bg-slate-900/40 ${dragging ? '' : 'transition-opacity duration-300'} ${
             open ? 'opacity-100 pointer-events-auto backdrop-blur-[2px]' : 'opacity-0 pointer-events-none'
           }`}
+          style={dragging ? { opacity: dragX! / (drawerRef.current?.offsetWidth || 264) } : undefined}
         />
       )}
 
@@ -1120,13 +1130,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           App.tsx — so it only needs a modest z-index, just enough to layer
           over page content it happens to sit beside.) */}
       <aside
+        ref={drawerRef}
         data-tour={isPersistent ? 'sidebar' : undefined}
         className={
           isPersistent
             ? `gsidebar hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] ${
                 collapsed ? 'w-[64px]' : 'w-[264px]'
               }`
-            : `gsidebar fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
+            : `gsidebar fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] ${dragging ? '' : 'transition-transform duration-300 ease-out'} ${
                 open ? 'translate-x-0' : '-translate-x-[110%]'
               }`
         }
@@ -1136,6 +1147,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           boxShadow: isPersistent ? 'none' : '12px 0 40px rgba(47,0,94,0.35)',
           borderRight: isPersistent ? '1px solid rgba(255,255,255,0.08)' : undefined,
           paddingTop: isPersistent ? undefined : 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
+          // While a finger drags it: exactly where the finger is.
+          // (`translate`, the same property Tailwind's translate-x classes set.)
+          ...(dragging ? { translate: `${dragX! - (drawerRef.current?.offsetWidth || 264)}px 0` } : {}),
         }}
       >
         {!isPersistent && (
