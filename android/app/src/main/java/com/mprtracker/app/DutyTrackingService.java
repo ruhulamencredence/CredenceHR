@@ -73,6 +73,14 @@ public class DutyTrackingService extends Service {
     // then stops (no notification) until that time, kept here.
     static final String KEY_PAUSED_UNTIL = "duty_paused_until";
     static final String ACTION_RESUME = "com.mprtracker.app.DUTY_RESUME";
+    // The end of the current tracking time (the server's schedule_until): at
+    // that moment tracking stops and the notification goes, even with the app
+    // closed — then the server is asked when it starts again.
+    static final String ACTION_WINDOW_END = "com.mprtracker.app.DUTY_WINDOW_END";
+    static final String KEY_WINDOW_END = "duty_window_end";
+    // Offline at the end: look again after this (the server's push at the
+    // next start brings tracking back too).
+    private static final long OFFLINE_RECHECK_MS = 60 * 60 * 1000L;
     // Next start unknown (no shift in the coming week): look again after this.
     private static final long RECHECK_MS = 6 * 60 * 60 * 1000L;
     // The alarm / a server wake-up push: report now (works in Doze).
@@ -128,6 +136,7 @@ public class DutyTrackingService extends Service {
     public static void stop(Context ctx) {
         cancelAlarm(ctx);
         cancelResume(ctx);
+        cancelWindowEnd(ctx);
         ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).remove(KEY_PAUSED_UNTIL).apply();
         ctx.stopService(new Intent(ctx, DutyTrackingService.class));
     }
@@ -190,6 +199,118 @@ public class DutyTrackingService extends Service {
             return d != null ? d.getTime() : 0;
         } catch (Exception e) {
             return 0;
+        }
+    }
+
+    // A ping / state answer inside the tracking time: remember when it ends.
+    private void noteWindowEnd(JSONObject res) {
+        if (res == null || res.optBoolean("off_schedule", false)) return;
+        final long end = parseIso(res.isNull("schedule_until") ? null : res.optString("schedule_until", null));
+        handler.post(() -> {
+            armWindowEnd(getApplicationContext(), end);
+            // Precise while this service runs (the alarm below is the backup
+            // when the phone sleeps; it fires at the latest when it wakes).
+            handler.removeCallbacks(windowEndRunnable);
+            long wait = end - System.currentTimeMillis();
+            if (end > 0 && wait > 0) handler.postDelayed(windowEndRunnable, wait + 1000);
+        });
+    }
+
+    private final Runnable windowEndRunnable = () -> windowEnded(getApplicationContext(), null);
+
+    static void armWindowEnd(Context ctx, long atWallMs) {
+        SharedPreferences p = ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
+        if (atWallMs > 0 && atWallMs == p.getLong(KEY_WINDOW_END, 0)) return;
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(windowEndIntent(ctx));
+        if (atWallMs <= System.currentTimeMillis()) {
+            p.edit().remove(KEY_WINDOW_END).apply();
+            return;
+        }
+        p.edit().putLong(KEY_WINDOW_END, atWallMs).apply();
+        if (am == null) return;
+        try {
+            boolean exact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms();
+            if (exact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atWallMs, windowEndIntent(ctx));
+            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atWallMs, windowEndIntent(ctx));
+            else am.setExact(AlarmManager.RTC_WAKEUP, atWallMs, windowEndIntent(ctx));
+        } catch (Exception e) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atWallMs, windowEndIntent(ctx));
+            } catch (Exception ignore) {
+                // best effort — the next ping's "off schedule" stops it then
+            }
+        }
+    }
+
+    static void cancelWindowEnd(Context ctx) {
+        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().remove(KEY_WINDOW_END).apply();
+        AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(windowEndIntent(ctx));
+    }
+
+    private static PendingIntent windowEndIntent(Context ctx) {
+        Intent i = new Intent(ctx, DutyAlarmReceiver.class).setAction(ACTION_WINDOW_END);
+        return PendingIntent.getBroadcast(ctx, 7346, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /**
+     * The tracking time is over: stop at once (the notification goes; no
+     * network needed), then ask the server when it starts again. If the
+     * schedule was changed meanwhile and it is still on, tracking comes back.
+     */
+    static void windowEnded(Context ctx, android.content.BroadcastReceiver.PendingResult done) {
+        final Context app = ctx.getApplicationContext();
+        SharedPreferences p = app.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
+        long end = p.getLong(KEY_WINDOW_END, 0);
+        // An old alarm / timer for a window that has since moved later.
+        if (end > System.currentTimeMillis() + 5000) {
+            if (done != null) done.finish();
+            return;
+        }
+        p.edit().remove(KEY_WINDOW_END).apply();
+        if (!wanted(app) || paused(app)) {
+            if (done != null) done.finish();
+            return;
+        }
+        pause(app, System.currentTimeMillis() + OFFLINE_RECHECK_MS);
+        new Thread(() -> {
+            try {
+                JSONObject w = getJson(app, "/api/tracking/schedule/me");
+                if (w != null) {
+                    if (w.optBoolean("on", false)) resume(app);
+                    else {
+                        long at = parseIso(w.isNull("next_start") ? null : w.optString("next_start", null));
+                        pause(app, at);
+                    }
+                }
+            } catch (Exception ignore) {
+                // offline: the hour's recheck / the server's push brings it back
+            } finally {
+                if (done != null) done.finish();
+            }
+        }).start();
+    }
+
+    private static JSONObject getJson(Context ctx, String path) {
+        SharedPreferences p = ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
+        String token = p.getString(LiveTrackingService.KEY_TOKEN, null);
+        String base = p.getString(LiveTrackingService.KEY_BASE, null);
+        if (token == null || base == null) return null;
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(base + path).openConnection();
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("Authorization", "Bearer " + token);
+            if (c.getResponseCode() < 200 || c.getResponseCode() >= 300) return null;
+            try (InputStream is = c.getInputStream(); Scanner s = new Scanner(is, "UTF-8").useDelimiter("\\A")) {
+                return new JSONObject(s.hasNext() ? s.next() : "{}");
+            }
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (c != null) c.disconnect();
         }
     }
 
@@ -436,6 +557,7 @@ public class DutyTrackingService extends Service {
                 offSchedule(res);
                 return;
             }
+            noteWindowEnd(res);
             if (!repeat) {
                 final long sentUpTo = batch.isEmpty() ? fix.getTime() : batch.get(batch.size() - 1).getTime();
                 handler.post(() -> {
@@ -465,7 +587,9 @@ public class DutyTrackingService extends Service {
             body.put("mode", idle ? "idle" : "active");
             int battery = batteryPct();
             if (battery >= 0) body.put("battery_pct", battery);
-            offSchedule(post("/api/tracking/state", body));
+            JSONObject stateRes = post("/api/tracking/state", body);
+            offSchedule(stateRes);
+            noteWindowEnd(stateRes);
         } catch (Exception ignore) {
             // next heartbeat tries again
         }

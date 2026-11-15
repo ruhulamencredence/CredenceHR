@@ -1,6 +1,7 @@
 import { activePeople } from '../lib/activePeople';
 import { RequestDetailsInline } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle
 } from 'lucide-react';
@@ -607,8 +608,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
       {/* Manage Chain modal — Superadmin only */}
       {showChainModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        createPortal(
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Manage Approval Chain</h3>
@@ -713,7 +715,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )
       )}
     </div>
   );

@@ -95,6 +95,7 @@ erDiagram
   }
   guard_posts {
     int id PK
+    int project_id FK
     int company_id
     varchar name
     varchar site
@@ -321,6 +322,7 @@ erDiagram
   users ||--o{ employee_breaks : "user_id"
   guard_posts ||--o{ guard_post_needs : "post_id"
   duty_shifts ||..o{ guard_post_needs : "shift_id"
+  projects ||..o{ guard_posts : "project_id"
   all_employees ||..o{ guard_relief : "employee_id"
   duty_shifts ||..o{ guard_relief : "shift_id"
   all_employees ||--o{ late_waivers : "employee_id"

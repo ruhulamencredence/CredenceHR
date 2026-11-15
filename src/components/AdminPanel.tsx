@@ -731,6 +731,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projects, setProjects] = useState<Project[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  // Departments list: search (name, Head, team, supervisor) and filters.
+  const [deptQ, setDeptQ] = useState('');
+  const [deptStatus, setDeptStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [deptSetup, setDeptSetup] = useState<'all' | 'no_head' | 'no_teams' | 'no_supervisor'>('all');
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   // Teams of the Department being edited (DepartmentTeamsEditor), saved with it.
   const deptTeamsRef = useRef<DepartmentTeamsEditorHandle | null>(null);
@@ -7160,16 +7164,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
           </PhoneSheet>
 
+          {(() => {
+            const q = deptQ.trim().toLowerCase();
+            const shownDepts = departments.filter((d) => {
+              if (deptStatus === 'active' && !d.is_active) return false;
+              if (deptStatus === 'inactive' && d.is_active) return false;
+              if (deptSetup === 'no_head' && d.head_user_id) return false;
+              if (deptSetup === 'no_teams' && d.teams && d.teams.length) return false;
+              if (deptSetup === 'no_supervisor' && !(d.teams || []).some((t) => !t.supervisor_name)) return false;
+              if (q) {
+                const hay = [d.name, d.head_name, ...(d.teams || []).flatMap((t) => [t.name, t.supervisor_name])].filter(Boolean).join(' ').toLowerCase();
+                if (!hay.includes(q)) return false;
+              }
+              return true;
+            });
+            const filtered = !!q || deptStatus !== 'all' || deptSetup !== 'all';
+            return (
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900">{departments.length} Department{departments.length === 1 ? '' : 's'}</h3>
+            <div className="p-4 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-bold text-slate-900 mr-auto">
+                {filtered ? `${shownDepts.length} of ${departments.length}` : departments.length} Department{departments.length === 1 ? '' : 's'}
+              </h3>
+              <span className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={deptQ}
+                  onChange={(e) => setDeptQ(e.target.value)}
+                  placeholder="Search department, Head, team…"
+                  aria-label="Search departments"
+                  className="w-full h-9 pl-8 pr-3 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </span>
+              <select value={deptStatus} onChange={(e) => setDeptStatus(e.target.value as any)} aria-label="Status" className="h-9 text-xs px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+                <option value="all">Active &amp; inactive</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <select value={deptSetup} onChange={(e) => setDeptSetup(e.target.value as any)} aria-label="Setup" className="h-9 text-xs px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+                <option value="all">Any setup</option>
+                <option value="no_head">No Head</option>
+                <option value="no_teams">No teams</option>
+                <option value="no_supervisor">A team without Supervisor</option>
+              </select>
+              {filtered && (
+                <button type="button" onClick={() => { setDeptQ(''); setDeptStatus('all'); setDeptSetup('all'); }} className="text-xs font-semibold text-blue-600 hover:underline">
+                  Clear
+                </button>
+              )}
             </div>
             {departments.length === 0 ? (
               <p className="p-4 text-xs text-slate-400 text-center">No Departments yet — add one above.</p>
+            ) : shownDepts.length === 0 ? (
+              <p className="p-6 text-xs text-slate-400 text-center">No department matches.</p>
             ) : (
-              <div className="overflow-x-auto">
+              // The table scrolls inside its own box (the page and the Add form
+              // stay put) and its header stays on top while scrolling.
+              <div className="overflow-auto md:max-h-[calc(100dvh-240px)]">
                 <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                  <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0 z-10 shadow-[0_1px_0_rgba(15,23,42,0.08)]">
                     <tr>
                       <th className="px-4 py-2.5 text-left">Department</th>
                       <th className="px-4 py-2.5 text-left">Head</th>
@@ -7180,7 +7233,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
-                    {departments.map((d) => (
+                    {shownDepts.map((d) => (
                       <tr key={d.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{d.name}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
@@ -7240,6 +7293,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             )}
           </div>
+            );
+          })()}
         </div>
       )}
 

@@ -11,6 +11,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { BillClaimStatusBadge } from './BillClaimStatusBadge';
 import { ClaimBillLines } from './ClaimBillLines';
+import { AttachmentViewer } from './AttachmentViewer';
 
 interface BillClaimDetailModalProps {
   claim: BillClaim;
@@ -60,6 +61,7 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
   }, [token, claim.id]);
   const isImage = (claim.file_mimetype || '').startsWith('image/');
   const fileUrl = apiUrl(`/api/bill-claims/${claim.id}/file`);
+  const [viewingFile, setViewingFile] = useState(false);
 
   // Rendered via a portal straight onto document.body instead of in place —
   // this row is opened from BillClaimCard, which sits inside
@@ -206,25 +208,28 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
           {claim.has_file && (
             <div>
               <div className="text-[11px] font-semibold text-slate-400 mb-1.5">Attachment</div>
+              {/* Opens in the app's own viewer (a new tab does nothing in the app). */}
               {isImage ? (
-                <a href={fileUrl} target="_blank" rel="noreferrer" className="block">
+                <button type="button" onClick={() => setViewingFile(true)} className="block w-full" aria-label={`View ${claim.file_name || 'attachment'}`}>
                   <img
                     src={fileUrl}
                     alt={claim.file_name || 'Attachment'}
                     className="w-full max-h-56 object-contain rounded-xl border border-slate-200 bg-slate-50"
                   />
-                </a>
+                </button>
               ) : (
-                <a
-                  href={fileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors"
+                <button
+                  type="button"
+                  onClick={() => setViewingFile(true)}
+                  className="w-full flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors text-left"
                 >
                   <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
                   <span className="truncate text-slate-700">{claim.file_name || 'View attachment'}</span>
                   <Download className="w-3.5 h-3.5 text-blue-600 ml-auto shrink-0" />
-                </a>
+                </button>
+              )}
+              {viewingFile && (
+                <AttachmentViewer token={token || localStorage.getItem('mpr_token') || ''} src={`/api/bill-claims/${claim.id}/file`} name={claim.file_name || 'Attachment'} onClose={() => setViewingFile(false)} />
               )}
             </div>
           )}

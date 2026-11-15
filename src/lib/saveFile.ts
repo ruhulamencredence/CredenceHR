@@ -100,3 +100,37 @@ export async function saveWorkbookCrossPlatform(wb: any, filename: string): Prom
   }
   XLSX.writeFile(wb, filename);
 }
+
+/**
+ * Saves any file the app fetched (an attachment). On the apps it goes to the
+ * cache directory and the Share sheet (an <a download> click does nothing in
+ * the Android WebView); in a browser it is the normal download.
+ */
+export async function saveBlobCrossPlatform(blob: Blob, filename: string): Promise<void> {
+  const name = (filename || "attachment").replace(/[\\/:*?"<>|]+/g, "_");
+  if (await isNativePlatform()) {
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const { Share } = await import("@capacitor/share");
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] || "");
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      });
+      const written = await Filesystem.writeFile({ path: name, data, directory: Directory.Cache });
+      await Share.share({ title: name, url: written.uri, dialogTitle: `Save or share ${name}` });
+      return;
+    } catch (err) {
+      console.error("Native file save failed, falling back to browser download:", err);
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

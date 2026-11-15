@@ -666,6 +666,119 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     }
   });
 
+  // Approve Application: for each request, what happened BEFORE it reached
+  // this account (the card's "Before it reached you" box) — every earlier
+  // Layer's approver (name, designation / department), what they did, when,
+  // their remarks, and what they changed (a bill claim's Approved Amount,
+  // an asset requisition's items). All from the request's own record
+  // (approval_requests.actions_json, asset_requisition_events), so it shows
+  // only what this approver may already see on the card. Also the
+  // requester's Employee ID / Designation / Department, for the page's search.
+  async function attachTrailAndRequester(combined: any[], mine: any[]) {
+    try {
+      const uids = new Set<number>();
+      for (const c of combined) if (c?.requested_by) uids.add(Number(c.requested_by));
+      const actsById = new Map<number, any[]>();
+      for (const r of mine) {
+        let a: any[] = [];
+        try {
+          a = JSON.parse(r.actions_json || "[]");
+        } catch {
+          a = [];
+        }
+        a = Array.isArray(a) ? a : [];
+        actsById.set(Number(r.id), a);
+        for (const x of a) if (x?.approver_id) uids.add(Number(x.approver_id));
+      }
+      const empOf = new Map<number, any>();
+      const ids = Array.from(uids).filter((n) => Number.isFinite(n) && n > 0);
+      for (let i = 0; i < ids.length; i += 500) {
+        const part = ids.slice(i, i + 500);
+        const rows: any[] =
+          (await queryDB(`SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${part.map(() => "?").join(",")})`, part).catch(() => [])) || [];
+        for (const e of rows) if (!empOf.has(Number(e.user_id))) empOf.set(Number(e.user_id), e);
+      }
+      // Asset requisitions: item edits, by who and when.
+      const assetIds = mine.filter((r: any) => r.source_type === "asset_requisition").map((r: any) => Number(r.source_id));
+      const editsByReq = new Map<number, any[]>();
+      if (assetIds.length) {
+        const rows: any[] =
+          (await queryDB(
+            `SELECT requisition_id, actor_user_id, details_json, created_at FROM asset_requisition_events WHERE action = 'items_edited' AND requisition_id IN (${assetIds.map(() => "?").join(",")}) ORDER BY created_at ASC, id ASC`,
+            assetIds
+          ).catch(() => [])) || [];
+        for (const e of rows) {
+          const k = Number(e.requisition_id);
+          if (!editsByReq.has(k)) editsByReq.set(k, []);
+          editsByReq.get(k)!.push(e);
+        }
+      }
+      const ms = (v: any) => {
+        const t = new Date(String(v || "").replace(" ", "T")).getTime();
+        return Number.isFinite(t) ? t : 0;
+      };
+      const tk = (n: number) => `৳${Number(n).toLocaleString("en-BD", { maximumFractionDigits: 2 })}`;
+      const describeEdit = (c: any) =>
+        c?.action === "added"
+          ? `Added ${c.item_name} × ${c.to?.quantity} ${c.to?.unit || ""}`.trim()
+          : c?.action === "removed"
+            ? `Removed ${c.item_name}`
+            : c?.from && c?.to && Number(c.from.quantity) !== Number(c.to.quantity)
+              ? `${c.item_name}: Qty ${c.from.quantity} → ${c.to.quantity}`
+              : c?.from && c?.to && c.from.item_name !== c.to.item_name
+                ? `Item ${c.from.item_name} → ${c.to.item_name}`
+                : `Edited ${c?.item_name || "an item"}`;
+      const mineIds = new Set<number>(mine.map((r: any) => Number(r.id)));
+      const ownRoutes = new Set(["leave_reliever", "leave_direct", "exit_clearance", "hr_action"]);
+      for (const c of combined) {
+        const req = c?.requested_by ? empOf.get(Number(c.requested_by)) : null;
+        c.requested_by_code = req?.employee_id || null;
+        c.requested_by_designation = req?.designation || null;
+        c.requested_by_department = req?.department || null;
+        if (ownRoutes.has(c?.source_type) || !mineIds.has(Number(c?.id))) continue;
+        const acts = (actsById.get(Number(c.id)) || []).filter((a: any) => a && ["approved", "rejected", "returned"].includes(a.action));
+        const edits = editsByReq.get(Number(c.source_id)) || [];
+        let prevAmount = c.source_type === "bill_claim" && c.source_amount != null ? Number(c.source_amount) : null;
+        let prevAt = 0;
+        c.trail = acts.map((a: any) => {
+          const who = a.approver_id ? empOf.get(Number(a.approver_id)) : null;
+          const changes: string[] = [];
+          if (c.source_type === "bill_claim" && a.approved_amount != null) {
+            if (a.amount_edited && prevAmount != null) changes.push(`Approved amount ${tk(prevAmount)} → ${tk(Number(a.approved_amount))}`);
+            prevAmount = Number(a.approved_amount);
+          }
+          const at = ms(a.acted_at);
+          if (c.source_type === "asset_requisition") {
+            for (const e of edits) {
+              const et = ms(e.created_at);
+              if (Number(e.actor_user_id) !== Number(a.approver_id) || et < prevAt || (at && et > at)) continue;
+              let d: any = null;
+              try {
+                d = JSON.parse(e.details_json || "null");
+              } catch {
+                d = null;
+              }
+              for (const ch of d?.changes || []) changes.push(describeEdit(ch));
+            }
+          }
+          prevAt = at || prevAt;
+          return {
+            step: Number(a.step_order) || null,
+            who: a.approver_name || null,
+            role: who?.designation || who?.department || null,
+            action: a.action,
+            remarks: a.remarks || null,
+            at: a.acted_at || null,
+            changes
+          };
+        });
+      }
+    } catch (err: any) {
+      // The page works without it — the box just doesn't show.
+      console.warn("my-approvals trail:", err?.message || err);
+    }
+  }
+
   app.get("/api/my-approvals", authenticateToken, async (req: any, res) => {
     try {
       const myId = Number(req.user.id);
@@ -1066,6 +1179,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         return Number.isFinite(v) ? v : 0;
       };
       combined.sort((a: any, b: any) => t(b) - t(a) || Number(b.id) - Number(a.id));
+      await attachTrailAndRequester(combined, mine);
       res.json(await attachClaimReview(await attachClaimRefsToMyApprovals(combined)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });

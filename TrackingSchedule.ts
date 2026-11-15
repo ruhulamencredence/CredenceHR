@@ -230,12 +230,15 @@ export function registerTrackingScheduleRoutes(app: Express, deps: Deps) {
       const scope = await getTrackingScope(queryDB, req.user);
       const emps: any[] =
         ((await queryDB(
-          `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.branch, e.user_id, u.can_use_tracking
+          `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.branch, e.user_id,
+                  CASE WHEN u.role = 'superadmin' THEN 1 ELSE u.can_use_tracking END AS can_use_tracking, u.role AS user_role
              FROM all_employees e JOIN users u ON u.id = e.user_id
-            WHERE e.is_active = 1 AND u.role <> 'superadmin'
+            WHERE e.is_active = 1
             ORDER BY e.name`
         )) as any[]) || [];
-      const list = scope ? emps.filter((e) => scope.employeePks.has(Number(e.id))) : emps;
+      // A Superadmin's own schedule: listed only to a Superadmin.
+      const mayList = emps.filter((e) => e.user_role !== "superadmin" || req.user.role === "superadmin");
+      const list = scope ? mayList.filter((e) => scope.employeePks.has(Number(e.id))) : mayList;
       const rows: any[] = ((await queryDB("SELECT * FROM tracking_schedules").catch(() => [])) as any[]) || [];
       const byUser = new Map<number, ScheduleRow>(rows.map((r) => [Number(r.user_id), toRow(r)]));
       const windows = await trackingWindowsFor(
@@ -298,7 +301,9 @@ export function registerTrackingScheduleRoutes(app: Express, deps: Deps) {
         const uid = Number(u.id);
         if (seen.has(uid)) continue;
         seen.add(uid);
-        if (u.role === "superadmin" || (scope && !scope.userIds.has(uid))) {
+        // A Superadmin's own tracking follows a schedule too, like anyone's —
+        // set by a Superadmin only.
+        if ((u.role === "superadmin" && req.user.role !== "superadmin") || (scope && !scope.userIds.has(uid))) {
           skipped.push(uid);
           continue;
         }

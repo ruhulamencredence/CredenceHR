@@ -15,6 +15,11 @@ public class DutyAlarmReceiver extends BroadcastReceiver {
             DutyTrackingService.resume(context);
             return;
         }
+        // The tracking time has ended: stop now (the notification goes).
+        if (intent != null && DutyTrackingService.ACTION_WINDOW_END.equals(intent.getAction())) {
+            DutyTrackingService.windowEnded(context, goAsync());
+            return;
+        }
         DutyTrackingService.wake(context);
         if (!DutyTrackingService.paused(context)) DutyTrackingService.scheduleAlarm(context);
     }
