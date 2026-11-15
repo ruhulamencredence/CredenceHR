@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom';
 import { Check, Clock, Eye, FileText, MapPin, Paperclip, User, X, XCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { AttachmentViewer } from './AttachmentViewer';
 
 interface Details {
   type: string;
@@ -88,13 +89,10 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
     };
   }, [token, type, id]);
 
-  const openFile = async () => {
-    const r = await fetch(apiUrl(`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${id}`), { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return setError('Could not open the attachment.');
-    const url = URL.createObjectURL(await r.blob());
-    window.open(url, '_blank', 'noopener');
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  };
+  // Opens in the app's own viewer (AttachmentViewer) — a new tab does
+  // nothing in the Android / iPhone app.
+  const [viewing, setViewing] = useState<string | null>(null);
+  const openFile = (label?: string) => setViewing(label || 'Attachment');
 
   const rq = data?.requester;
   return createPortal(
@@ -182,7 +180,7 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
                     <button
                       key={i}
                       type="button"
-                      onClick={() => void openFile()}
+                      onClick={() => openFile(a.label)}
                       disabled={!data.has_file}
                       className="liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 disabled:opacity-50"
                     >
@@ -239,6 +237,9 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
           )}
         </div>
       </div>
+      {viewing && (
+        <AttachmentViewer token={token} src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${id}`} name={viewing} onClose={() => setViewing(null)} />
+      )}
     </div>,
     document.body
   );
@@ -285,6 +286,8 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
   const n = Number(id);
   const [data, setData] = useState<Details | null>(null);
   const [failed, setFailed] = useState(false);
+  // The attachment open in the app's own viewer (its label), if any.
+  const [viewing, setViewing] = useState<string | null>(null);
   useEffect(() => {
     if (!type || !Number.isFinite(n) || n <= 0) return;
     let alive = true;
@@ -318,13 +321,9 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
 
   const skip = new Set(['Status', ...hide]);
   const fields = data.fields.filter((f) => !skip.has(f.label) && f.value !== '');
-  const openFile = async (e: React.MouseEvent) => {
+  const openFile = (e: React.MouseEvent, label?: string) => {
     e.stopPropagation();
-    const r = await fetch(apiUrl(`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${n}`), { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return;
-    const url = URL.createObjectURL(await r.blob());
-    window.open(url, '_blank', 'noopener');
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    setViewing(label || 'Attachment');
   };
   const table = !noTable && data.table && data.table.rows.length ? data.table : null;
   if (!fields.length && !table && !data.attachments.length && !data.locations.length) return null;
@@ -372,7 +371,7 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
             <button
               key={i}
               type="button"
-              onClick={(e) => void openFile(e)}
+              onClick={(e) => openFile(e, a.label)}
               disabled={!data.has_file}
               className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50"
             >
@@ -392,6 +391,14 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
             </a>
           ))}
         </div>
+      )}
+      {viewing && (
+        <AttachmentViewer
+          token={token}
+          src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${n}`}
+          name={viewing}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>
   );

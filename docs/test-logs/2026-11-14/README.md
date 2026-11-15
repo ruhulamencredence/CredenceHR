@@ -330,6 +330,20 @@ card's right-hand column on a computer, long histories folded), then built:
   the step with a change stays open, a long remark shows two lines, "show" reveals the hidden step.
 - Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
 
+## Attachments open in the app's own viewer (phone / APK)
+
+A bill claim's attachment opened with `window.open(blob:)` (approver side) or `<a target=_blank>` (claimant side):
+nothing happens in the Android WebView, and phone browsers often block a tab opened after a fetch. Now
+`AttachmentViewer.tsx` (liquid-glass popup): picture shown (tap / button to enlarge), PDF drawn page by page with
+pdf.js, other files "can't be shown here" + Download; Download = browser download, or Filesystem + Share sheet in
+the apps (`saveBlobCrossPlatform`). Used by RequestDetails (cards and Details popup) and BillClaimDetailModal.
+
+- `scripts/attachment-viewer.cjs` (a test employee login linked to the QA employee files a bill claim with a PNG;
+  window.open is stubbed and counted): **21/21** — on the Superadmin's Approve Application card (computer and
+  Pixel 7) the attachment chip opens the viewer, the picture loads, Download is there, Close and Esc shut it, no
+  window.open; on the claimant's own Bill Claim page the claim's details open the same viewer; no page errors.
+  The PDF path (pdf.js) is the same code as DocReader's; not exercised here (one claim a day per employee).
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
