@@ -1051,6 +1051,8 @@ Users → Features (Module Access) → Remote Attendance → "Allowed projects f
 
 Employee Tracking পাতার উপরে **Schedule** বোতাম (Employee Tracking module-এর নতুন layer "Tracking Schedule", `tracking_schedule` — explicit-only, Superadmin সবসময়) খোলে full screen পাতা (`src/components/TrackingScheduleSheet.tsx`): যাঁদের track করার অধিকার আছে (TrackingScope) তাঁদের তালিকা — নাম, ID, Department, Branch, নিয়ম, আর **এখন** track হচ্ছেন কিনা ("Tracked until today 06:30 PM" / "Off · starts tomorrow 08:30 AM")। খোঁজা, Department ও নিয়ম দিয়ে filter; টিক দিয়ে অনেকজনকে একসাথে একটা নিয়ম (confirmDialog):
 
+**Superadmin-ও Schedule-এর আওতায়:** আগে Schedule তালিকায় Superadmin আসতেন না, তাঁর নিয়মও বসত না। এখন Superadmin-এর employee রেকর্ড থাকলে তিনিও তালিকায় (tracking সবসময় চালু হিসেবে), নিয়ম বসানো যায়, আর সময়ের বাইরে তাঁর ফোনের location-ও জমা হয় না; schedule শুরু হলে ফোন জাগানোর push-ও তাঁর কাছে যায় (`TrackingWake.ts`)। Superadmin-এর নিয়ম শুধু একজন Superadmin দেখেন ও বদলান — Department-সীমার Tracking manager-এর তালিকায় তিনি আসেন না, বদলাতে চাইলে skip হয়।
+
 - **Always** — আগের মতো সারাক্ষণ (কোনো নিয়ম না দিলে এটাই)।
 - **Fixed hours** — কোন কোন দিন (শনি–শুক্র বাছাই) আর শুরু–শেষ সময়; শেষ সময় শুরুর আগে হলে পরের দিন পর্যন্ত (রাতের shift)।
 - **Duty Roster** — সেদিন Duty Roster-এ যে shift (`duty_roster` + `duty_shifts`) শুধু সেই সময়; off day বা shift না থাকলে সেদিন track হয় না। Roster বদলালে নিজে থেকেই মানে।

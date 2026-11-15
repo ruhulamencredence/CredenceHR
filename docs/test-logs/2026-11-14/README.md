@@ -344,6 +344,19 @@ the apps (`saveBlobCrossPlatform`). Used by RequestDetails (cards and Details po
   window.open; on the claimant's own Bill Claim page the claim's details open the same viewer; no page errors.
   The PDF path (pdf.js) is the same code as DocReader's; not exercised here (one claim a day per employee).
 
+## Tracking Schedule covers the Superadmin
+
+The Schedule list left Superadmins out (`u.role <> 'superadmin'`) and saving skipped them, so their own tracking
+never followed a schedule; the schedule-start wake push also only looked at `can_use_tracking = 1`, which a
+Superadmin may not have stored (they always have tracking). Now a Superadmin with an employee record is listed
+(tracking shown on), can be given a rule, and their pings outside it are not stored; the wake push includes them.
+A Superadmin's rule is seen and changed by a Superadmin only.
+
+- `scripts/superadmin-tracking-schedule.cjs` (the Superadmin linked to a test employee row): **8/8** — listed with
+  tracking on; a Fixed schedule on another weekday saves; a ping now returns `off_schedule` (nothing stored); back to
+  Always and the ping is stored. A test account given admin + Tracking module + the "Tracking Schedule" layer for the
+  check (then put back): the Superadmin is not in its list and its change is skipped.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
