@@ -304,6 +304,32 @@ Stay Report side by side. Same actions, same permissions (Live Follow / Stay Rep
   and the Live Follow / Back to Live pair sit side by side; no duplicate title on the phone; Apply loads the points;
   View Report opens; no page errors.
 
+## Approve Application: separate cards, filters, "Before it reached you"
+
+Shown as a mockup first (cards with a gap and the submitted date → filters → the earlier-Layer box, moved to the
+card's right-hand column on a computer, long histories folded), then built:
+- Cards: own white card per request; header strip with number, "Submitted <date, time>", waiting chip (green today /
+  amber 1–2 days / red 3+), Layer. Phone keeps its tinted cards with the same strip.
+- Filters: search (name, Employee ID, designation, department, label), kind chips with counts (Leave's three
+  sources share one), Waiting chips, Submitted (today / 7 / 30 days / pick dates), From (SearchSelect, Name · ID ·
+  Designation · Department), Sort (oldest first by default). Phone: search + "Filters" liquid-glass popup. Select
+  all / Approve selected act on what is shown; a no-match state with Clear filters.
+- "Before it reached you": `GET /api/my-approvals` items now carry `trail` (from approval_requests.actions_json:
+  step, approver, designation/department, action, remarks, time; bill claim Approved amount before → after;
+  asset item edits from asset_requisition_events by that approver before their decision) and the requester's
+  Employee ID / designation / department. Last two steps open (plus any with a change or a Return), the rest
+  behind "N earlier steps — show"; remarks clamp to two lines.
+
+- `scripts/approve-cards-filters.cjs` (a 2-layer asset template; Layer 1 approved with a remark; one item-edit
+  record before that approval; a few requests back-dated 1–6 days): **33/33** on computer and Pixel 7 — every card
+  has its Submitted line and waiting chip; the box shows Layer 1's name, remark, "Changed · QA trail Monitor: Qty
+  3 → 2" and "Now waiting on you"; on the computer it sits in the right-hand column; kind chip, 3+ days chip,
+  Clear filters, search, no-match message, oldest-first default and newest-first sort all work; phone Filters
+  popup and its count; no sideways overflow; no page errors.
+- Folding checked by writing four steps into that request's record (then restoring it): "1 earlier step — show",
+  the step with a change stays open, a long remark shows two lines, "show" reveals the hidden step.
+- Full QA (`tests/qa/run-all.sh`): all suites pass. Typecheck clean.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
