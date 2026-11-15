@@ -437,6 +437,15 @@ spare SIMs count by their duty location. Also by operator and "not given". "amar
 
 - `scripts/assistant-sim-list.sh`: **6/6** — MIS, HR, not given, operator, own SIM, no module → no access.
 
+## SIM & Mobile Bill: stock SIMs from the card, Department filter
+
+"Not given to anyone" card filters the SIMs tab to the stock SIMs (and shows as selected; "Active SIMs" goes back).
+A Department filter (type to search) on the SIMs and Monthly Bills tabs — the holder's department, or the duty
+location of a SIM not given to anyone; "(No department)" too. Works with the other filters and the summary row.
+
+- `scripts/sims-dept-stock.cjs`: **7/7** — stock card → 9 of 10, 0 people, selected, status select follows;
+  "MIS" → 2 SIMs (one held, one spare by duty location); MIS + stock → 1; Monthly Bills has the filter; no page errors.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The
