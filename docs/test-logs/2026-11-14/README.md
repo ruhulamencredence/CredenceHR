@@ -196,6 +196,17 @@ or on a computer. `src/lib/useEdgeSwipeDrawer.ts`, wired into `GlobalSidebar` (o
 - Note: Android's own Back gesture also starts at the screen edge; a drag starting a little in from the very
   edge is the one the app gets. On iPhone Safari the browser's own edge-swipe (Back) comes first.
 
+### Update: on the home screen, from anywhere
+
+On the phone's home screen (Dashboard, user or admin), a swipe right from anywhere on the screen opens the menu,
+not only from the edge (asked for after the first version). Other pages keep the edge-only start. Not started on
+the holiday calendar (its own swipe changes the month, now `data-no-edge-swipe`), in a text field, or on a strip
+that scrolls sideways.
+
+- `scripts/edge-swipe-menu.cjs`: **15/15** — the earlier checks plus: Dashboard mid-screen swipe opens it and
+  swiping left closes it; a swipe on the holiday calendar doesn't open it; on Employee Directory a mid-screen swipe
+  doesn't open it and the edge still does.
+
 > **Held back (not on the main branch):** the "attendance from a browser only on iPhone / iPad" rule above is
 > kept on its own branch, `claude/attendance-device-rule`, and was taken out of `claude/funny-lamport-dm7ouh` /
 > `claude/nice-fermi-0tale9`. It is not to go to `deployed-live` unless that rule is named specifically. The

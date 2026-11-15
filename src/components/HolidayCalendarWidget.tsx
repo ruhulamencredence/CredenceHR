@@ -497,7 +497,8 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // the rest of this card. Edge-to-edge (no side padding) so the grid
         // lines actually reach the card's own rounded corners, same as the
         // Admin grid reaching its bordered container's edges.
-        <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
+        // data-no-edge-swipe: its own left/right swipe changes the month.
+        <div data-no-edge-swipe onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
           <div className="grid grid-cols-7 bg-white/30 border-b border-white/40">
             {weekdayLabels.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">

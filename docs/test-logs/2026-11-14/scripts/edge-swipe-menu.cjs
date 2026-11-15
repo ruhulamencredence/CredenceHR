@@ -32,8 +32,15 @@ const login=async e=>(await (await fetch(B+'/api/auth/login',{method:'POST',head
  ok(await isOpen(),'a quick flick from the edge opens it (only 50 px)');
  await p.mouse.click(380,400); await p.waitForTimeout(500);
  ok(!(await isOpen()),'tapping the dim area still closes it');
- await drag(150,400,330,405);
- ok(!(await isOpen()),'a drag starting mid-screen does not open it');
+ // Home screen (Dashboard): from anywhere
+ await drag(150,400,400,405);
+ ok(await isOpen(),'Dashboard: a swipe right from the middle of the screen opens it');
+ await drag(240,400,30,405);
+ ok(!(await isOpen()),'…and swiping it left closes it');
+ const cal=await p.evaluate(()=>{const el=document.querySelector('[data-no-edge-swipe]');if(!el)return null;el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};});
+ if(cal){ await p.waitForTimeout(400); const c=await p.evaluate(()=>{const r=document.querySelector('[data-no-edge-swipe]').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2};}); await drag(c.x-80,c.y,c.x+120,c.y+3); ok(!(await isOpen()),'Dashboard: a swipe on the holiday calendar (its own month swipe) does not open it'); }
+ else console.log('   (holiday calendar not on this Dashboard)');
+ await p.evaluate(()=>window.scrollTo(0,0)); await p.waitForTimeout(300);
  const y0=await p.evaluate(()=>window.scrollY||document.scrollingElement.scrollTop);
  await drag(10,600,30,200,10,16);
  const y1=await p.evaluate(()=>window.scrollY||document.scrollingElement.scrollTop);
@@ -44,6 +51,14 @@ const login=async e=>(await (await fetch(B+'/api/auth/login',{method:'POST',head
  const hasPopup=await p.evaluate(()=>!!document.querySelector('.liquid-glass-backdrop,[role="dialog"][aria-modal="true"]'));
  if(hasPopup){ await drag(8,400,240,405); ok(!(await isOpen()),'with a popup open the swipe does nothing'); }
  else console.log('   (no popup to try)');
+ // Another page: only from the edge
+ await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+ await p.goto(B+'/self/employee-directory',{waitUntil:'domcontentloaded'}); await p.waitForTimeout(4000);
+ const notHome=await p.evaluate(()=>location.pathname); console.log('   other page:',notHome);
+ await drag(150,400,400,405);
+ ok(!(await isOpen()),'another page: a swipe from mid-screen does not open it');
+ await drag(8,400,240,405);
+ ok(await isOpen(),'another page: from the left edge still opens it');
  // computer width: nothing
  await p.setViewportSize({width:1280,height:800}); await p.waitForTimeout(800);
  await p.keyboard.press('Escape');

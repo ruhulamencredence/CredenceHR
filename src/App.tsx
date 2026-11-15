@@ -1695,6 +1695,11 @@ export default function App() {
         open={globalSidebarOpen}
         onClose={() => setGlobalSidebarOpen(false)}
         onOpen={() => setGlobalSidebarOpen(true)}
+        // Home screen (Dashboard): swipe right from anywhere opens the menu.
+        swipeAnywhere={
+          !showChat && !showAlertsPage && !showProfilePage && !selfServiceView &&
+          (isAdminView ? adminActiveTab === 'dashboard' : userActiveSection.mobile === null)
+        }
         activeKey={computeSidebarActiveKey('mobile')}
         {...sidebarNavProps}
       />
