@@ -1829,6 +1829,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     // was an unindexed full table scan of every approval request ever
     // created. Ignore the error if it already exists.
     await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
+    // Approve Application -> History reads only rows touched since its From date.
+    await dbPool.query(`CREATE INDEX idx_approval_requests_updated ON approval_requests (updated_at)`).catch(() => {});
     // The Monthly Attendance Report (and the Admin Dashboard that reads it)
     // reads one month by date; claims and leave are read from a date on.
     await dbPool.query(`CREATE INDEX idx_attendance_date ON attendance (attendance_date)`).catch(() => {});

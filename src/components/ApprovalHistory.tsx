@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, XCircle, History, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { LoadingBlock } from './LoadingBlock';
+import { PagerBar } from './PagerBar';
 
 // GET /api/my-approvals/history — every approve / reject this account made.
 interface HistoryItem {
@@ -48,6 +49,9 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // One page of decisions at a time — a long period has hundreds.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +83,8 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
         (!q || `${i.type} ${i.title} ${i.requested_by_name || ''} ${i.remarks || ''}`.toLowerCase().includes(q))
     );
   }, [data, actionFilter, typeFilter, search]);
+  useEffect(() => setPage(1), [data, actionFilter, typeFilter, search, pageSize]);
+  const pageRows = shown.slice((page - 1) * pageSize, page * pageSize);
 
   const s = data?.summary;
   const inputCls = 'text-xs px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-200 focus:outline-none';
@@ -160,7 +166,7 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
             </div>
           ) : (
             <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
-              {shown.map((i) => (
+              {pageRows.map((i) => (
                 <div key={i.key} className="px-6 py-3 flex items-start gap-3">
                   {i.action === 'approved' ? (
                     <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
@@ -190,6 +196,7 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
                   <div className="text-[11px] text-slate-400 shrink-0 text-right">{fmtWhen(i.acted_at)}</div>
                 </div>
               ))}
+              <PagerBar page={page} pageSize={pageSize} total={shown.length} onPage={setPage} onPageSize={setPageSize} />
             </div>
           )}
         </>

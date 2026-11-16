@@ -1203,6 +1203,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         const d = v instanceof Date ? v : new Date(v);
         return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
       };
+      // SQL lower bound for "decided on or after `from`": a day early, so a
+      // decision near midnight (Dhaka vs the server clock) is never missed;
+      // inRange() below is the exact check.
+      const since = from ? new Date(Date.parse(`${from}T00:00:00Z`) - 2 * 864e5).toISOString().slice(0, 10) : null;
       const inRange = (at: any) => {
         const d = day(at);
         return (!from || d >= from) && (!to || d <= to);
@@ -1212,7 +1216,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
 
       // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
       const reqRows: any[] =
-        (await queryDB("SELECT * FROM approval_requests WHERE actions_json LIKE ?", [`%"approver_id":${myId}%`]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, source_type, source_id, requested_by, actions_json FROM approval_requests
+            WHERE (actions_json LIKE ? OR actions_json LIKE ?)${since ? " AND updated_at >= ?" : ""}`,
+          // Every action writes the row, so updated_at is never older than
+          // the decision in it.
+          [`%"approver_id":${myId},%`, `%"approver_id":${myId}}%`, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       const TYPE_TITLE: Record<string, string> = {
         attendance: "Remote Attendance",
         claim: "Check In/Out",
@@ -1225,14 +1235,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         advance_request: "Loan / Advance Request"
       };
       const idsOf = (t: string) => reqRows.filter((r) => r.source_type === t).map((r) => Number(r.source_id));
-      const fetchByIds = (table: string, ids: number[]) =>
-        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT * FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
+      // Only the columns the list shows — SELECT * also pulled every Bill
+      // Claim's / Asset Requisition's attached file, which made this slow.
+      const fetchByIds = (table: string, ids: number[], cols = "*") =>
+        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${cols} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
       const [ucs, cls, las, ars, vrs, mls, ads] = await Promise.all([
-        fetchByIds("bill_claims", idsOf("bill_claim")),
-        fetchByIds("claims", idsOf("claim")),
-        fetchByIds("leave_applications", idsOf("leave_application")),
-        fetchByIds("asset_requisitions", idsOf("asset_requisition")),
-        fetchByIds("vehicle_requisitions", idsOf("vehicle_requisition")),
+        fetchByIds("bill_claims", idsOf("bill_claim"), "id, description, category, amount, approved_amount"),
+        fetchByIds("claims", idsOf("claim"), "id, purpose"),
+        fetchByIds("leave_applications", idsOf("leave_application"), "id, leave_type, start_date, end_date, day_count"),
+        fetchByIds("asset_requisitions", idsOf("asset_requisition"), "id, asset_category"),
+        fetchByIds("vehicle_requisitions", idsOf("vehicle_requisition"), "id, pickup_location, destination"),
         fetchByIds("mobile_limit_requests", idsOf("mobile_limit_request")),
         fetchByIds("advance_requests", idsOf("advance_request"))
       ]);
@@ -1290,10 +1302,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       // 2. HR personnel actions — history_json carries {action, by, at, step}.
-      const hrRows: any[] = (await queryDB("SELECT * FROM hr_actions WHERE history_json LIKE ?", [`%"by":${myId}%`]).catch(() => [])) || [];
+      const hrRows: any[] =
+        (await queryDB(
+          `SELECT id, employee_id, action_type, effective_date, history_json FROM hr_actions
+            WHERE (history_json LIKE ? OR history_json LIKE ?)${since ? " AND updated_at >= ?" : ""}`,
+          [`%"by":${myId},%`, `%"by":${myId}}%`, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       if (hrRows.length) {
         const empIds = Array.from(new Set(hrRows.map((a) => Number(a.employee_id))));
-        const emps = byId(await fetchByIds("all_employees", empIds));
+        const emps = byId(await fetchByIds("all_employees", empIds, "id, name, user_id"));
         for (const a of hrRows) {
           let hist: any[] = [];
           try {
@@ -1323,7 +1340,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // 3. Leave Applications decided directly (no Approval Workflow) or as Reliever.
       const viaWorkflow = new Set(reqRows.filter((r) => r.source_type === "leave_application").map((r) => Number(r.source_id)));
       const direct: any[] =
-        (await queryDB("SELECT * FROM leave_applications WHERE decided_by = ? AND status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, user_id, leave_type, start_date, end_date, day_count, status, remarks, decided_by, decided_at FROM leave_applications
+            WHERE decided_by = ? AND status IN ('approved', 'rejected')${since ? " AND decided_at >= ?" : ""}`,
+          [myId, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       for (const la of direct) {
         if (viaWorkflow.has(Number(la.id)) || Number(la.decided_by) !== myId || !inRange(la.decided_at)) continue;
         rows.push({
@@ -1340,10 +1361,14 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         });
       }
       const relieved: any[] =
-        (await queryDB("SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, user_id, leave_type, start_date, end_date, reliever_id, reliever_status, reliever_remarks, reliever_decided_at, created_at FROM leave_applications
+            WHERE reliever_id = ? AND reliever_status IN ('approved', 'rejected')${since ? " AND COALESCE(reliever_decided_at, created_at) >= ?" : ""}`,
+          [myId, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       for (const la of relieved) {
         if (Number(la.reliever_id) !== myId) continue;
-        const at = la.reliever_decided_at || la.updated_at || la.created_at;
+        const at = la.reliever_decided_at || la.created_at;
         if (!inRange(at)) continue;
         rows.push({
           key: `lr-${la.id}`,
@@ -1360,9 +1385,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       // 4. Exit clearance items this account cleared.
-      const cleared: any[] = (await queryDB("SELECT * FROM exit_clearance_items WHERE cleared_by = ?", [myId]).catch(() => [])) || [];
+      const cleared: any[] =
+        (await queryDB(`SELECT * FROM exit_clearance_items WHERE cleared_by = ?${since ? " AND cleared_at >= ?" : ""}`, [myId, ...(since ? [since] : [])]).catch(() => [])) || [];
       if (cleared.length) {
-        const exits = byId(await fetchByIds("exit_requests", Array.from(new Set(cleared.map((c) => Number(c.exit_id))))));
+        const exits = byId(await fetchByIds("exit_requests", Array.from(new Set(cleared.map((c) => Number(c.exit_id)))), "id, exit_type, user_id"));
         for (const c of cleared) {
           if (Number(c.cleared_by) !== myId || !Number(c.is_cleared) || !inRange(c.cleared_at)) continue;
           const ex = exits.get(Number(c.exit_id));
@@ -1382,7 +1408,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       const requesterIds = Array.from(new Set(rows.map((r) => r.requester_id).filter((x): x is number => !!x)));
-      const names = byId(await fetchByIds("users", requesterIds));
+      const names = byId(await fetchByIds("users", requesterIds, "id, name"));
       const items = rows
         .map((r) => ({ ...r, requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null }))
         .sort((a, b) => new Date(b.acted_at).getTime() - new Date(a.acted_at).getTime());
