@@ -1240,6 +1240,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure tracking_device_state table exists: " + err.message);
   }
+  // Which Android app the phone has (its versionCode / name), reported when
+  // the app opens — Employee Tracking shows who still has an app too old to
+  // stop at the end of their Tracking Schedule.
+  for (const [col, def] of [["app_build", "INT NULL"], ["app_version", "VARCHAR(40) NULL"], ["app_reported_at", "DATETIME NULL"]] as const) {
+    try {
+      await dbPool.query(`ALTER TABLE tracking_device_state ADD COLUMN ${col} ${def}`);
+    } catch {
+      // already there
+    }
+  }
   // Notices — Superadmin/Admin -> User popup shown right after the User logs in,
   // with optional custom Lottie animation (pasted JSON or a hosted URL) + free-form
   // text/HTML. See ADMIN_MODULE_KEYS ("notices") and the /api/notices* routes below.

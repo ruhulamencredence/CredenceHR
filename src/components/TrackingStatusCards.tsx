@@ -37,6 +37,10 @@ interface TrackingRow {
   // Outside their Tracking Schedule right now (not counted as Not Tracked).
   off_schedule?: boolean;
   reason: string | null;
+  // The phone's Android app (reported when it opens): 'old' = too old to stop
+  // at the end of the Tracking Schedule; 'update' = a newer one is out.
+  app_version?: string | null;
+  app_status?: 'old' | 'update' | 'ok' | null;
 }
 // Dashboard card background: a faint street map (blocks, a park, a river)
 // with people on it — green pins for those sending their location, with the
@@ -124,6 +128,8 @@ export interface TrackingStatus {
   not_tracked: number;
   // Outside their Tracking Schedule right now.
   off_schedule?: number;
+  // Phones whose app is too old to stop at the end of the Tracking Schedule.
+  old_app?: number;
   // Accounts with the Notices module may send a notice from the Not Tracked list.
   can_send_notice?: boolean;
   // Location updates per minute over the last 30 minutes, oldest first.
@@ -589,6 +595,16 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                         <span className="min-w-0 flex-1">
                           <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
                           <span className="block text-[10px] text-slate-400 truncate">{[r.employee_id, r.designation].filter(Boolean).join(' · ') || '—'}</span>
+                          {r.app_status === 'old' && (
+                            <span className="inline-block mt-0.5 px-1.5 py-px rounded-full bg-rose-50 text-rose-700 text-[9px] font-bold" title={`App ${r.app_version || ''} — too old to stop tracking at the end of the Tracking Schedule. Ask them to install the latest app.`}>
+                              Old app — update needed
+                            </span>
+                          )}
+                          {r.app_status === 'update' && (
+                            <span className="inline-block mt-0.5 px-1.5 py-px rounded-full bg-amber-50 text-amber-700 text-[9px] font-bold" title={`App ${r.app_version || ''} — a newer app is out.`}>
+                              App update available
+                            </span>
+                          )}
                         </span>
                         <span className={`text-[10px] font-semibold text-right shrink-0 ${r.tracked ? 'text-emerald-600' : 'text-slate-500'}`}>
                           {r.tracked ? (r.standing_still ? 'Phone on, standing still' : ago(r.minutes_ago)) : r.reason}

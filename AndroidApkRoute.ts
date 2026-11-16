@@ -228,6 +228,12 @@ function servable(file: string): string | null {
 
 const versions = new Map<string, { code: number; name: string | null } | null>();
 // What the login page's button would send now, and its version.
+/** The versionCode of the APK on the server now (null = none). */
+export function latestApkBuild(): number | null {
+  const v = currentApk()?.version;
+  return v && Number.isFinite(Number(v.code)) ? Number(v.code) : null;
+}
+
 function currentApk(): { file: string; version: { code: number; name: string | null } | null } | null {
   const file = findApk(LOGIN_PAGE_APK) || findApk("CredenceHR.zip") || findApk("CredenceHR-android-debug.zip") || newestApk();
   const send = file && servable(file);
