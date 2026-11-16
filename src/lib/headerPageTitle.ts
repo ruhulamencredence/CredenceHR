@@ -68,7 +68,14 @@ export const BLENDED_HEADER_TITLES = new Set([
   'Alerts',
   'Employee Directory',
   'Grievance & Disciplinary',
-  'My Resignation'
+  'My Resignation',
+  'My OT',
+  'Notice Board',
+  'Select a Budget',
+  'MPR Entry',
+  'Jobs',
+  'Job Entry Details',
+  'Job Edit'
 ]);
 
 // A page that puts its own title in the phone header while it's open (the
