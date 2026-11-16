@@ -131,7 +131,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       }
       await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
       const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat, mock: !!is_mock });
-      res.json({ success: true, live_until, schedule_until: win?.until ?? null });
+      res.json({ success: true, live_until, schedule_until: win?.until ?? null, schedule_label: win?.label ?? null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -143,7 +143,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
     try {
       const win = await trackingWindowFor(queryDB, Number(req.user.id)).catch(() => null);
       await saveTrackingState(Number(req.user.id), win && !win.on ? { ...(req.body || {}), mode: "off_sched" } : req.body || {});
-      res.json(win && !win.on ? { success: true, off_schedule: true, next_start: win.next_start } : { success: true, schedule_until: win?.until ?? null });
+      res.json(win && !win.on ? { success: true, off_schedule: true, next_start: win.next_start } : { success: true, schedule_until: win?.until ?? null, schedule_label: win?.label ?? null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
