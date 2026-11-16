@@ -1211,7 +1211,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         const d = day(at);
         return (!from || d >= from) && (!to || d <= to);
       };
-      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
+      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null; amount?: number | null };
       const rows: Row[] = [];
 
       // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
@@ -1286,12 +1286,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         actions.forEach((a: any, n: number) => {
           if (Number(a.approver_id) !== myId || (a.action !== "approved" && a.action !== "rejected") || !inRange(a.acted_at)) return;
           const detail = detailOf(r);
+          // A Bill Claim's amount, for the "Bill Claims approved ৳…" total.
+          const bc = r.source_type === "bill_claim" ? ucMap.get(Number(r.source_id)) : null;
           rows.push({
             key: `ar-${r.id}-${n}`,
             source_type: r.source_type,
             source_id: Number(r.source_id),
             type: TYPE_TITLE[r.source_type] || r.source_type,
             title: detail,
+            amount: bc ? Number(bc.approved_amount ?? bc.amount) || 0 : null,
             requester_id: Number(r.requested_by) || null,
             action: a.action,
             remarks: a.remarks || null,
@@ -1409,8 +1412,29 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
 
       const requesterIds = Array.from(new Set(rows.map((r) => r.requester_id).filter((x): x is number => !!x)));
       const names = byId(await fetchByIds("users", requesterIds, "id, name"));
+      // Who asked, the way people know them: Employee ID, designation and
+      // Department from their Employee record (the History's Employee /
+      // Department filters and columns).
+      const empOf = new Map<number, any>();
+      if (requesterIds.length) {
+        const emps: any[] =
+          (await queryDB(
+            `SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${requesterIds.map(() => "?").join(",")}) ORDER BY is_active ASC`,
+            requesterIds
+          ).catch(() => [])) || [];
+        for (const e of emps) empOf.set(Number(e.user_id), e); // the active record wins (last)
+      }
       const items = rows
-        .map((r) => ({ ...r, requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null }))
+        .map((r) => {
+          const e = r.requester_id ? empOf.get(r.requester_id) : null;
+          return {
+            ...r,
+            requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null,
+            requested_by_code: e?.employee_id || null,
+            requested_by_designation: e?.designation || null,
+            requested_by_department: e?.department || null
+          };
+        })
         .sort((a, b) => new Date(b.acted_at).getTime() - new Date(a.acted_at).getTime());
       const byType: Record<string, { approved: number; rejected: number }> = {};
       for (const r of items) {

@@ -545,6 +545,8 @@ Chat-এর attachment (voice, ছবি, video, document) ডাটাবেস
 
 ফোনের Back প্রথমে সবচেয়ে উপরের খোলা popup / sheet / ধাপ বন্ধ করে (`backButtonStack.ts`, প্রতিটা popup `useBackButtonClose` দিয়ে নিজেকে রাখে)। কিছু খোলা না থাকলে পুরো পাতা এক ধাপ পেছায় (`App.tsx`): Chat / Alerts / Profile / যেকোনো Self Service পাতা → যেখান থেকে খোলা হয়েছিল (Dashboard); Admin Panel-এর কোনো পাতা → Admin Dashboard → User Dashboard। শুধু User Dashboard-এ "Press back again to exit", ২ সেকেন্ডের মধ্যে আবার চাপলে app বন্ধ।
 
+**Approve Application → History (১৬ নভেম্বর):** Bill Disbursement-এর মতো একটা টেবিল — উপরে Search, Approved / Rejected / All, আর Type, Employee, Department, Layer, Decided from / to; তারপর এক লাইনে কতগুলো সিদ্ধান্ত, Approved, Rejected আর অনুমোদিত Bill Claim-এর মোট টাকা; টেবিলে Decided on, Type, Employee (নামের নিচে Employee ID · পদবি), Department, Detail (নিচে নিজের মন্তব্য), Layer, Decision, Details; ২৫টা করে পাতা (PagerBar)। ফোনে একই তথ্য কার্ডে। `GET /api/my-approvals/history` এখন প্রত্যেক আবেদনকারীর `requested_by_code / requested_by_designation / requested_by_department` (Employee record থেকে) আর Bill Claim-এর `amount` পাঠায়; আর শুধু দরকারি কলাম ও From তারিখ থেকে পড়ে (আগে প্রতিটা Bill Claim-এর সংযুক্ত ফাইলও টেনে আনত, তাই ধীর ছিল)।
+
 ## Timesheet → Correct Attendance: কে কখন জানতে পারে
 
 কর্মী সংশোধনের আবেদন দিলে Approval Template / Supervisor-এর প্রথম ধাপের approver alert আর ফোনে push পান — "Attendance Correction Awaiting Your Approval" (click করলে Approve Application)। এক ধাপ approve হলে পরের ধাপের approver-ও একইভাবে জানেন (`ApprovalRoutes.ts` notifyNextStepApprovers)। শেষে approve বা reject হলে কর্মী নিজে alert পান, reject-এর কারণসহ; click করলে Timesheet খোলে (`server.ts` finalizeAttendanceCorrection / rejectAttendanceCorrection)।
