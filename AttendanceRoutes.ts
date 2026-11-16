@@ -1019,7 +1019,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           return res.status(403).json({ error: listed.size ? "You can only correct attendance at your own check-in projects for that day." : "You had no check-in project on that day." });
         }
       }
-      if (!projectId) return res.status(400).json({ error: "Project is required." });
+      if (!projectId) return res.status(400).json({ error: "Pick the Project for this day." });
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       // A day whose salary month is already processed / paid stays as it is.
