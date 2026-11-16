@@ -78,9 +78,6 @@ public class DutyTrackingService extends Service {
     // closed — then the server is asked when it starts again.
     static final String ACTION_WINDOW_END = "com.mprtracker.app.DUTY_WINDOW_END";
     static final String KEY_WINDOW_END = "duty_window_end";
-    // The person's own time from the server (schedule_label), shown under the
-    // notification's two lines: "Your schedule: Sat–Thu, 9:00 AM – 6:00 PM".
-    static final String KEY_SCHEDULE_LABEL = "duty_schedule_label";
     // Offline at the end: look again after this (the server's push at the
     // next start brings tracking back too).
     private static final long OFFLINE_RECHECK_MS = 60 * 60 * 1000L;
@@ -140,7 +137,7 @@ public class DutyTrackingService extends Service {
         cancelAlarm(ctx);
         cancelResume(ctx);
         cancelWindowEnd(ctx);
-        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).remove(KEY_PAUSED_UNTIL).remove(KEY_SCHEDULE_LABEL).apply();
+        ctx.getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_DUTY, false).remove(KEY_PAUSED_UNTIL).apply();
         ctx.stopService(new Intent(ctx, DutyTrackingService.class));
     }
 
@@ -209,15 +206,7 @@ public class DutyTrackingService extends Service {
     private void noteWindowEnd(JSONObject res) {
         if (res == null || res.optBoolean("off_schedule", false)) return;
         final long end = parseIso(res.isNull("schedule_until") ? null : res.optString("schedule_until", null));
-        final String label = res.has("schedule_label") && !res.isNull("schedule_label") ? res.optString("schedule_label", "") : null;
         handler.post(() -> {
-            // An older server sends no label: keep the notification as it was.
-            if (label != null) {
-                SharedPreferences p = getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
-                boolean changed = !label.equals(p.getString(KEY_SCHEDULE_LABEL, "")) || end != p.getLong(KEY_WINDOW_END, 0);
-                p.edit().putString(KEY_SCHEDULE_LABEL, label).apply();
-                if (changed) refreshNotification(end);
-            }
             armWindowEnd(getApplicationContext(), end);
             // Precise while this service runs (the alarm below is the backup
             // when the phone sleeps; it fires at the latest when it wakes).
@@ -689,42 +678,13 @@ public class DutyTrackingService extends Service {
         }
         Intent open = new Intent(this, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        SharedPreferences p = getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE);
-        return build(pi, p.getString(KEY_SCHEDULE_LABEL, ""), p.getLong(KEY_WINDOW_END, 0));
-    }
-
-    // "Tracking is active / Your location is getting tracked", plus — once the
-    // server has said — "Your schedule: …" (seen when the notification is
-    // pulled open) and "until 6:00 PM" on its top line (seen always).
-    private Notification build(PendingIntent pi, String label, long end) {
-        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Tracking is active")
             .setContentText("Your location is getting tracked")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
-            .setShowWhen(false)
-            .setContentIntent(pi);
-        if (label != null && !label.isEmpty()) {
-            b.setStyle(new NotificationCompat.BigTextStyle().bigText("Your location is getting tracked\nYour schedule: " + label));
-        }
-        if (end > System.currentTimeMillis()) {
-            b.setSubText("until " + new SimpleDateFormat("h:mm a", Locale.US).format(new Date(end)));
-        }
-        return b.build();
-    }
-
-    // The label / end time changed while tracking runs: redraw the notification.
-    private void refreshNotification(long end) {
-        if (!running) return;
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm == null) return;
-        Intent open = new Intent(this, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pi = PendingIntent.getActivity(this, 1, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        try {
-            nm.notify(NOTIFICATION_ID, build(pi, getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).getString(KEY_SCHEDULE_LABEL, ""), end));
-        } catch (Exception ignore) {
-            // notifications blocked — tracking goes on regardless
-        }
+            .setContentIntent(pi)
+            .build();
     }
 
     @Override

@@ -15,10 +15,6 @@
 //     (buffer_minutes, default 30: the trip to work) and after it
 //     (after_minutes, default 0: tracking stops right at the end time).
 //
-// The phone's notification shows the person's own time under the usual two
-// lines ("Your schedule: Sat–Thu, 9:00 AM – 6:00 PM"): every ping / state
-// answer carries it as schedule_label, with schedule_until (the stop time).
-//
 // Outside the window the phone stops tracking and its notification goes
 // away (src/lib/backgroundTracking.ts, DutyTrackingService.java), and
 // /api/tracking/ping stores nothing — an older app that still sends is
