@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৪টি টেবিল, ২৮৬৫টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৬টি টেবিল, ২৮৭৩টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2894,6 +2894,24 @@ Unique: `unique_company_code`(group_id,short_code)
 | `is_active` | tinyint(1) | না | default 1 | |
 
 Unique: `unique_workspace_code`(workspace_code)
+
+### `department_team_auto`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `team_id` | int(11) | না |  | FK → `department_teams.id` |
+| `branch` | varchar(150) | না |  | |
+| `department_id` | int(11) | হ্যাঁ |  | logical → `departments` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `department_team_auto_done`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `rule_id` | int(11) | না | PK  | |
+| `employee_id` | int(11) | না | PK  | logical → `all_employees` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
 
 ### `department_team_members`
 
