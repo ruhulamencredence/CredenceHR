@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৬টি টেবিল, ২৮৭৩টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৬টি টেবিল, ২৮৭৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1458,6 +1458,9 @@ Unique: `unique_user_department`(user_id,department)
 | `mode` | varchar(10) | হ্যাঁ |  | |
 | `battery_pct` | int(11) | হ্যাঁ |  | |
 | `reported_at` | timestamp | না | default current_timestamp() | |
+| `app_build` | int(11) | হ্যাঁ |  | |
+| `app_version` | varchar(40) | হ্যাঁ |  | |
+| `app_reported_at` | datetime | হ্যাঁ |  | |
 
 ### `tracking_employee_access`
 

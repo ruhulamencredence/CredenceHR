@@ -10,6 +10,7 @@ import { autoLinkByEmployeeId } from "./EmployeeLoginId";
 import { wallMinutes } from "./TrackingStayReport";
 import { getTrackingScope, inTrackingScope, TRACKING_SCOPE_DENIED } from "./TrackingScope";
 import { trackingWindowFor, trackingWindowsFor } from "./TrackingSchedule";
+import { latestApkBuild } from "./AndroidApkRoute";
 import type { Express } from "express";
 
 export interface RegisterEmployeeTrackingRoutesDeps {
@@ -47,6 +48,39 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
       // Table missing / in-memory mode — the plain ping history still works.
     }
   };
+
+  // Android app versions (versionCode = minutes since 1 Jan 2026 UTC, set at
+  // build time — android/app/build.gradle). Built before Tracking Schedule
+  // (14 Nov 2026, 06:37 UTC) the app doesn't know it at all and keeps its
+  // tracking notification after the scheduled time; built before the exact
+  // end-of-schedule stop (15 Nov, 08:11 UTC) it stops at its next check.
+  const APK_BUILD_SCHEDULE = 456877;
+  const APK_BUILD_SCHEDULE_STOP = 458411;
+  const appStatus = (build: any): "old" | "update" | "ok" | null => {
+    if (build === null || build === undefined) return null;
+    const b = Number(build);
+    if (!Number.isFinite(b)) return null;
+    if (b < APK_BUILD_SCHEDULE) return "old";
+    const latest = latestApkBuild();
+    return b < APK_BUILD_SCHEDULE_STOP || (latest != null && b < latest) ? "update" : "ok";
+  };
+
+  // The Android app says which version it is, each time it opens.
+  app.post("/api/tracking/app-info", authenticateToken, requireTrackingAccess, async (req: any, res) => {
+    try {
+      const build = Number(req.body?.build);
+      if (!Number.isInteger(build) || build < 0) return res.status(400).json({ error: "build is required." });
+      const version = typeof req.body?.version === "string" ? req.body.version.slice(0, 40) : null;
+      await queryDB(
+        `INSERT INTO tracking_device_state (user_id, app_build, app_version, app_reported_at) VALUES (?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE app_build = VALUES(app_build), app_version = VALUES(app_version), app_reported_at = NOW()`,
+        [req.user.id, build, version]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.post("/api/tracking/ping", authenticateToken, requireTrackingAccess, async (req: any, res) => {
     try {
@@ -172,9 +206,14 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
     const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
     const states: any[] =
       (await queryDB(
-        `SELECT user_id, location_on, foreground_granted, background_granted, mode, TIMESTAMPDIFF(MINUTE, reported_at, NOW()) AS state_minutes_ago FROM tracking_device_state`,
+        `SELECT user_id, location_on, foreground_granted, background_granted, mode, app_build, app_version, TIMESTAMPDIFF(MINUTE, reported_at, NOW()) AS state_minutes_ago FROM tracking_device_state`,
         []
-      ).catch(() => [])) || [];
+      ).catch(() =>
+        queryDB(
+          `SELECT user_id, location_on, foreground_granted, background_granted, mode, TIMESTAMPDIFF(MINUTE, reported_at, NOW()) AS state_minutes_ago FROM tracking_device_state`,
+          []
+        ).catch(() => [])
+      )) || [];
     const stateByUser = new Map<number, any>(states.map((x) => [Number(x.user_id), x]));
     // Tracking Schedule: who is outside their tracking time right now.
     const windows = await trackingWindowsFor(
@@ -241,7 +280,10 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         standing_still: standing,
         off_schedule: offSchedule,
         next_start: offSchedule ? win.next_start : null,
-        reason
+        reason,
+        // The phone's Android app: "old" = keeps tracking after the schedule.
+        app_version: st?.app_version || null,
+        app_status: appStatus(st?.app_build)
       };
     });
     // Accounts sending locations with no active employee record linked to
@@ -269,7 +311,9 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
             standing_still: false,
             off_schedule: false,
             next_start: null,
-            reason: null
+            reason: null,
+            app_version: null,
+            app_status: null
           });
         }
       }
@@ -304,6 +348,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         tracked: rows.filter((r) => r.tracked).length,
         not_tracked: rows.filter((r: any) => !r.tracked && !r.off_schedule).length,
         off_schedule: rows.filter((r: any) => r.off_schedule).length,
+        old_app: rows.filter((r: any) => r.app_status === "old").length,
         can_send_notice: await canSendTrackingNotice(req.user),
         updates_per_minute: perMinute,
         employees: rows

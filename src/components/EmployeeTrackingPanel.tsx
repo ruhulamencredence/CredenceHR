@@ -487,6 +487,9 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     const has = (txt: string) => (r: (typeof employees)[number]) => !r.tracked && !!r.reason && r.reason.includes(txt);
     return [
       { key: 'battery', label: `Battery below ${LOW_BATTERY}%`, color: '#dc2626', names: low },
+      // The phone's app, as it reported when it last opened (anyone, tracked or not).
+      { key: 'oldApp', label: 'Old app — tracking notice stays after the schedule (update needed)', color: '#dc2626', names: names((r) => r.app_status === 'old') },
+      { key: 'appUpdate', label: 'App update available', color: '#d97706', names: names((r) => r.app_status === 'update') },
       { key: 'gps', label: 'Location (GPS) off', color: '#dc2626', names: names(has('GPS) is OFF')) },
       { key: 'saver', label: 'No GPS fix (battery saver / weak signal)', color: '#d97706', names: names(has('no GPS fix')) },
       { key: 'allTime', label: "Location only 'While using the app'", color: '#d97706', names: names(has('Allow all the time')) },
