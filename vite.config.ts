@@ -5,7 +5,26 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      // The app's stylesheet (300+ KB before compression) no longer holds up
+      // the first paint: index.html's own first frame (the splash, or the
+      // sign-in page's picture) shows at once. It is still fetched first
+      // (preload); main.tsx waits for it before React draws anything.
+      {
+        name: 'non-blocking-app-css',
+        apply: 'build',
+        transformIndexHtml: {
+          order: 'post',
+          handler: (html: string) =>
+            html.replace(
+              /<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+\.css)">/g,
+              `<link rel="preload" as="style" crossorigin href="$1"><link rel="stylesheet" crossorigin href="$1" media="print" onload="this.media='all'" data-app-css>`
+            ),
+        },
+      },
+    ],
     // The build date, shown as the website's version (feedback, Version Info).
     define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')) },
     build: {

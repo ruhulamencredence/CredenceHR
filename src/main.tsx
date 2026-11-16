@@ -225,6 +225,35 @@ const render = () =>
       </AppErrorBoundary>
     </StrictMode>,
   );
+// The stylesheet loads without holding up index.html's first frame
+// (vite.config.ts "non-blocking-app-css"): React draws only once it is in, so
+// nothing shows unstyled. No such link in development (Vite injects the CSS).
+const cssReady = (): Promise<void> => {
+  const link = document.querySelector<HTMLLinkElement>('link[data-app-css]');
+  if (!link || link.sheet) return Promise.resolve();
+  return new Promise((done) => {
+    const go = () => done();
+    link.addEventListener('load', go, { once: true });
+    link.addEventListener('error', go, { once: true });
+    window.setTimeout(go, 10_000);
+  });
+};
+// Website sign-in: index.html already shows the sign-in page's picture
+// (#web-signin-shell). React takes over once that picture is on screen, so
+// the picture people see first stays the page's "largest paint" (PageSpeed)
+// instead of React drawing a second copy of it later. At most 3 s.
+const shellPainted = (): Promise<void> => {
+  const img = document.querySelector<HTMLImageElement>('html[data-web-signin] #web-signin-shell .ws-hero');
+  if (!img) return Promise.resolve();
+  const loaded = img.complete
+    ? Promise.resolve()
+    : new Promise<void>((done) => {
+        img.addEventListener('load', () => done(), { once: true });
+        img.addEventListener('error', () => done(), { once: true });
+      });
+  const painted = loaded.then(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  return Promise.race([painted, new Promise<void>((done) => window.setTimeout(done, 3000))]);
+};
 // Signed in: keep index.html's "Loading…" screen up until the Dashboard's
 // code is ready (from the phone's cache that is a fraction of a second; never
 // more than 1.5 s), then draw — no skeleton flash on every open.
@@ -232,5 +261,6 @@ if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardi
   void loadApp()
     .then((m) => m.dashboardCodeReady(1500))
     .catch(() => undefined)
+    .then(cssReady)
     .then(render);
-else render();
+else void Promise.all([cssReady(), shellPainted()]).then(render);
