@@ -198,6 +198,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // Phone bottom bar: which list the room column shows, and the "+" menu.
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+  // The list header's "+" menu (new chat / group / community / join).
+  const [headMenuOpen, setHeadMenuOpen] = useState(false);
   const canCall = user.role === 'superadmin' || !!user.can_use_calls;
   // Android app: what this phone allows for calls with the app closed (CallSetupCard.tsx).
   const callSetup = useCallSetup();
@@ -1081,20 +1083,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <UserRound className="w-5 h-5" />
           </button>
           <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
-            <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
+            {/* Opens on hover / focus on a computer, and on a tap too: Safari on
+                iPhone doesn't focus a tapped button, so focus-within alone
+                never opened it there (the Dashboard chat head's window). */}
+            {headMenuOpen && <div className="fixed inset-0 z-10" onClick={() => setHeadMenuOpen(false)} />}
+            <button type="button" onClick={() => setHeadMenuOpen((v) => !v)} aria-label="New chat" aria-expanded={headMenuOpen} className="relative z-20 p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
             </button>
-            <div className="hidden group-hover:block group-focus-within:block absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-44 z-20">
-              <button type="button" onClick={() => setShowNewChatModal('direct')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+            <div className={`${headMenuOpen ? 'block' : 'hidden'} group-hover:block group-focus-within:block absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-44 z-20`}>
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('direct'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-slate-400" /> New Chat
               </button>
-              <button type="button" onClick={() => setShowNewChatModal('group')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('group'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-400" /> New Group
               </button>
-              <button type="button" onClick={() => setShowNewChatModal('community')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('community'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-slate-400" /> New Community
               </button>
-              <button type="button" onClick={() => setJoinCode('')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setJoinCode(''); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
                 <LinkIcon className="w-4 h-4 text-slate-400" /> Join with a link
               </button>
             </div>
