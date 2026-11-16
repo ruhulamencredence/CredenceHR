@@ -110,16 +110,25 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   // Project than the one now pinned. The In/Out Time still pre-fills from
   // whatever row that day actually has (there's realistically at most one),
   // just filed under the pinned Project instead.
+  //
+  // An Office Attendance (office machine) or Team Attendance day carries the
+  // placeholder project_id 0, which no correction can be filed under (a
+  // correction is written to that day's `attendance` row, and every row
+  // belongs to a real Project). Such a day is treated like an Absent one: the
+  // Project comes from the account's check-in Projects (just one = picked
+  // without asking), and its times still pre-fill the form.
+  const realRecords = dayRecords.filter((r) => Number(r.project_id) > 0);
+  const placeholder = (dayRecords.find((r) => !(Number(r.project_id) > 0)) as AttendanceRecord | undefined) || null;
   const options = (pinnedProjectId
     ? [{
         id: pinnedProjectId,
         name: projects.find((p) => p.id === pinnedProjectId)?.project_name || `Project #${pinnedProjectId}`,
         record: (dayRecords[0] as AttendanceRecord | undefined) || null
       }]
-    : dayRecords.length > 0
-      ? dayRecords.map((r) => ({ id: r.project_id, name: r.project_name || `Project #${r.project_id}`, record: r as AttendanceRecord | null }))
-      : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }))
-  ).filter((o) => pinnedProjectId || dayRecords.length > 0 || !checkInList || checkInList.has(o.id));
+    : realRecords.length > 0
+      ? realRecords.map((r) => ({ id: r.project_id, name: r.project_name || `Project #${r.project_id}`, record: r as AttendanceRecord | null }))
+      : projects.map((p) => ({ id: p.id, name: p.project_name, record: placeholder }))
+  ).filter((o) => pinnedProjectId || realRecords.length > 0 || !checkInList || checkInList.has(o.id));
 
   const [projectId, setProjectId] = useState<number | ''>(options.length > 0 ? options[0].id : '');
   const [checkInTime, setCheckInTime] = useState(options.length > 0 ? toTimeInputValue(options[0].record?.check_in_at) : '');
@@ -172,7 +181,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   const outNextDay = !!checkInTime && !!checkOutTime && checkOutTime < checkInTime;
 
   const validate = (): string | null => {
-    if (projectId === '' || projectId === null || projectId === undefined) return 'Select a Project.';
+    if (!projectId) return 'Select a Project.';
     if (!checkInTime && !checkOutTime) return 'Enter an In Time or Out Time to correct.';
     if (!remarks.trim()) return 'Write the reason.';
     return null;
