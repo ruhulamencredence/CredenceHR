@@ -288,9 +288,14 @@ export const DepartmentTeamsEditor = forwardRef<
   );
 });
 
-// Team -> "Add people": pick Work stations (projects) and a Department, tick
-// who to add (or everyone shown), add at once; optionally new joiners there
-// join this team by themselves.
+// Team -> "Add people": pick Work stations (projects) first — one Supervisor
+// often has people at several — then narrow by Department (all of them to
+// start with, since a team may hold people from other Departments), tick who
+// to add (a whole project at once, or everyone shown) and add them in one go;
+// optionally new joiners there join this team by themselves.
+const NO_DEPT = '0';
+const deptKey = (p: Person) => (p.department_id ? String(p.department_id) : NO_DEPT);
+
 function AddPeople({
   teamName,
   departmentId,
@@ -310,36 +315,56 @@ function AddPeople({
 }) {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<Set<string>>(new Set());
-  const [dept, setDept] = useState(String(departmentId));
+  const [bq, setBq] = useState('');
+  // null = every Department; otherwise the Departments picked.
+  const [depts, setDepts] = useState<Set<string> | null>(null);
   const [q, setQ] = useState('');
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [auto, setAuto] = useState(true);
   const [done, setDone] = useState('');
-  const inDept = (p: Person) => dept === '*' || String(p.department_id || '') === dept;
-  const departments = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const p of pool) if (p.department_id && p.department) m.set(p.department_id, p.department);
-    return [...m].filter(([id]) => id !== departmentId).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [pool, departmentId]);
-  // Work stations with how many people (in the chosen Department) are there.
+  const members = useMemo(() => new Set(memberIds), [memberIds]);
+  const deptName = (k: string, p?: Person) =>
+    k === NO_DEPT ? '(No department)' : Number(k) === departmentId ? departmentName : p?.department || 'Department';
+
+  // Every Work station, with how many people are there (any Department).
   const stations = useMemo(() => {
     const m = new Map<string, number>();
-    for (const p of pool) if (inDept(p)) m.set(branchOf(p), (m.get(branchOf(p)) || 0) + 1);
+    for (const p of pool) m.set(branchOf(p), (m.get(branchOf(p)) || 0) + 1);
     return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [pool]);
+  const atStations = useMemo(() => pool.filter((p) => branches.has(branchOf(p))), [pool, branches]);
+  // The Departments people at the picked Work stations belong to.
+  const deptsHere = useMemo(() => {
+    const m = new Map<string, { name: string; n: number }>();
+    for (const p of atStations) {
+      const k = deptKey(p);
+      const e = m.get(k) || { name: deptName(k, p), n: 0 };
+      e.n++;
+      m.set(k, e);
+    }
+    return [...m].sort((a, b) => (Number(b[0]) === departmentId ? 1 : 0) - (Number(a[0]) === departmentId ? 1 : 0) || b[1].n - a[1].n || a[1].name.localeCompare(b[1].name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool, dept]);
-  const members = useMemo(() => new Set(memberIds), [memberIds]);
+  }, [atStations, departmentId, departmentName]);
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return pool.filter(
-      (p) => branches.has(branchOf(p)) && inDept(p) && !members.has(p.id) && (!s || [p.name, p.employee_code, p.designation].some((v) => String(v || '').toLowerCase().includes(s)))
+    return atStations.filter(
+      (p) => (!depts || depts.has(deptKey(p))) && !members.has(p.id) && (!s || [p.name, p.employee_code, p.designation].some((v) => String(v || '').toLowerCase().includes(s)))
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool, branches, dept, q, members]);
+  }, [atStations, depts, q, members]);
+  const groups = useMemo(() => {
+    const m = new Map<string, Person[]>();
+    for (const p of list) m.set(branchOf(p), [...(m.get(branchOf(p)) || []), p]);
+    return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [list]);
   const picked = list.filter((p) => ticked.has(p.id));
   const moving = picked.filter((p) => nowIn(p)).length;
   const others = picked.filter((p) => p.department_id !== departmentId).length;
   const chip = 'px-2.5 py-1 rounded-full border text-[11px] font-semibold';
+  const on = (x: boolean) => (x ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50');
+  const count = (x: boolean) => (x ? 'text-white/80' : 'text-slate-400');
+  const tick = (ids: number[], v: boolean) => setTicked((x) => { const y = new Set(x); ids.forEach((id) => (v ? y.add(id) : y.delete(id))); return y; });
+  const shownStations = stations.filter(([b]) => b.toLowerCase().includes(bq.trim().toLowerCase()) || branches.has(b));
+  const deptLabel = !depts ? 'any department' : [...depts].map((k) => deptsHere.find(([d]) => d === k)?.[1].name || deptName(k)).join(', ');
 
   if (!open)
     return (
@@ -348,31 +373,23 @@ function AddPeople({
       </button>
     );
   return (
-    <div className="rounded-2xl border-2 border-orange-300 bg-white p-3 space-y-2.5" aria-label={`Add people to ${teamName}`}>
+    <div className="rounded-2xl border-2 border-orange-300 bg-white p-3 space-y-3" aria-label={`Add people to ${teamName}`}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-bold text-slate-800">Add people by project</p>
         <button type="button" aria-label="Close add people" onClick={() => setOpen(false)} className="p-1 rounded-full text-slate-500 hover:bg-slate-100"><X className="w-3.5 h-3.5" /></button>
       </div>
-      <div>
-        <p className="text-[11px] font-semibold text-slate-600 mb-1">1 · Department</p>
-        <select aria-label="Department" className={field} value={dept} onChange={(e) => { setDept(e.target.value); setTicked(new Set()); }}>
-          <option value={String(departmentId)}>{departmentName} (this department)</option>
-          <option value="*">All departments</option>
-          {departments.map(([id, name]) => (
-            <option key={id} value={String(id)}>{name}</option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <p className="text-[11px] font-semibold text-slate-600 mb-1">2 · Project / Work station <span className="font-normal text-slate-500">— pick one or more</span></p>
-        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
-          {stations.length === 0 && <span className="text-[11px] text-slate-500">Nobody in this department.</span>}
-          {stations.map(([b, n]) => {
-            const on = branches.has(b);
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold text-slate-600">1 · Project / Work station <span className="font-normal text-slate-500">— pick one or more</span></p>
+        {stations.length > 8 && (
+          <input aria-label="Search projects" className={field} value={bq} onChange={(e) => setBq(e.target.value)} placeholder="Search projects" />
+        )}
+        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+          {stations.length === 0 && <span className="text-[11px] text-slate-500">Nobody to add.</span>}
+          {shownStations.map(([b, n]) => {
+            const x = branches.has(b);
             return (
-              <button key={b} type="button" aria-pressed={on} onClick={() => { setBranches((x) => { const y = new Set(x); on ? y.delete(b) : y.add(b); return y; }); }}
-                className={`${chip} ${on ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                {b} <span className={on ? 'text-white/80' : 'text-slate-400'}>{n}</span>
+              <button key={b} type="button" aria-pressed={x} onClick={() => { setBranches((s) => { const y = new Set(s); x ? y.delete(b) : y.add(b); return y; }); setTicked(new Set()); }} className={`${chip} ${on(x)}`}>
+                {b} <span className={count(x)}>{n}</span>
               </button>
             );
           })}
@@ -380,33 +397,63 @@ function AddPeople({
       </div>
       {branches.size > 0 && (
         <>
-          <div className="flex items-center gap-2">
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-600">2 · Department <span className="font-normal text-slate-500">— of the people at these projects</span></p>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" aria-pressed={!depts} onClick={() => { setDepts(null); setTicked(new Set()); }} className={`${chip} ${on(!depts)}`}>
+                All departments <span className={count(!depts)}>{atStations.length}</span>
+              </button>
+              {deptsHere.map(([k, d]) => {
+                const x = !!depts && depts.has(k);
+                return (
+                  <button key={k} type="button" aria-pressed={x}
+                    onClick={() => { setDepts((s) => { const y = new Set(s || []); x ? y.delete(k) : y.add(k); return y.size ? y : null; }); setTicked(new Set()); }}
+                    className={`${chip} ${on(x)}`}>
+                    {d.name}{Number(k) === departmentId ? ' (this one)' : ''} <span className={count(x)}>{d.n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold text-slate-600">3 · Who to add</p>
             <input aria-label="Search the list" className={field} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search — name, Employee ID, designation" />
-          </div>
-          <div className="flex items-center justify-between gap-2 text-[11px]">
-            <span className="text-slate-500">{list.length} not in this team yet · {picked.length} ticked</span>
-            <span className="flex gap-3">
-              <button type="button" className="font-semibold text-orange-700 hover:underline" onClick={() => setTicked(new Set(list.map((p) => p.id)))}>Select all</button>
-              <button type="button" className="font-semibold text-slate-500 hover:underline" onClick={() => setTicked(new Set())}>Clear</button>
-            </span>
-          </div>
-          <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100" role="list">
-            {list.length === 0 && <p className="px-3 py-3 text-[11px] text-slate-500">Everyone here is already in this team.</p>}
-            {list.map((p) => {
-              const w = nowIn(p);
-              return (
-                <label key={p.id} role="listitem" className="flex items-start gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-slate-50">
-                  <input type="checkbox" className="mt-0.5 accent-orange-500" checked={ticked.has(p.id)}
-                    onChange={(e) => setTicked((x) => { const y = new Set(x); e.target.checked ? y.add(p.id) : y.delete(p.id); return y; })} />
-                  <span className="flex-1 min-w-0">
-                    <span className="font-semibold text-slate-800">{p.name}</span>
-                    <span className="text-slate-500"> · {[p.employee_code, p.designation, dept === '*' ? p.department : null].filter(Boolean).join(' · ')}</span>
-                    {w && <span className="block text-[10px] font-semibold text-amber-700">now in {w}</span>}
-                  </span>
-                  <span className="text-[10px] text-slate-400 shrink-0">{branchOf(p)}</span>
-                </label>
-              );
-            })}
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-slate-500">{list.length} not in this team yet · {picked.length} ticked</span>
+              <span className="flex gap-3">
+                <button type="button" className="font-semibold text-orange-700 hover:underline" onClick={() => setTicked(new Set(list.map((p) => p.id)))}>Select all</button>
+                <button type="button" className="font-semibold text-slate-500 hover:underline" onClick={() => setTicked(new Set())}>Clear</button>
+              </span>
+            </div>
+            <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200" role="list">
+              {list.length === 0 && <p className="px-3 py-3 text-[11px] text-slate-500">Everyone here is already in this team.</p>}
+              {groups.map(([b, ps]) => {
+                const all = ps.every((p) => ticked.has(p.id));
+                return (
+                  <div key={b}>
+                    <div className="sticky top-0 z-[1] flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 border-b border-slate-200 text-[11px]">
+                      <span className="font-bold text-slate-700">{b} · {ps.length}</span>
+                      <button type="button" className="font-semibold text-orange-700 hover:underline" onClick={() => tick(ps.map((p) => p.id), !all)}>
+                        {all ? 'Untick this project' : 'Everyone at this project'}
+                      </button>
+                    </div>
+                    {ps.map((p) => {
+                      const w = nowIn(p);
+                      return (
+                        <label key={p.id} role="listitem" className="flex items-start gap-2 px-3 py-1.5 text-xs cursor-pointer hover:bg-slate-50 border-b border-slate-100 last:border-b-0">
+                          <input type="checkbox" className="mt-0.5 accent-orange-500" checked={ticked.has(p.id)} onChange={(e) => tick([p.id], e.target.checked)} />
+                          <span className="flex-1 min-w-0">
+                            <span className="font-semibold text-slate-800">{p.name}</span>
+                            <span className="text-slate-500"> · {[p.employee_code, p.designation, p.department].filter(Boolean).join(' · ')}</span>
+                            {w && <span className="block text-[10px] font-semibold text-amber-700">now in {w}</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           {(moving > 0 || others > 0) && (
             <div className="text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-800 space-y-0.5">
@@ -416,7 +463,7 @@ function AddPeople({
           )}
           <label className="flex items-start gap-2 text-[11px] text-slate-700 cursor-pointer">
             <input type="checkbox" className="mt-0.5 accent-emerald-600" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            <span>Also add <b>new joiners</b> at {[...branches].filter((b) => b !== NO_BRANCH).join(', ') || 'these work stations'} ({dept === '*' ? 'any department' : dept === String(departmentId) ? departmentName : departments.find(([id]) => String(id) === dept)?.[1]}) to this team by themselves</span>
+            <span>Also add <b>new joiners</b> at {[...branches].filter((b) => b !== NO_BRANCH).join(', ') || 'these work stations'} ({deptLabel}) to this team by themselves</span>
           </label>
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-semibold text-emerald-700">{done}</span>
@@ -424,7 +471,9 @@ function AddPeople({
               type="button"
               disabled={!picked.length && !auto}
               onClick={() => {
-                const rules = auto ? [...branches].filter((b) => b !== NO_BRANCH).map((b) => ({ branch: b, department_id: dept === '*' ? null : Number(dept) })) : [];
+                const bs = [...branches].filter((b) => b !== NO_BRANCH);
+                const ds: (number | null)[] = !depts ? [null] : [...depts].filter((k) => k !== NO_DEPT).map(Number);
+                const rules = auto ? bs.flatMap((b) => ds.map((d) => ({ branch: b, department_id: d }))) : [];
                 onAdd(picked.map((p) => p.id), rules);
                 setDone(`${picked.length} added${rules.length ? ' · new joiners too' : ''} — Save Changes to keep it`);
                 setTicked(new Set());

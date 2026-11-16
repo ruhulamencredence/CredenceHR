@@ -355,12 +355,34 @@ async function switchMode(next: 'active' | 'idle' | 'live') {
 // Call once right after login (and again if can_use_tracking is granted
 // mid-session — see UserPanel.tsx) with the account's JWT. No-ops on the web
 // build or if tracking is already running for this token.
+// Tell the server which Android app this phone has (once per sign-in), so
+// Employee Tracking can show who still has an app too old to stop at the end
+// of their Tracking Schedule. The screens come from the server, so even an
+// old app sends this.
+let appInfoSentFor: string | null = null;
+async function reportAppInfo(token: string): Promise<void> {
+  if (appInfoSentFor === token) return;
+  appInfoSentFor = token;
+  try {
+    const { App } = await import('@capacitor/app');
+    const info = await App.getInfo();
+    await fetch(apiUrl('/api/tracking/app-info'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ build: Number(info.build) || 0, version: info.version || null })
+    });
+  } catch {
+    appInfoSentFor = null; // try again next time
+  }
+}
+
 export async function startBackgroundTracking(token: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   // Android only — the iPhone app is built without the background-location
   // plugin (capacitor.config.ts -> ios.includePlugins).
   if (Capacitor.getPlatform() === 'ios') return;
   requestedToken = token;
+  void reportAppInfo(token);
   // Never ask Android for location before the person has agreed on the
   // disclosure screen (src/lib/locationDisclosure.tsx — a Google Play rule).
   if (getLocationConsent() !== 'accepted') return;

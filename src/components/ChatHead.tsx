@@ -76,6 +76,27 @@ export const ChatHead: React.FC<{ token: string; user: User; hidden?: boolean }>
   useEffect(() => {
     if (hidden) setOpen(false);
   }, [hidden]);
+  // While the window is open and the on-screen keyboard is up (searching,
+  // typing a message), fit the window into what is still visible above the
+  // keyboard. A phone browser / Home Screen app doesn't shrink fixed boxes
+  // for the keyboard, so the window used to run under it and the browser
+  // scrolled its insides out of view to show the field.
+  const [kbView, setKbView] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    const v = window.visualViewport;
+    if (!open || !v) {
+      setKbView(null);
+      return;
+    }
+    const on = () => setKbView(window.innerHeight - v.height > 120 ? { top: v.offsetTop, height: v.height } : null);
+    on();
+    v.addEventListener('resize', on);
+    v.addEventListener('scroll', on);
+    return () => {
+      v.removeEventListener('resize', on);
+      v.removeEventListener('scroll', on);
+    };
+  }, [open]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (open) return;
@@ -119,7 +140,7 @@ export const ChatHead: React.FC<{ token: string; user: User; hidden?: boolean }>
   const style: React.CSSProperties = dragAt
     ? { left: dragAt.x, bottom: `calc(${dragAt.bottom}px + ${safeBottom})`, transition: 'none' }
     : open
-      ? { right: EDGE, top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 14px)' }
+      ? { right: EDGE, top: kbView ? kbView.top + 8 : 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 14px)' }
       : {
           [pos.side]: EDGE,
           bottom: `calc(${pos.bottom}px + ${safeBottom})`,
@@ -133,15 +154,30 @@ export const ChatHead: React.FC<{ token: string; user: User; hidden?: boolean }>
           <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => setOpen(false)} />
           <div
             className="absolute left-2 right-2"
-            style={{
-              top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 66px)',
-              bottom: `calc(12px + ${safeBottom})`
-            }}
+            style={
+              kbView
+                ? { top: kbView.top + 60, height: Math.max(160, kbView.height - 68) }
+                : {
+                    top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 66px)',
+                    bottom: `calc(12px + ${safeBottom})`
+                  }
+            }
           >
             {/* No ✕ of its own: it would cover Chat's "+" (new chat). Chat's
-                ← , the head above, or a tap outside closes it. */}
-            <div className="liquid-glass liquid-glass-in rounded-[28px] h-full overflow-hidden flex flex-col">
-              <div className="flex-1 min-h-0 flex">
+                ← , the head above, or a tap outside closes it.
+                The glass is a layer BEHIND Chat, not Chat's parent: a parent
+                with backdrop-filter traps Chat's own full-screen popups (New
+                Chat, New Group…) inside this window, where they were cut off.
+                The browser may also scroll a clipped box to show a focused
+                field; that is undone at once (onScroll). */}
+            <div
+              className="relative h-full rounded-[28px] overflow-hidden flex flex-col liquid-glass-in"
+              onScroll={(e) => {
+                if (e.currentTarget.scrollTop) e.currentTarget.scrollTop = 0;
+              }}
+            >
+              <div className="liquid-glass rounded-[28px] pointer-events-none" style={{ position: 'absolute', inset: 0 }} aria-hidden="true" />
+              <div className="relative flex-1 min-h-0 flex">
                 <Suspense fallback={<div className="m-auto text-xs text-slate-500">Loading…</div>}>
                   <ChatPanel user={user} token={token} onBack={() => setOpen(false)} variant="modal" />
                 </Suspense>
