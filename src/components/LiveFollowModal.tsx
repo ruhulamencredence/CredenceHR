@@ -11,6 +11,7 @@
 // Closing it tells the server to stop (the phone slows down again).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { BatteryMedium, Crosshair, Gauge, Radio, Target, X } from 'lucide-react';
@@ -223,10 +224,15 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
   const ago =
     secsAgo == null ? '—' : secsAgo < 60 ? `${secsAgo}s ago` : secsAgo < 3600 ? `${Math.round(secsAgo / 60)} min ago` : `${Math.round(secsAgo / 3600)} hr ago`;
 
-  return (
+  // Portalled onto document.body: Employee Tracking renders this inside a
+  // blurred / transformed page container, and a `position: fixed` element
+  // under a transform or filter is placed against that container instead of
+  // the screen — the popup then sat low on the page and ran off the bottom.
+  // The card also never grows past the screen: the map shrinks to fit.
+  return createPortal(
     <div className="fixed inset-0 z-[1100] liquid-glass-backdrop flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
       <style>{`@keyframes lf-pulse{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.6);opacity:0}}`}</style>
-      <div className="w-full max-w-4xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-4xl max-h-full overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-[32px] p-3 sm:p-4">
           <div className="flex items-center justify-between gap-3 px-2 pb-3">
             <div className="min-w-0">
@@ -257,7 +263,7 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
             </button>
           </div>
 
-          <div className="liquid-glass-inset relative rounded-[24px] overflow-hidden h-[60vh] min-h-[340px]">
+          <div className="liquid-glass-inset relative rounded-[24px] overflow-hidden h-[min(60vh,calc(100dvh-15rem))] min-h-[260px]">
             <div ref={boxRef} className="absolute inset-0" />
             {!follow && fix && (
               <button
@@ -290,6 +296,7 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
