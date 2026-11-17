@@ -34,11 +34,16 @@ await call('POST', '/sync', { accountId: acc });
 const inboxList = (await call('GET', `/messages?accountId=${acc}&label=Inbox`)).body.items || [];
 ok(inboxList.length === 3, `3 mails in Inbox (${inboxList.length})`);
 
-// Permission: an account without the switch can't use folders.
-sql("UPDATE users SET can_use_mail=1, can_use_mail_folders=0, role='user' WHERE email='qa.claimant@credence.test'");
-const U = await login('qa.claimant@credence.test', 'ProbePass123');
-ok((await api(U)('GET', '/folders')).status === 403, 'switch off -> GET /folders 403');
-ok((await api(U)('POST', '/folders', { accountId: acc, name: 'X' })).status !== 200, 'switch off -> cannot create');
+// Permission: folders come with Mail — no Mail, no folders; Mail on, folders on (no switch of their own).
+sql("UPDATE users SET can_use_mail=0, role='user' WHERE email='qa.claimant@credence.test'");
+let U = await login('qa.claimant@credence.test', 'ProbePass123');
+ok((await api(U)('GET', '/folders')).status === 403, 'no Mail -> GET /folders 403');
+ok((await api(U)('POST', '/folders', { accountId: acc, name: 'X' })).status === 403, 'no Mail -> cannot create');
+sql("UPDATE users SET can_use_mail=1 WHERE email='qa.claimant@credence.test'");
+await new Promise((r) => setTimeout(r, 31000)); // the server keeps an access answer 30 s
+U = await login('qa.claimant@credence.test', 'ProbePass123');
+ok((await api(U)('GET', '/folders')).status === 200 && (await api(U)('GET', '/status')).body.canFolders === true, 'Mail on -> folders on (canFolders, GET /folders 200), no extra switch');
+ok((await api(U)('POST', '/folders', { accountId: acc, name: 'X' })).status === 404, "someone else's mailbox -> 404");
 ok((await call('GET', '/status')).body.canFolders === true, 'Superadmin: status.canFolders');
 
 // Create Projects, then Projects/Gulshan Tower — on the server.

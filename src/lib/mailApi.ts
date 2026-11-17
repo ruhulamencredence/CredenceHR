@@ -89,7 +89,7 @@ export interface MailStatus {
   canDirectory?: boolean;
   // Tools -> My groups (users.can_use_mail_groups).
   canMyGroups?: boolean;
-  // My folders (users.can_use_mail_folders).
+  // My folders — part of Mail: true whenever Mail is on.
   canFolders?: boolean;
 }
 

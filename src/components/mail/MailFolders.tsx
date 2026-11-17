@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Credence Mail -> My folders (users.can_use_mail_folders, MailRoutes.ts):
+// Credence Mail -> My folders (part of Mail, MailRoutes.ts):
 // the person's own folders and sub-folders, real folders on their mail server
 // (Outlook / the phone's mail app show the same ones). A mail in one carries
 // the label "Folder:<id>"; the list opens it like any other folder.

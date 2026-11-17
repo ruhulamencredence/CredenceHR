@@ -348,9 +348,9 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   );
   await run("users.can_use_mail_groups", "ALTER TABLE users ADD COLUMN can_use_mail_groups TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // My folders: the person's own folders, real folders on their mail server
-  // (also seen in Outlook / the phone's mail app). Off by default per account
-  // (users.can_use_mail_folders). A message in one has folder_role "f:<id>"
-  // and the label "Folder:<id>".
+  // (also seen in Outlook / the phone's mail app). Part of Credence Mail —
+  // whoever has Mail has them. A message in one has folder_role "f:<id>" and
+  // the label "Folder:<id>".
   await run(
     "mail_folders",
     `CREATE TABLE IF NOT EXISTS mail_folders (
@@ -366,7 +366,6 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
       KEY idx_mail_folders_user (user_id)
     ) DEFAULT CHARSET=utf8mb4`
   );
-  await run("users.can_use_mail_folders", "ALTER TABLE users ADD COLUMN can_use_mail_folders TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -744,16 +743,19 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return f && f.inbox ? f : resolveFolders(a, c);
   }
 
-  // ---- My folders (users.can_use_mail_folders) ----------------------------
+  // ---- My folders (part of Credence Mail) ----------------------------------
   // Real folders on the person's mail server. Each one is a sync "role" of
   // its own ("f:<id>" -> its server path), so syncing, moving, read / star
   // and delete work for it the same way as for Inbox.
   const folderCache = new Map<number, { ok: boolean; at: number }>();
+  // No switch of their own: whoever may use Credence Mail (users.can_use_mail,
+  // or a Superadmin; not a new joiner's temporary login) has their folders.
   async function hasFolders(userId: number): Promise<boolean> {
     const hit = folderCache.get(userId);
     if (hit && Date.now() - hit.at < 30_000) return hit.ok;
-    const rows: any[] = (await queryDB("SELECT role, can_use_mail_folders FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
-    const ok = rows[0]?.role === "superadmin" || !!Number(rows[0]?.can_use_mail_folders);
+    const rows: any[] = (await queryDB("SELECT role, can_use_mail, is_onboarding FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    const u = rows[0];
+    const ok = !!u && (u.role === "superadmin" || (!!Number(u.can_use_mail) && !Number(u.is_onboarding)));
     folderCache.set(userId, { ok, at: Date.now() });
     return ok;
   }
@@ -2183,10 +2185,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
-  // ---- My folders (users.can_use_mail_folders) -----------------------------
+  // ---- My folders (part of Credence Mail) -----------------------------------
   const requireFolders = async (req: any, write: boolean) => {
     if (write && req.mailViewAs) throw bad("Read only.", 403);
-    if (!(await hasFolders(uid(req)))) throw bad("My folders isn't turned on for your account.", 403);
+    if (!(await hasFolders(uid(req)))) throw bad("Credence Mail isn't turned on for your account.", 403);
   };
   const RESERVED_FOLDERS = new Set(["inbox", "sent", "sent items", "trash", "deleted items", "spam", "junk", "drafts", "archive", "starred", "important", "scheduled", "all"]);
   const folderName = (v: any, delim: string) => {
@@ -2806,7 +2808,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         let list = rows;
         if (fid) {
           // One of the person's own folders: only mail of that same mailbox goes in.
-          if (!(await hasFolders(uid(req)))) throw bad("My folders isn't turned on for your account.", 403);
+          if (!(await hasFolders(uid(req)))) throw bad("Credence Mail isn't turned on for your account.", 403);
           const f: any = ((await queryDB("SELECT * FROM mail_folders WHERE id = ? AND user_id = ?", [Number(fid), uid(req)])) || [])[0];
           if (!f) throw bad("That folder no longer exists.", 404);
           if (!Number(f.selectable)) throw bad("That folder only holds other folders.");
