@@ -81,8 +81,9 @@ const ruleText = (p: Person) =>
 export const TrackingScheduleSheet: React.FC<{ token: string; onClose: () => void }> = ({ token, onClose }) => {
   const phone = useIsPhone();
   const [people, setPeople] = useState<Person[] | null>(null);
-  const [buffer, setBuffer] = useState(30);
-  const [bufferDraft, setBufferDraft] = useState('30');
+  // Minutes added before the start / after the end of every window.
+  const [buffer, setBuffer] = useState({ before: 30, after: 0 });
+  const [bufferDraft, setBufferDraft] = useState({ before: '30', after: '0' });
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -104,8 +105,9 @@ export const TrackingScheduleSheet: React.FC<{ token: string; onClose: () => voi
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Could not load');
       setPeople(d.people || []);
-      setBuffer(Number(d.buffer_minutes ?? 30));
-      setBufferDraft(String(d.buffer_minutes ?? 30));
+      const b = { before: Number(d.buffer_minutes ?? 30), after: Number(d.after_minutes ?? 0) };
+      setBuffer(b);
+      setBufferDraft({ before: String(b.before), after: String(b.after) });
     } catch (e: any) {
       setError(e.message);
       setPeople([]);
@@ -161,15 +163,16 @@ export const TrackingScheduleSheet: React.FC<{ token: string; onClose: () => voi
   };
 
   const saveBuffer = async () => {
-    const n = Number(bufferDraft);
-    if (!Number.isInteger(n) || n < 0 || n > 180) return setError('Minutes must be 0 to 180.');
+    const before = Number(bufferDraft.before);
+    const after = Number(bufferDraft.after);
+    if (![before, after].every((n) => Number.isInteger(n) && n >= 0 && n <= 180)) return setError('Minutes must be 0 to 180.');
     setBusy(true);
     setError('');
     try {
-      const r = await fetch(apiUrl('/api/tracking/schedule-settings'), { method: 'PUT', headers, body: JSON.stringify({ buffer_minutes: n }) });
+      const r = await fetch(apiUrl('/api/tracking/schedule-settings'), { method: 'PUT', headers, body: JSON.stringify({ buffer_minutes: before, after_minutes: after }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Could not save');
-      setMsg(`Before / after each window: ${n} minutes.`);
+      setMsg(`Starts ${before} min early, stops ${after ? `${after} min after the end` : 'right at the end'}.`);
       await load();
     } catch (e: any) {
       setError(e.message);
@@ -244,19 +247,30 @@ export const TrackingScheduleSheet: React.FC<{ token: string; onClose: () => voi
               <option value="fixed">Fixed hours</option>
               <option value="roster">Duty Roster</option>
             </select>
-            <span className="flex items-center gap-1.5 text-xs text-slate-600 ml-auto">
-              Before / after each window
+            <span className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 ml-auto">
+              Start early
               <input
                 type="number"
                 min={0}
                 max={180}
-                value={bufferDraft}
-                onChange={(e) => setBufferDraft(e.target.value)}
-                className="w-16 text-xs px-2 py-1 rounded-lg bg-white/80 border border-white text-center"
-                aria-label="Minutes before and after"
+                value={bufferDraft.before}
+                onChange={(e) => setBufferDraft((d) => ({ ...d, before: e.target.value }))}
+                className="w-14 text-xs px-2 py-1 rounded-lg bg-white/80 border border-white text-center"
+                aria-label="Minutes before the start"
+              />
+              min · Stop late
+              <input
+                type="number"
+                min={0}
+                max={180}
+                value={bufferDraft.after}
+                onChange={(e) => setBufferDraft((d) => ({ ...d, after: e.target.value }))}
+                className="w-14 text-xs px-2 py-1 rounded-lg bg-white/80 border border-white text-center"
+                aria-label="Minutes after the end (0 = stop right at the end)"
+                title="0 = tracking stops right at the end time"
               />
               min
-              {bufferDraft !== String(buffer) && (
+              {(bufferDraft.before !== String(buffer.before) || bufferDraft.after !== String(buffer.after)) && (
                 <button type="button" onClick={() => void saveBuffer()} disabled={busy} className="liquid-glass-button rounded-full px-3 py-1 text-xs font-semibold">
                   Save
                 </button>

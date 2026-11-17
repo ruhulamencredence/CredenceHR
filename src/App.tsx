@@ -1572,8 +1572,9 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
       {erp360Error && (
-        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
-          <span className="flex-1">{erp360Error}</span>
+        <div className="fixed top-3 left-3 right-3 sm:left-auto z-[100] sm:max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
+          {/* Long setting names (ERP360_APP_SECRET…) break instead of running off a phone screen. */}
+          <span className="flex-1 min-w-0 [overflow-wrap:anywhere]">{erp360Error}</span>
           <button type="button" onClick={() => setErp360Error(null)} className="shrink-0 opacity-80 hover:opacity-100" aria-label="Dismiss">
             ✕
           </button>

@@ -11,8 +11,9 @@
 //             time; an end before the start runs past midnight;
 //     roster: the person's Duty Roster shift that day (RosterRoutes.ts,
 //             duty_roster + duty_shifts); off day / no shift = not tracked.
-//   tracking_schedule_settings — the minutes added before and after every
-//     window (default 30: the trip to and from work).
+//   tracking_schedule_settings — the minutes added before every window
+//     (buffer_minutes, default 30: the trip to work) and after it
+//     (after_minutes, default 0: tracking stops right at the end time).
 //
 // Outside the window the phone stops tracking and its notification goes
 // away (src/lib/backgroundTracking.ts, DutyTrackingService.java), and
@@ -32,6 +33,7 @@ type Query = (sql: string, params?: any[]) => Promise<any>;
 const TZ_MS = 6 * 3600 * 1000;
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_BUFFER = 30;
+const DEFAULT_AFTER = 0;
 
 export type ScheduleMode = "always" | "fixed" | "roster";
 
@@ -49,6 +51,11 @@ export interface TrackingWindow {
   // ISO times (UTC); null = no end / nothing within the next week.
   until: string | null;
   next_start: string | null;
+}
+
+export interface Buffers {
+  before: number;
+  after: number;
 }
 
 export async function ensureTrackingScheduleSchema(dbPool: any): Promise<void> {
@@ -70,10 +77,14 @@ export async function ensureTrackingScheduleSchema(dbPool: any): Promise<void> {
     `CREATE TABLE IF NOT EXISTS tracking_schedule_settings (
       id INT NOT NULL PRIMARY KEY,
       buffer_minutes INT NOT NULL DEFAULT ${DEFAULT_BUFFER},
+      after_minutes INT NOT NULL DEFAULT ${DEFAULT_AFTER},
       updated_by INT NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`
   );
+  // Before / after split: an older table has one number for both.
+  const cols: any[] = ((await dbPool.query("SHOW COLUMNS FROM tracking_schedule_settings LIKE 'after_minutes'").catch(() => [[]])) as any[])[0] || [];
+  if (!cols.length) await run(`ALTER TABLE tracking_schedule_settings ADD COLUMN after_minutes INT NOT NULL DEFAULT ${DEFAULT_AFTER}`);
 }
 
 const hm = (v: any): string | null => {
@@ -96,10 +107,13 @@ const toRow = (r: any): ScheduleRow => ({
   end_time: hm(r.end_time)
 });
 
-export async function getBufferMinutes(queryDB: Query): Promise<number> {
-  const r: any = ((await queryDB("SELECT buffer_minutes FROM tracking_schedule_settings WHERE id = 1").catch(() => [])) as any[])[0];
-  const n = r ? Number(r.buffer_minutes) : DEFAULT_BUFFER;
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_BUFFER;
+export async function getBuffers(queryDB: Query): Promise<Buffers> {
+  const r: any = ((await queryDB("SELECT * FROM tracking_schedule_settings WHERE id = 1").catch(() => [])) as any[])[0];
+  const num = (v: any, d: number) => {
+    const n = v == null ? d : Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : d;
+  };
+  return { before: num(r?.buffer_minutes, DEFAULT_BUFFER), after: num(r?.after_minutes, DEFAULT_AFTER) };
 }
 
 // Bangladesh wall clock as "local ms" (UTC ms + 6 h), and back.
@@ -110,15 +124,14 @@ const isoOfLocal = (localMs: number) => new Date(localMs - TZ_MS).toISOString();
 
 type Shift = { date: string; start: string; end: string };
 
-// Windows (local ms) for days [today-1 … today+7], buffer added, merged.
-function windowsFor(row: ScheduleRow, shifts: Shift[], nowLocal: number, buffer: number): [number, number][] {
+// The shifts themselves (local ms, no buffer) for days [today-1 … today+7].
+function shiftsFor(row: ScheduleRow, shifts: Shift[], nowLocal: number): [number, number][] {
   const out: [number, number][] = [];
-  const b = buffer * 60000;
   const add = (dayStart: number, start: string, end: string) => {
     const s = dayStart + minutesOf(start) * 60000;
     let e = dayStart + minutesOf(end) * 60000;
     if (e <= s) e += DAY; // past midnight
-    out.push([s - b, e + b]);
+    out.push([s, e]);
   };
   const today = dayStartLocal(nowLocal);
   if (row.mode === "fixed" && row.start_time && row.end_time) {
@@ -129,9 +142,14 @@ function windowsFor(row: ScheduleRow, shifts: Shift[], nowLocal: number, buffer:
   } else if (row.mode === "roster") {
     for (const s of shifts) add(Date.parse(`${s.date}T00:00:00Z`), s.start, s.end);
   }
-  out.sort((x, y) => x[0] - y[0]);
+  return out.sort((x, y) => x[0] - y[0]);
+}
+
+// Tracking windows: each shift with the minutes before / after added, merged.
+function mergeWindows(raw: [number, number][], buf: Buffers): [number, number][] {
   const merged: [number, number][] = [];
-  for (const w of out) {
+  for (const [s, e] of raw) {
+    const w: [number, number] = [s - buf.before * 60000, e + buf.after * 60000];
     const last = merged[merged.length - 1];
     if (last && w[0] <= last[1]) last[1] = Math.max(last[1], w[1]);
     else merged.push([w[0], w[1]]);
@@ -139,10 +157,13 @@ function windowsFor(row: ScheduleRow, shifts: Shift[], nowLocal: number, buffer:
   return merged;
 }
 
-function windowFrom(row: ScheduleRow | null, shifts: Shift[], nowUtc: number, buffer: number): TrackingWindow {
-  if (!row || row.mode === "always") return { mode: "always", on: true, until: null, next_start: null };
+const ALWAYS: TrackingWindow = { mode: "always", on: true, until: null, next_start: null };
+
+function windowFrom(row: ScheduleRow | null, shifts: Shift[], nowUtc: number, buf: Buffers): TrackingWindow {
+  if (!row || row.mode === "always") return { ...ALWAYS };
   const now = localNow(nowUtc);
-  const ws = windowsFor(row, shifts, now, buffer);
+  const raw = shiftsFor(row, shifts, now);
+  const ws = mergeWindows(raw, buf);
   const cur = ws.find((w) => w[0] <= now && now < w[1]);
   if (cur) return { mode: row.mode, on: true, until: isoOfLocal(cur[1]), next_start: null };
   const next = ws.find((w) => w[0] > now);
@@ -178,13 +199,13 @@ async function loadShifts(queryDB: Query, employeePks: number[], nowUtc: number)
 export async function trackingWindowFor(queryDB: Query, userId: number, nowUtc = Date.now()): Promise<TrackingWindow> {
   const r: any = ((await queryDB("SELECT * FROM tracking_schedules WHERE user_id = ?", [userId]).catch(() => [])) as any[])[0];
   const row = r ? toRow(r) : null;
-  if (!row || row.mode === "always") return { mode: "always", on: true, until: null, next_start: null };
+  if (!row || row.mode === "always") return { ...ALWAYS };
   let shifts: Shift[] = [];
   if (row.mode === "roster") {
     const e: any = ((await queryDB("SELECT id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC, id LIMIT 1", [userId]).catch(() => [])) as any[])[0];
     if (e) shifts = (await loadShifts(queryDB, [Number(e.id)], nowUtc)).get(Number(e.id)) || [];
   }
-  return windowFrom(row, shifts, nowUtc, await getBufferMinutes(queryDB));
+  return windowFrom(row, shifts, nowUtc, await getBuffers(queryDB));
 }
 
 // Many people at once (status board, schedule list): userId -> window.
@@ -195,9 +216,9 @@ export async function trackingWindowsFor(queryDB: Query, people: { user_id: numb
   const byUser = new Map<number, ScheduleRow>(rows.map((r) => [Number(r.user_id), toRow(r)]));
   const rosterPks = people.filter((p) => p.employee_pk && byUser.get(p.user_id)?.mode === "roster").map((p) => Number(p.employee_pk));
   const shifts = await loadShifts(queryDB, rosterPks, nowUtc);
-  const buffer = await getBufferMinutes(queryDB);
+  const buf = await getBuffers(queryDB);
   for (const p of people) {
-    out.set(p.user_id, windowFrom(byUser.get(p.user_id) || null, p.employee_pk ? shifts.get(Number(p.employee_pk)) || [] : [], nowUtc, buffer));
+    out.set(p.user_id, windowFrom(byUser.get(p.user_id) || null, p.employee_pk ? shifts.get(Number(p.employee_pk)) || [] : [], nowUtc, buf));
   }
   return out;
 }
@@ -245,8 +266,10 @@ export function registerTrackingScheduleRoutes(app: Express, deps: Deps) {
         queryDB,
         list.map((e) => ({ user_id: Number(e.user_id), employee_pk: Number(e.id) }))
       );
+      const buf = await getBuffers(queryDB);
       res.json({
-        buffer_minutes: await getBufferMinutes(queryDB),
+        buffer_minutes: buf.before,
+        after_minutes: buf.after,
         people: list.map((e) => {
           const s = byUser.get(Number(e.user_id));
           return {
@@ -322,16 +345,21 @@ export function registerTrackingScheduleRoutes(app: Express, deps: Deps) {
     }
   });
 
-  // Minutes before / after every window (0–180).
+  // Minutes before the start (buffer_minutes) and after the end
+  // (after_minutes) of every window, 0–180 each.
   app.put("/api/tracking/schedule-settings", ...gate, async (req: any, res) => {
     try {
-      const n = Number(req.body?.buffer_minutes);
-      if (!Number.isInteger(n) || n < 0 || n > 180) return res.status(400).json({ error: "Minutes must be 0 to 180." });
+      const cur = await getBuffers(queryDB);
+      const pick = (v: any, d: number) => (v === undefined ? d : Number(v));
+      const before = pick(req.body?.buffer_minutes, cur.before);
+      const after = pick(req.body?.after_minutes, cur.after);
+      for (const n of [before, after]) if (!Number.isInteger(n) || n < 0 || n > 180) return res.status(400).json({ error: "Minutes must be 0 to 180." });
       await queryDB(
-        "INSERT INTO tracking_schedule_settings (id, buffer_minutes, updated_by) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE buffer_minutes = VALUES(buffer_minutes), updated_by = VALUES(updated_by)",
-        [n, Number(req.user.id)]
+        `INSERT INTO tracking_schedule_settings (id, buffer_minutes, after_minutes, updated_by) VALUES (1, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE buffer_minutes = VALUES(buffer_minutes), after_minutes = VALUES(after_minutes), updated_by = VALUES(updated_by)`,
+        [before, after, Number(req.user.id)]
       );
-      res.json({ buffer_minutes: n });
+      res.json({ buffer_minutes: before, after_minutes: after });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

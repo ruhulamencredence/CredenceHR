@@ -246,12 +246,13 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-2xl mx-auto">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Notice Board']} onBack={onBack} />}
+        {/* Phone: the title and Back are in the header (UserPanel.tsx sets it). */}
+        {!isNativeApp && <div className="hidden md:block"><ModulePath path={['Self Service', 'Notice Board']} onBack={onBack} /></div>}
         {/* On the native app the hardware / gesture back returns to the tile
             menu (UserPanel.tsx), so there's no on-screen Back here. */}
 
         <div className="flex items-end justify-between gap-3 mb-3 px-0.5">
-          <div>
+          <div className="hidden md:block">
             <h1 className="text-[22px] font-extrabold tracking-tight text-slate-900">Notices</h1>
             <p className="text-[12.5px] text-slate-500 mt-0.5">Everything posted for you</p>
           </div>

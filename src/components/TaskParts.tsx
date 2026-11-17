@@ -178,20 +178,18 @@ const TaskDeskCard: React.FC<{ task: Task; onOpen: () => void; showAssignees?: b
 // Modal shell, portalled so blurred ancestors never trap it.
 export const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }> = ({ title, onClose, children, wide }) =>
   createPortal(
-    <div className="fixed inset-0 z-[80] bg-slate-950/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-        className={`bg-white w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} max-h-[92vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col`}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h3 className="text-base font-bold text-slate-900">{title}</h3>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
+    // House popup style (liquid glass); on a phone it sits at the bottom.
+    <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-3 sm:p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} max-h-[92vh] flex`}>
+        <div role="dialog" aria-label={title} className="liquid-glass liquid-glass-in rounded-[32px] w-full flex flex-col min-h-0">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3">
+            <h3 className="text-base font-bold text-slate-900">{title}</h3>
+            <button type="button" onClick={onClose} className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500 shrink-0" aria-label="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="overflow-y-auto px-5 pb-5 pt-1">{children}</div>
         </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
       </div>
     </div>,
     document.body

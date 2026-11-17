@@ -164,8 +164,10 @@ useLiveRefresh(() => fetchClaims(true));
                 type="button"
                 onClick={() => setTab(t.key)}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full transition-colors ${
-                  active ? 'text-white shadow-sm bg-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                  active ? 'text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
+                // The app's accent colour, like every other page's tabs.
+                style={active ? { background: 'var(--g-accent, #7f00ff)' } : undefined}
               >
                 {t.label}
                 <span
@@ -305,14 +307,16 @@ useLiveRefresh(() => fetchClaims(true));
       <button
         type="button"
         onClick={() => setShowNewClaim(true)}
-        // Liquid glass pill — same translucent gradient + blur + glossy inset
-        // highlight + colored drop shadow treatment as Check In/Out's and
-        // Submit Leave's floating buttons, instead of the old flat solid
-        // color.
-        className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-indigo-400/90 via-indigo-600/90 to-violet-700/90 shadow-[0_10px_28px_-6px_rgba(79,70,229,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(79,70,229,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
-        style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
+        // Same pill as Check In/Out's "Add Check In/Out": the app's accent
+        // colour, centred above the bottom bar (clear of the Assistant tab).
+        className="md:hidden fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform"
+        style={{
+          bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))',
+          background: 'var(--g-accent, #7f00ff)',
+          boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)'
+        }}
       >
-        <Plus className="w-3.5 h-3.5" /> New Claim
+        <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> New Claim
       </button>
 
       {(showNewClaim || editingClaim) && (
