@@ -7,7 +7,10 @@
 // the browser, so they get the link to copy or share instead; newer ones
 // (MainActivity's DownloadListener) open it in the browser with one tap.
 //
-// "Later" hides it for a day, for that version only.
+// "Later" hides it for a day, for that version only. An app older than the
+// server's min_version_code (built before 14 Nov 2026 by default; the "Old
+// app — update needed" in Employee Tracking) gets "Update required" instead:
+// no Later and no close, the app can't be used until it's updated.
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -20,6 +23,7 @@ interface Latest {
   version_code: number;
   version_name: string | null;
   url: string;
+  required: boolean;
 }
 
 const SNOOZE_KEY = (code: number) => `credence_app_update_later_${code}`;
@@ -51,9 +55,11 @@ export const AppUpdatePrompt: React.FC = () => {
         const res = await fetch(apiUrl('/api/app/android-latest'));
         if (!res.ok) return;
         const data = await res.json();
-        if (cancelled || !data.available || !(Number(data.version_code) > build) || snoozed(Number(data.version_code))) return;
+        if (cancelled || !data.available || !(Number(data.version_code) > build)) return;
+        const required = build < (Number(data.min_version_code) || 0);
+        if (!required && snoozed(Number(data.version_code))) return;
         setOneTap(build > 1);
-        setLatest({ version_code: Number(data.version_code), version_name: data.version_name || null, url: String(data.url) });
+        setLatest({ version_code: Number(data.version_code), version_name: data.version_name || null, url: String(data.url), required });
       } catch {
         // offline, or no App plugin: no prompt
       }
@@ -109,8 +115,9 @@ export const AppUpdatePrompt: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[95] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4">
-      <div role="dialog" aria-label="Update available" className="liquid-glass liquid-glass-in rounded-[32px] max-w-sm w-full max-h-[92vh] overflow-y-auto">
+    <div className={`fixed inset-0 ${latest.required ? 'z-[300]' : 'z-[95]'} liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4`}>
+      <div role="dialog" aria-modal="true" aria-label={latest.required ? 'Update required' : 'Update available'} className="liquid-glass liquid-glass-in rounded-[32px] max-w-sm w-full max-h-[92vh] overflow-y-auto">
+        {!latest.required && (
         <button
           type="button"
           onClick={later}
@@ -119,14 +126,17 @@ export const AppUpdatePrompt: React.FC = () => {
         >
           <X className="w-4 h-4" />
         </button>
+        )}
 
         <div className="px-6 pt-6 pb-5">
           <div className="liquid-glass-inset w-14 h-14 rounded-[20px] flex items-center justify-center mb-3">
             <Download className="w-6 h-6" style={{ color: 'var(--g-accent)' }} />
           </div>
-          <h2 className="text-lg font-bold text-slate-900">Update available</h2>
+          <h2 className="text-lg font-bold text-slate-900">{latest.required ? 'Update required' : 'Update available'}</h2>
           <p className="mt-1 text-sm text-slate-600">
-            A newer CredenceHR app{latest.version_name ? ` (${latest.version_name})` : ''} is ready. Update to get the latest fixes.
+            {latest.required
+              ? `This CredenceHR app is too old to keep using. Install the new app${latest.version_name ? ` (${latest.version_name})` : ''} to continue — your account and data stay as they are.`
+              : `A newer CredenceHR app${latest.version_name ? ` (${latest.version_name})` : ''} is ready. Update to get the latest fixes.`}
           </p>
 
           {oneTap ? (
@@ -159,9 +169,11 @@ export const AppUpdatePrompt: React.FC = () => {
               </button>
             </>
           )}
-          <button type="button" onClick={later} className="w-full mt-1 py-1.5 text-xs font-semibold text-slate-500">
-            Later
-          </button>
+          {!latest.required && (
+            <button type="button" onClick={later} className="w-full mt-1 py-1.5 text-xs font-semibold text-slate-500">
+              Later
+            </button>
+          )}
         </div>
       </div>
     </div>
