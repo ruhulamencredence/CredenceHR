@@ -13,7 +13,8 @@
 // Guide for a partner's developers: docs/CredenceHR-SSO-API.md.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Copy, KeyRound, Link2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronDown, Copy, KeyRound, Link2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { useCardOpen } from '../lib/useCardOpen';
 import { useHrApi, inputCls } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 
@@ -165,6 +166,7 @@ const AppRow: React.FC<{
 
 export const Erp360SignInCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMsg: (m: Msg) => void }> = ({ api, onMsg }) => {
   const [data, setData] = useState<{ clients: Client[]; logins: LoginRow[]; calls: CallRow[]; initiate_url: string } | null>(null);
+  const [open, toggle, setOpen] = useCardOpen('active-users-partner-sso');
   const [secret, setSecret] = useState<{ name: string; app_id: string; secret: string } | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -209,23 +211,34 @@ export const Erp360SignInCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMs
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+        <button type="button" aria-expanded={open} onClick={toggle} className="flex-1 min-w-0 flex items-start gap-2 text-left">
+          <ChevronDown className={`w-4 h-4 mt-0.5 shrink-0 text-slate-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="min-w-0">
+          <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
             <Link2 className="w-4 h-4 text-violet-600" /> Partner app sign-in (SSO)
-          </div>
-          <p className="text-[11px] text-slate-500 mt-0.5 max-w-3xl">
+          </span>
+          {open ? (
+          <span className="block text-[11px] text-slate-500 mt-0.5 max-w-3xl">
             Lets someone signed in to another application (360 ERP or any other) open CredenceHR without a password. That application's server asks for a
             one-time link with its own App ID and Secret; the person is matched by <b>email and Employee ID</b>, and the sign-in passes the same checks as a
             password sign-in. Each application below has its own keys and settings.
-          </p>
-        </div>
+          </span>
+          ) : (
+          <span className="block text-[11px] text-slate-500 mt-0.5">
+            {data.clients.length} {data.clients.length === 1 ? 'application' : 'applications'}
+            {data.clients.length > 0 && ` (${data.clients.filter((c) => c.is_active).length} on): ${data.clients.map((c) => c.name).join(', ')}`}
+          </span>
+          )}
+          </span>
+        </button>
         {newName === null && (
-          <button type="button" onClick={() => setNewName('')} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-violet-600 text-white">
+          <button type="button" onClick={() => { setOpen(true); setNewName(''); }} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-violet-600 text-white">
             <Plus className="w-3.5 h-3.5" /> Add application
           </button>
         )}
       </div>
 
+      {open && (<>
       <div className="text-[11px] text-slate-600">
         Every application calls: <span className="font-mono break-all">POST {data.initiate_url}</span>{' '}
         <button type="button" onClick={() => copy(data.initiate_url)} className="inline-flex items-center gap-0.5 text-violet-700 font-semibold">
@@ -329,6 +342,7 @@ export const Erp360SignInCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMs
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 };
