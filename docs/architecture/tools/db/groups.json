@@ -25,6 +25,7 @@
   "mail_files",
   "mail_filters",
   "mail_folder_state",
+  "mail_folders",
   "mail_groups",
   "mail_messages",
   "mail_personal_groups",

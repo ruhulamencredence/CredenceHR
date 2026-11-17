@@ -89,6 +89,8 @@ export interface MailStatus {
   canDirectory?: boolean;
   // Tools -> My groups (users.can_use_mail_groups).
   canMyGroups?: boolean;
+  // My folders (users.can_use_mail_folders).
+  canFolders?: boolean;
 }
 
 export interface SignatureFields {
@@ -119,8 +121,20 @@ export interface MailFilter {
   id: string;
   name: string;
   conditions: { from?: string; to?: string; subjectContains?: string; bodyContains?: string; hasAttachment?: boolean };
-  actions: { archive?: boolean; markRead?: boolean; star?: boolean; applyLabels?: string[]; categorize?: string };
+  actions: { archive?: boolean; markRead?: boolean; star?: boolean; applyLabels?: string[]; categorize?: string; moveToFolder?: number };
   isActive: boolean;
+}
+
+// My folders: the person's own folders on the mail server (MailRoutes.ts).
+export interface MailFolder {
+  id: number;
+  accountId: number;
+  name: string;
+  path: string;
+  parentId: number | null;
+  selectable: boolean;
+  total: number;
+  unread: number;
 }
 
 export interface MailContact {

@@ -173,6 +173,15 @@ erDiagram
     bigint uidvalidity
     bigint last_uid
   }
+  mail_folders {
+    int id PK
+    int user_id FK
+    int account_id
+    varchar path
+    varchar name
+    int parent_id
+    tinyint selectable
+  }
   mail_groups {
     int id PK
     varchar email
@@ -332,6 +341,7 @@ erDiagram
   users ||..o{ mail_contacts : "user_id"
   users ||..o{ mail_events : "user_id"
   users ||..o{ mail_filters : "user_id"
+  users ||..o{ mail_folders : "user_id"
   users ||..o{ mail_messages : "user_id"
   users ||..o{ mail_personal_groups : "user_id"
   users ||..o{ mail_settings : "user_id"

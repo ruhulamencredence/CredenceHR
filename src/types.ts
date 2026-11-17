@@ -890,6 +890,7 @@ export interface User {
   can_use_mail?: boolean;
   can_view_mail_directory?: boolean;
   can_use_mail_groups?: boolean;
+  can_use_mail_folders?: boolean;
   can_receive_material?: boolean;
   // Material Receive -> take an MPR row back out of Dispatch Material — off by default.
   can_return_dispatch?: boolean;

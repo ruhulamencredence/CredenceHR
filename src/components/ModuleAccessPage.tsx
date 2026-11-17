@@ -80,6 +80,7 @@ type FlagKey =
   | 'can_use_mail'
   | 'can_view_mail_directory'
   | 'can_use_mail_groups'
+  | 'can_use_mail_folders'
   | 'can_receive_material'
   | 'can_return_dispatch'
   | 'can_give_feedback'
@@ -165,6 +166,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_use_mail', label: 'Credence Mail', desc: 'Connect their company mailbox and read / send mail.', section: 'mail', endpoint: 'mail-access' },
   { key: 'can_view_mail_directory', label: 'Email Directory', desc: 'Find any employee’s email address.', section: 'mail', endpoint: 'mail-directory-access', parent: 'can_use_mail' },
   { key: 'can_use_mail_groups', label: 'My groups', desc: 'Their own named lists of people for To / Cc / Bcc.', section: 'mail', endpoint: 'mail-groups-access', parent: 'can_use_mail' },
+  { key: 'can_use_mail_folders', label: 'My folders', desc: 'Their own folders and sub-folders on the mail server (also seen in Outlook / phone).', section: 'mail', endpoint: 'mail-folders-access', parent: 'can_use_mail' },
 
   // Shown with the modules they belong to (see MODULE_EXTRA_FLAGS / LEAVE_MANAGE).
   { key: 'can_view_group_dashboard', label: 'See all companies (group view)', desc: 'Admin Dashboard covers the mother and every sister company.', section: 'hr', endpoint: 'group-dashboard-access' },

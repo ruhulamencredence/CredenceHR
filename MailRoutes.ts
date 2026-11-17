@@ -347,6 +347,26 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
     ) DEFAULT CHARSET=utf8mb4`
   );
   await run("users.can_use_mail_groups", "ALTER TABLE users ADD COLUMN can_use_mail_groups TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // My folders: the person's own folders, real folders on their mail server
+  // (also seen in Outlook / the phone's mail app). Off by default per account
+  // (users.can_use_mail_folders). A message in one has folder_role "f:<id>"
+  // and the label "Folder:<id>".
+  await run(
+    "mail_folders",
+    `CREATE TABLE IF NOT EXISTS mail_folders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      account_id INT NOT NULL,
+      user_id INT NOT NULL,
+      path VARCHAR(500) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      parent_id INT NULL,
+      selectable TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mail_folder_path (account_id, path(191)),
+      KEY idx_mail_folders_user (user_id)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run("users.can_use_mail_folders", "ALTER TABLE users ADD COLUMN can_use_mail_folders TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -724,6 +744,85 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return f && f.inbox ? f : resolveFolders(a, c);
   }
 
+  // ---- My folders (users.can_use_mail_folders) ----------------------------
+  // Real folders on the person's mail server. Each one is a sync "role" of
+  // its own ("f:<id>" -> its server path), so syncing, moving, read / star
+  // and delete work for it the same way as for Inbox.
+  const folderCache = new Map<number, { ok: boolean; at: number }>();
+  async function hasFolders(userId: number): Promise<boolean> {
+    const hit = folderCache.get(userId);
+    if (hit && Date.now() - hit.at < 30_000) return hit.ok;
+    const rows: any[] = (await queryDB("SELECT role, can_use_mail_folders FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    const ok = rows[0]?.role === "superadmin" || !!Number(rows[0]?.can_use_mail_folders);
+    folderCache.set(userId, { ok, at: Date.now() });
+    return ok;
+  }
+  const folderIdOf = (role: any): number | null => {
+    const m = /^f:(\d+)$/.exec(String(role || ""));
+    return m ? Number(m[1]) : null;
+  };
+  const folderLabelOf = (labels: string[]) => labels.find((l) => /^Folder:\d+$/.test(l)) || null;
+  const folderRows = async (accountId: number): Promise<any[]> =>
+    ((await queryDB("SELECT * FROM mail_folders WHERE account_id = ? ORDER BY path ASC", [accountId]).catch(() => [])) || []) as any[];
+  // Inbox / Sent / Trash / Spam / Drafts, plus the person's own folders.
+  async function allFoldersOf(a: any, c: ImapFlow) {
+    const f: Record<string, string> = { ...(await foldersOf(a, c)) };
+    if (await hasFolders(Number(a.user_id))) for (const r of await folderRows(Number(a.id))) if (Number(r.selectable)) f[`f:${r.id}`] = r.path;
+    return f;
+  }
+  // The folders as the mail server has them now (also ones made in Outlook /
+  // on the phone): new ones added, renamed / deleted ones followed.
+  const foldersListedAt = new Map<number, number>();
+  async function refreshFolders(a: any, force = false) {
+    if (isInternalBox(a)) return;
+    if (!force && Date.now() - (foldersListedAt.get(Number(a.id)) || 0) < 60_000) return;
+    foldersListedAt.set(Number(a.id), Date.now());
+    await withAccountLock(Number(a.id), () =>
+      withImap(a, async (c) => {
+        const special = new Set(Object.values(await foldersOf(a, c)).map((x) => String(x).toLowerCase()));
+        const list: any[] = await c.list();
+        const mine = list.filter(
+          (m) => String(m.path).toUpperCase() !== "INBOX" && !m.specialUse && !special.has(String(m.path).toLowerCase())
+        );
+        const have = await folderRows(Number(a.id));
+        const byPath = new Map<string, any>(have.map((r) => [String(r.path), r]));
+        for (const m of mine) {
+          const selectable = m.flags?.has?.("\\Noselect") || m.flags?.has?.("\\NonExistent") ? 0 : 1;
+          const name = String(m.name || m.path).slice(0, 255);
+          const old = byPath.get(String(m.path));
+          if (!old) await queryDB("INSERT IGNORE INTO mail_folders (account_id, user_id, path, name, selectable) VALUES (?, ?, ?, ?, ?)", [Number(a.id), Number(a.user_id), String(m.path).slice(0, 500), name, selectable]);
+          else if (old.name !== name || Number(old.selectable) !== selectable) await queryDB("UPDATE mail_folders SET name = ?, selectable = ? WHERE id = ?", [name, selectable, old.id]);
+        }
+        // Gone from the server: its local copies go too (the mail itself is wherever the server put it).
+        const onServer = new Set(mine.map((m) => String(m.path)));
+        for (const r of have) if (!onServer.has(String(r.path))) await dropFolderRow(a, Number(r.id));
+        // Parents by path ("Projects/Gulshan" sits in "Projects").
+        const rows = await folderRows(Number(a.id));
+        const delimOf = (p: string) => list.find((m) => String(m.path) === p)?.delimiter || "/";
+        const idByPath = new Map<string, number>(rows.map((r) => [String(r.path), Number(r.id)]));
+        for (const r of rows) {
+          const d = delimOf(String(r.path));
+          const cut = String(r.path).lastIndexOf(d);
+          const parent = cut > 0 ? idByPath.get(String(r.path).slice(0, cut)) ?? null : null;
+          if ((r.parent_id == null ? null : Number(r.parent_id)) !== parent) await queryDB("UPDATE mail_folders SET parent_id = ? WHERE id = ?", [parent, r.id]);
+        }
+      })
+    );
+  }
+  async function dropFolderRow(a: any, id: number) {
+    const ids = [id, ...(await folderRows(Number(a.id))).filter((r) => Number(r.parent_id) === id).map((r) => Number(r.id))];
+    for (const x of ids) {
+      // Mail kept here only by label (a CredenceHR-only mailbox) goes back to Inbox.
+      await queryDB(
+        "UPDATE mail_messages SET labels_json = REPLACE(labels_json, ?, '\"Inbox\"'), folder_role = IF(folder_role = ?, 'inbox', folder_role) WHERE account_id = ? AND uid IS NULL AND labels_json LIKE ?",
+        [JSON.stringify(`Folder:${x}`), `f:${x}`, Number(a.id), `%${JSON.stringify(`Folder:${x}`)}%`]
+      );
+      await queryDB("DELETE FROM mail_messages WHERE account_id = ? AND folder_role = ? AND uid IS NOT NULL", [Number(a.id), `f:${x}`]);
+      await queryDB("DELETE FROM mail_folder_state WHERE account_id = ? AND role = ?", [Number(a.id), `f:${x}`]);
+      await queryDB("DELETE FROM mail_folders WHERE id = ? AND account_id = ?", [x, Number(a.id)]);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Settings helpers
   // -------------------------------------------------------------------------
@@ -785,6 +884,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (act.markRead) isRead = 1;
         if (act.star) isStarred = 1;
         if (act.categorize) category = String(act.categorize).slice(0, 30);
+        // "Move to folder": one of the person's own folders in this mailbox (checked when the rule is saved and here).
+        const fid = Number(act.moveToFolder);
+        if (fid > 0 && lab.includes("Inbox") && (await hasFolders(userId))) {
+          const f: any[] = (await queryDB("SELECT id FROM mail_folders WHERE id = ? AND user_id = ? AND selectable = 1", [fid, userId]).catch(() => [])) || [];
+          if (f.length) lab = lab.filter((l) => l !== "Inbox" && !/^Folder:\d+$/.test(l)).concat(`Folder:${fid}`);
+        }
         const extra = [...(Array.isArray(act.applyLabels) ? act.applyLabels : []), ...(act.applyLabel ? [act.applyLabel] : [])];
         for (const l of extra) if (l && !lab.includes(String(l))) lab.push(String(l).slice(0, 60));
       }
@@ -830,7 +935,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const text = String(parsed.text || "").replace(/\s+/g, " ").trim();
     const snippet = (text || subject).slice(0, 200);
     const flags: Set<string> = msg.flags || new Set();
-    const labels = [ROLE_LABEL[role] || "Inbox"];
+    const fid = folderIdOf(role);
+    const labels = [fid ? `Folder:${fid}` : ROLE_LABEL[role] || "Inbox"];
     let category = role === "inbox" ? categorize(fromEmail, subject, text) : "primary";
     let isRead = flags.has("\\Seen") || role === "sent" ? 1 : 0;
     let isStarred = flags.has("\\Flagged") ? 1 : 0;
@@ -922,13 +1028,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // -------------------------------------------------------------------------
   // Sync: new mail by UID, folder by folder
   // -------------------------------------------------------------------------
-  async function syncAccount(a: any, roles: string[] = SYNC_ROLES): Promise<{ inbox: number; sent: number; junk: number; fresh: any[] }> {
-    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, fresh: [] };
+  async function syncAccount(a: any, roles?: string[]): Promise<{ inbox: number; sent: number; junk: number; folders: number; fresh: any[] }> {
+    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, folders: 0, fresh: [] };
     return withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
-        const out = { inbox: 0, sent: 0, junk: 0, fresh: [] as any[] };
-        const folders = await foldersOf(a, c);
-        for (const role of roles) {
+        const out = { inbox: 0, sent: 0, junk: 0, folders: 0, fresh: [] as any[] };
+        const folders = await allFoldersOf(a, c);
+        // A full sync covers the person's own folders too.
+        for (const role of roles || [...SYNC_ROLES, ...Object.keys(folders).filter((k) => folderIdOf(k))]) {
           const path = folders[role];
           if (!path) continue;
           let lock: any;
@@ -976,8 +1083,20 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
                 }
                 const row = await storeFetched(a, role, m, !firstTime);
                 if (row?.addFlags.length) await c.messageFlagsAdd(String(m.uid), row.addFlags, { uid: true }).catch(() => undefined);
+                // A rule filed it in one of the person's folders: there on the server too.
+                const ruled = role === "inbox" && row ? folderLabelOf(row.labels) : null;
+                if (ruled) {
+                  const toRole = `f:${ruled.slice(7)}`;
+                  const res: any = folders[toRole] ? await c.messageMove(String(m.uid), folders[toRole], { uid: true }).catch(() => null) : null;
+                  const newUid = res?.uidMap?.get(Number(m.uid));
+                  if (newUid) await queryDB("UPDATE mail_messages SET folder_role = ?, uid = ? WHERE id = ?", [toRole, newUid, row.id]);
+                  // No new number from the server: the folder's own sync brings it in.
+                  else if (res) await queryDB("DELETE FROM mail_messages WHERE id = ?", [row.id]);
+                  else await queryDB("UPDATE mail_messages SET labels_json = ? WHERE id = ?", [JSON.stringify(row.labels.filter((l: string) => l !== ruled).concat("Inbox")), row.id]);
+                }
                 if (row) {
-                  (out as any)[role]++;
+                  if (folderIdOf(role)) out.folders++;
+                  else (out as any)[role]++;
                   if (role === "inbox" && !firstTime && row.labels.includes("Inbox")) out.fresh.push(row);
                 }
               }
@@ -1041,7 +1160,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     try {
       const r = await syncAccount(a, roles);
       if (r.fresh.length) announceNew(Number(a.user_id), Number(a.id), r.fresh);
-      if (r.inbox || r.sent || r.junk) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
+      if (r.inbox || r.sent || r.junk || r.folders) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
       return r;
     } catch (e: any) {
       const msg = e?.status ? e.message : imapError(e);
@@ -1435,7 +1554,11 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   const roleForLabels = (labels: string[], current: string | null) => {
     if (labels.includes("Trash")) return "trash";
     if (labels.includes("Spam")) return "junk";
+    const own = folderLabelOf(labels);
+    if (own) return `f:${own.slice(7)}`;
     if (labels.includes("Inbox") && (current === "trash" || current === "junk")) return "inbox";
+    // Out of one of the person's folders (to Inbox / Archive): back in the server's Inbox.
+    if (folderIdOf(current)) return "inbox";
     return current;
   };
 
@@ -1493,6 +1616,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         ourDomains: enabled ? (await systemSettings()).domains : [],
         canDirectory: enabled && (await hasDirectory(req.user)),
         canMyGroups: enabled && (await hasMyGroups(Number(req.user.id))),
+        canFolders: enabled && (await hasFolders(Number(req.user.id))),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -2030,7 +2154,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   );
 
   // ---- Sync ---------------------------------------------------------------
-  const lastManualSync = new Map<number, number>();
+  const lastManualSync = new Map<string, number>();
   app.post(
     "/api/mail/sync",
     ...gate,
@@ -2039,20 +2163,218 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const result: any[] = [];
       for (const a of list) {
         // A sync for the same mailbox a few seconds ago is enough.
-        const prev = lastManualSync.get(Number(a.id)) || 0;
+        const syncKey = `${a.id}:${Number(req.body?.folderId) || ""}`;
+        const prev = lastManualSync.get(syncKey) || 0;
         if (Date.now() - prev < 10_000) {
           result.push({ accountId: Number(a.id), skipped: true });
           continue;
         }
-        lastManualSync.set(Number(a.id), Date.now());
+        lastManualSync.set(syncKey, Date.now());
         try {
-          const r = await syncAndNotify(a);
-          result.push({ accountId: Number(a.id), inbox: r.inbox, sent: r.sent, spam: r.junk });
+          // { folderId }: just that one of the person's folders (opened in the list).
+          const fid = Number(req.body?.folderId);
+          const r = await syncAndNotify(a, fid > 0 ? [`f:${fid}`] : undefined);
+          result.push({ accountId: Number(a.id), inbox: r.inbox, sent: r.sent, spam: r.junk, folders: r.folders });
         } catch (e: any) {
           result.push({ accountId: Number(a.id), error: e.message });
         }
       }
       res.json({ accounts: result });
+    })
+  );
+
+  // ---- My folders (users.can_use_mail_folders) -----------------------------
+  const requireFolders = async (req: any, write: boolean) => {
+    if (write && req.mailViewAs) throw bad("Read only.", 403);
+    if (!(await hasFolders(uid(req)))) throw bad("My folders isn't turned on for your account.", 403);
+  };
+  const RESERVED_FOLDERS = new Set(["inbox", "sent", "sent items", "trash", "deleted items", "spam", "junk", "drafts", "archive", "starred", "important", "scheduled", "all"]);
+  const folderName = (v: any, delim: string) => {
+    const name = String(v ?? "").replace(/[\u0000-\u001f]/g, "").trim();
+    if (!name) throw bad("Give the folder a name.");
+    if (name.length > 60) throw bad("A folder name can be at most 60 characters.");
+    if (name.includes(delim) || /[\\/*%]/.test(name)) throw bad(`A folder name can't have ${delim === "/" ? "/" : `"${delim}" or /`} \\ * or %.`);
+    return name;
+  };
+  const folderOut = (r: any, counts: Map<string, any>) => {
+    const c = counts.get(`Folder:${r.id}`) || {};
+    return { id: Number(r.id), accountId: Number(r.account_id), name: r.name, path: r.path, parentId: r.parent_id == null ? null : Number(r.parent_id), selectable: !!Number(r.selectable), total: Number(c.n || 0), unread: Number(c.unread || 0) };
+  };
+  async function folderCounts(userId: number) {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT labels_json, is_read FROM mail_messages WHERE user_id = ? AND labels_json LIKE '%"Folder:%' AND labels_json NOT LIKE '%"Trash"%' AND labels_json NOT LIKE '%"Spam"%'`,
+        [userId]
+      ).catch(() => [])) || [];
+    const m = new Map<string, any>();
+    for (const r of rows) {
+      const l = folderLabelOf(parseJson<string[]>(r.labels_json, []));
+      if (!l) continue;
+      const c = m.get(l) || { n: 0, unread: 0 };
+      c.n++;
+      if (!Number(r.is_read)) c.unread++;
+      m.set(l, c);
+    }
+    return m;
+  }
+  const myFolder = async (req: any, id: any) => {
+    const f: any = ((await queryDB("SELECT * FROM mail_folders WHERE id = ? AND user_id = ?", [Number(id), uid(req)])) || [])[0];
+    if (!f) throw bad("That folder no longer exists.", 404);
+    return { f, a: await accountOf(uid(req), f.account_id) };
+  };
+  // ?accountId= &refresh=1 — every mailbox's folders (as the server has them), with counts.
+  app.get(
+    "/api/mail/folders",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      await requireFolders(req, false);
+      const list = req.query.accountId ? [await accountOf(uid(req), req.query.accountId)] : await accountsOf(uid(req));
+      const errors: any[] = [];
+      for (const a of list) await refreshFolders(a, req.query.refresh === "1").catch((e) => errors.push({ accountId: Number(a.id), error: imapError(e) }));
+      const counts = await folderCounts(uid(req));
+      const out: any[] = [];
+      for (const a of list) out.push(...(await folderRows(Number(a.id))).map((r) => folderOut(r, counts)));
+      res.json({ folders: out, errors });
+    })
+  );
+  // { accountId, name, parentId? } — a new folder on the mail server.
+  app.post(
+    "/api/mail/folders",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const a = await accountOf(uid(req), req.body?.accountId);
+      const parent = req.body?.parentId ? (await myFolder(req, req.body.parentId)).f : null;
+      if (parent && Number(parent.account_id) !== Number(a.id)) throw bad("That folder belongs to another mailbox.");
+      if ((await folderRows(Number(a.id))).length >= 300) throw bad("At most 300 folders in a mailbox.");
+      let path = "";
+      let name = "";
+      if (isInternalBox(a)) {
+        name = folderName(req.body?.name, "/");
+        path = parent ? `${parent.path}/${name}` : name;
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const ns: any = (c as any).namespace || {};
+            const delim = ns.delimiter || (await c.list())[0]?.delimiter || "/";
+            name = folderName(req.body?.name, delim);
+            if (!parent && RESERVED_FOLDERS.has(name.toLowerCase())) throw bad(`"${name}" is already a mail folder — pick another name.`);
+            path = parent ? `${parent.path}${delim}${name}` : `${ns.prefix || ""}${name}`;
+            const exists = (await c.list()).some((m: any) => String(m.path).toLowerCase() === path.toLowerCase());
+            if (exists) throw bad(`There is already a folder "${name}" here.`);
+            const r: any = await c.mailboxCreate(path);
+            path = String(r?.path || path);
+            await c.mailboxSubscribe(path).catch(() => undefined);
+          })
+        );
+      }
+      const dupe: any[] = await queryDB("SELECT id FROM mail_folders WHERE account_id = ? AND LOWER(path) = LOWER(?)", [Number(a.id), path]);
+      if (dupe.length) throw bad(`There is already a folder "${name}" here.`);
+      const ins: any = await queryDB("INSERT INTO mail_folders (account_id, user_id, path, name, parent_id, selectable) VALUES (?, ?, ?, ?, ?, 1)", [
+        Number(a.id), uid(req), path.slice(0, 500), name, parent ? Number(parent.id) : null
+      ]);
+      res.json({ success: true, folder: folderOut({ id: ins.insertId, account_id: a.id, name, path, parent_id: parent?.id ?? null, selectable: 1 }, new Map()) });
+    })
+  );
+  // { name } — renamed on the server; the folders inside it move with it.
+  app.patch(
+    "/api/mail/folders/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const { f, a } = await myFolder(req, req.params.id);
+      const all = await folderRows(Number(a.id));
+      let newPath = "";
+      let name = "";
+      if (isInternalBox(a)) {
+        name = folderName(req.body?.name, "/");
+        const cut = String(f.path).lastIndexOf("/");
+        newPath = cut > 0 ? `${String(f.path).slice(0, cut)}/${name}` : name;
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const list = await c.list();
+            const delim = list.find((m: any) => String(m.path) === String(f.path))?.delimiter || (c as any).namespace?.delimiter || "/";
+            name = folderName(req.body?.name, delim);
+            const cut = String(f.path).lastIndexOf(delim);
+            const ns: any = (c as any).namespace || {};
+            newPath = cut > 0 ? `${String(f.path).slice(0, cut)}${delim}${name}` : `${ns.prefix && String(f.path).startsWith(ns.prefix) ? ns.prefix : ""}${name}`;
+            if (newPath === f.path) return;
+            if (!f.parent_id && RESERVED_FOLDERS.has(name.toLowerCase())) throw bad(`"${name}" is already a mail folder — pick another name.`);
+            if (list.some((m: any) => String(m.path).toLowerCase() === newPath.toLowerCase() && String(m.path) !== String(f.path))) throw bad(`There is already a folder "${name}" here.`);
+            const r: any = await c.mailboxRename(String(f.path), newPath);
+            newPath = String(r?.newPath || newPath);
+            await c.mailboxSubscribe(newPath).catch(() => undefined);
+          })
+        );
+      }
+      if (newPath && newPath !== f.path) {
+        // This folder and every folder inside it: the new path in front.
+        const inside = (id: number): any[] => all.filter((r) => Number(r.parent_id) === id).flatMap((r) => [r, ...inside(Number(r.id))]);
+        for (const r of [f, ...inside(Number(f.id))]) {
+          const p = String(r.path);
+          if (!p.startsWith(String(f.path))) continue;
+          const np = newPath + p.slice(String(f.path).length);
+          await queryDB("UPDATE mail_folders SET path = ?, name = IF(id = ?, ?, name) WHERE id = ?", [np.slice(0, 500), Number(f.id), name, Number(r.id)]);
+          await queryDB("UPDATE mail_folder_state SET path = ? WHERE account_id = ? AND role = ?", [np.slice(0, 255), Number(a.id), `f:${r.id}`]);
+        }
+      }
+      res.json({ success: true });
+    })
+  );
+  // Deleted on the server with the folders inside it; their mail goes back to Inbox first — no mail is deleted.
+  app.delete(
+    "/api/mail/folders/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const { f, a } = await myFolder(req, req.params.id);
+      const all = await folderRows(Number(a.id));
+      const under = (id: number): any[] => all.filter((r) => Number(r.parent_id) === id).flatMap((r) => [...under(Number(r.id)), r]);
+      const doomed = [...under(Number(f.id)), f]; // deepest first
+      let moved = 0;
+      const toInbox = async (id: number, map?: Map<number, number>) => {
+        const rows: any[] = (await queryDB("SELECT id, uid, labels_json FROM mail_messages WHERE account_id = ? AND labels_json LIKE ?", [Number(a.id), `%${JSON.stringify(`Folder:${id}`)}%`])) || [];
+        for (const r of rows) {
+          const labels = parseJson<string[]>(r.labels_json, []).filter((l) => l !== `Folder:${id}`);
+          if (!labels.includes("Inbox")) labels.unshift("Inbox");
+          const newUid = r.uid != null && map ? map.get(Number(r.uid)) ?? null : r.uid;
+          await queryDB("UPDATE mail_messages SET labels_json = ?, folder_role = 'inbox', uid = ? WHERE id = ?", [JSON.stringify(labels), newUid, Number(r.id)]);
+        }
+        moved += rows.length;
+      };
+      if (isInternalBox(a)) {
+        for (const r of doomed) await toInbox(Number(r.id));
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            for (const r of doomed) {
+              let map: Map<number, number> | undefined;
+              if (Number(r.selectable)) {
+                const lock = await c.getMailboxLock(String(r.path)).catch(() => null);
+                if (lock) {
+                  try {
+                    if (Number((c as any).mailbox?.exists || 0) > 0) map = ((await c.messageMove("1:*", "INBOX")) as any)?.uidMap;
+                  } finally {
+                    lock.release();
+                  }
+                }
+              }
+              await toInbox(Number(r.id), map);
+              await c.mailboxDelete(String(r.path)).catch((e: any) => {
+                if (!/NONEXISTENT|doesn't exist|not exist/i.test(String(e?.responseText || e?.message || ""))) throw e;
+              });
+            }
+          })
+        );
+      }
+      for (const r of doomed) {
+        await queryDB("DELETE FROM mail_folder_state WHERE account_id = ? AND role = ?", [Number(a.id), `f:${r.id}`]);
+        await queryDB("DELETE FROM mail_folders WHERE id = ?", [Number(r.id)]);
+      }
+      io.to(`user:${uid(req)}`).emit("mail:changed", { accountId: Number(a.id) });
+      res.json({ success: true, folders: doomed.length, movedToInbox: moved });
     })
   );
 
@@ -2331,7 +2653,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const labels = parseJson<string[]>(row.labels_json, []);
     return labels.includes("Trash") || (!row.uid && (labels.includes("Drafts") || labels.includes("Scheduled")));
   };
-  const toTrashLabels = (row: any) => [...parseJson<string[]>(row.labels_json, []).filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive"), "Trash"];
+  const toTrashLabels = (row: any) => [...parseJson<string[]>(row.labels_json, []).filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive" && !/^Folder:\d+$/.test(l)), "Trash"];
   async function deleteOne(userId: number, row: any) {
     const labels = parseJson<string[]>(row.labels_json, []);
     if (deletesForGood(row)) {
@@ -2363,7 +2685,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const a = await accountOf(userId, accountId);
     await withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
-        const folders = await foldersOf(a, c);
+        const folders = await allFoldersOf(a, c);
         const path = folders[role];
         if (!path) return;
         const lock = await c.getMailboxLock(path);
@@ -2479,8 +2801,20 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       if (action === "delete") await deleteMany(uid(req), rows);
       else if (action === "move") {
         const to = String(req.body?.to || "");
-        if (!["Inbox", "Spam", "Archive"].includes(to)) throw bad("Move to Inbox, Spam or Archive.");
-        await moveMany(uid(req), rows, (r) => [...parseJson<string[]>(r.labels_json, []).filter((l) => !["Inbox", "Spam", "Trash", "Archive"].includes(l)), to]);
+        const fid = /^Folder:(\d+)$/.exec(to)?.[1];
+        if (!["Inbox", "Spam", "Archive"].includes(to) && !fid) throw bad("Move to Inbox, Spam, Archive or one of your folders.");
+        let list = rows;
+        if (fid) {
+          // One of the person's own folders: only mail of that same mailbox goes in.
+          if (!(await hasFolders(uid(req)))) throw bad("My folders isn't turned on for your account.", 403);
+          const f: any = ((await queryDB("SELECT * FROM mail_folders WHERE id = ? AND user_id = ?", [Number(fid), uid(req)])) || [])[0];
+          if (!f) throw bad("That folder no longer exists.", 404);
+          if (!Number(f.selectable)) throw bad("That folder only holds other folders.");
+          list = rows.filter((r) => Number(r.account_id) === Number(f.account_id));
+          if (!list.length) throw bad("That folder belongs to another mailbox.");
+        }
+        await moveMany(uid(req), list, (r) => [...parseJson<string[]>(r.labels_json, []).filter((l) => !["Inbox", "Spam", "Trash", "Archive"].includes(l) && !/^Folder:\d+$/.test(l)), to]);
+        return res.json({ success: true, done: list.length, skipped: rows.length - list.length });
       } else {
         const patch = req.body?.patch || {};
         if (Array.isArray(patch.labels)) for (const r of rows) await applyPatch(uid(req), r, patch);
@@ -2900,7 +3234,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           markRead: !!ac.markRead,
           star: !!ac.star,
           applyLabels: (Array.isArray(ac.applyLabels) ? ac.applyLabels : ac.applyLabel ? [ac.applyLabel] : []).map((x: any) => str(x, 60)).filter(Boolean).slice(0, 10),
-          categorize: str(ac.categorize, 30) || undefined
+          categorize: str(ac.categorize, 30) || undefined,
+          // One of the person's own folders (My folders); checked again when mail arrives.
+          moveToFolder: Number(ac.moveToFolder) > 0 ? Number(ac.moveToFolder) : undefined
         }),
         is_active: b.isActive === false ? 0 : 1
       };
