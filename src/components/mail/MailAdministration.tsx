@@ -58,6 +58,8 @@ interface LogRow {
 interface SystemSettings {
   internalDelivery: boolean;
   domains: string[];
+  // A colleague not using Credence Mail: through the mail server, or held inside.
+  unconnected: 'server' | 'inside';
   canEdit: boolean;
 }
 
@@ -150,7 +152,7 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
       })
       .catch((e) => setError(e.message));
   }, [token]);
-  const save = async (patch: Partial<Pick<SystemSettings, 'internalDelivery'>> & { domains?: string }) => {
+  const save = async (patch: Partial<Pick<SystemSettings, 'internalDelivery' | 'unconnected'>> & { domains?: string }) => {
     if (patch.internalDelivery === false && !(await confirmDialog('Turn internal delivery off? Mail between colleagues will go through the mail server (cPanel) again.', { confirmLabel: 'Turn off', tone: 'danger' }))) return;
     setBusy(true);
     setError('');
@@ -186,8 +188,8 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
           <div className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Building2 className="w-4 h-4 text-emerald-600" /> Internal delivery</div>
           <p className="text-xs text-slate-600 mt-1">
             Mail from one of our mailboxes to a colleague whose mailbox is connected in Credence Mail is delivered inside CredenceHR, at once — it never goes through the
-            mail server (cPanel). Only recipients outside (another domain, or a colleague not on Credence Mail) get it through the mail server. With a mix, each side
-            gets one copy, To / Cc stay as written and Bcc stays hidden.
+            mail server (cPanel). Recipients outside (another domain) get it through the mail server, and so does a colleague not on Credence Mail unless set
+            otherwise below. With a mix, each side gets one copy, To / Cc stay as written and Bcc stays hidden.
           </p>
         </div>
         <button
@@ -218,6 +220,37 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
           )}
         </div>
         <p className="text-[11px] text-slate-500 mt-1">Comma separated. Only mail sent from and to these domains can stay inside CredenceHR.</p>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-700">A colleague not using Credence Mail</div>
+        <p className="text-[11px] text-slate-500 mt-0.5">
+          Someone who hasn't connected their mailbox in Credence Mail (or has Mail turned off). Mail from someone who has only an inside-only mailbox always stays inside.
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="A colleague not using Credence Mail">
+          {([
+            ['server', 'Through the mail server', 'Goes to their real mailbox — seen in Outlook or the phone, and in Credence Mail once they connect.'],
+            ['inside', 'Keep it inside CredenceHR', 'Held in Credence Mail only; they see it when they open Credence Mail. For people with no real mailbox.']
+          ] as const).map(([k, title, desc]) => {
+            const on = (s.unconnected || 'server') === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={!s.canEdit || busy}
+                onClick={() => !on && void save({ unconnected: k })}
+                className={`text-left rounded-xl border px-3 py-2.5 transition-colors disabled:cursor-not-allowed ${on ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'} ${!s.canEdit ? 'opacity-70' : ''}`}
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                  <span className={`w-3.5 h-3.5 rounded-full border-2 ${on ? 'border-emerald-600 bg-emerald-600 shadow-[inset_0_0_0_2px_white]' : 'border-slate-300'}`} />
+                  {title}
+                </span>
+                <span className="block mt-1 text-[11px] text-slate-500 leading-snug">{desc}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
         Internal mail is only in Credence Mail: Outlook or a phone's mail app on the cPanel mailbox doesn't show it.

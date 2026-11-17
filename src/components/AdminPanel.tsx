@@ -1,3 +1,5 @@
+import { MprEditLog } from './MprEditLog';
+import { useElementHeight } from '../lib/useElementHeight';
 import { AttendanceEditPopup } from './AttendanceEditPopup';
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
@@ -96,6 +98,7 @@ const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) =
 const FeedbackAdmin = lazyPanel(() => import('./feedback/FeedbackAdmin').then((m) => ({ default: m.FeedbackAdmin })));
 const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport').then((m) => ({ default: m.BudgetSubmissionReport })));
 const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
+const MprUndelivered = lazyPanel(() => import('./MprUndelivered').then((m) => ({ default: m.MprUndelivered })));
 const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
 const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
 const AccountMergePopup = lazyPanel(() => import('./AccountMergePopup').then((m) => ({ default: m.AccountMergePopup })));
@@ -542,6 +545,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
+  // Users / Monthly Leave Application: the sticky search bar's height, so
+  // the table's column titles stick right under it (lib/useElementHeight.ts).
+  const [usersBarRef, usersBarH] = useElementHeight();
+  const [leaveBarRef, leaveBarH] = useElementHeight();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'designations' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
@@ -949,7 +956,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   useEffect(() => {
-    if (activeTab === 'editlog') fetchMprEditLog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -3102,6 +3108,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const saved = user.module_permission_layers?.designations;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
+  // MPR Edit Log: read (history, approvals) and the explicit-only mpr_followup.
+  const editlogLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.editlog;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -3401,7 +3413,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // Dispatch Material (Purchase) — its own tick too.
       dispatch: reportLayer('dispatch_material'),
       // P.O Import — its own tick too (MprPoImport.tsx).
-      poImport: reportLayer('po_import')
+      poImport: reportLayer('po_import'),
+      // Undelivered MPR & Close short — its own tick too (MprUndelivered.tsx).
+      closeShort: reportLayer('close_short')
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
@@ -3447,14 +3461,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // blank when there's no match, which is accurate (that import data doesn't exist).
   // Reports tab: the MPR Entries report or the per-Project Budget
   // Submission Status (BudgetSubmissionReport).
-  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import'>('entries');
+  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import' | 'undelivered'>('entries');
   // The reports this account may open, in page order; a view it can't open
   // falls back to the first one it can.
   const reportViews = ([
     ['entries', 'MPR Entries Report', reportCan.read],
     ['submission', 'Budget Submission Status', reportCan.submission],
     ['dispatch', 'Dispatch Material', reportCan.dispatch],
-    ['po_import', 'P.O Import', reportCan.poImport]
+    ['po_import', 'P.O Import', reportCan.poImport],
+    ['undelivered', 'Undelivered MPR', reportCan.closeShort]
   ] as const).filter(([, , ok]) => ok);
   const reportView = reportViews.some(([k]) => k === reportViewPicked) ? reportViewPicked : reportViews[0]?.[0] || 'entries';
 
@@ -3670,6 +3685,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
+      {activeTab === 'reports' && reportView === 'undelivered' && reportCan.closeShort && <MprUndelivered token={token} projects={projects} />}
       {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => void loadShared(['entries'])} />}
 
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
@@ -4827,8 +4843,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           viewing report, the same "Monthly Attendance Report" pattern applied
           to Leave Applications instead of attendance. */}
       {activeTab === 'leave_applications' && (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <CalendarClock className="w-5 h-5 text-blue-600" />
@@ -4839,6 +4855,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {leaveApplicationsReportDepartments.length > 0 && ' Only Departments you have access to are listed below.'}
               </p>
             </div>
+          </div>
+          {/* Search + Department stay at the top while the list scrolls (a
+              computer); the table's column titles stick right under them. */}
+          <div ref={leaveBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             <div className="flex flex-wrap gap-3 items-center">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -4873,9 +4893,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               {/* Desktop — unchanged full table. */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="hidden md:block overflow-x-clip">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <thead className="sticky z-10 bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + leaveBarH }}>
                     <tr>
                       <th className="px-4 py-3">Employee</th>
                       <th className="px-4 py-3">Department</th>
@@ -5306,13 +5326,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           happened, so an Admin can see at a glance which day which Job/MPR rows were
           touched (and by whom) without opening each entry's own history one at a time. */}
       {activeTab === 'editlog' && (
-        <>
+        // MprEditLog.tsx: Pending approvals (the Job Edit section below), Edit
+        // history, and — with the mpr_followup layer — Needs update and People.
+        <MprEditLog
+          token={token}
+          projects={projects}
+          pendingCount={pendingJobEditRequests.length}
+          canFollowup={editlogLayer('mpr_followup')}
+          pendingSection={<>
         {/* Job Edit Approvals — pending first, so an Admin with "editlog" access sees
             what needs action before scrolling into the (much longer) permanent log
             below. Only an Admin/User account with the "editlog" module actually gets
             data back from GET /api/job-edits — this section simply doesn't render
             anything for anyone else since this whole tab is already gated the same way. */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+        <div>
           <div className="p-6 border-b border-slate-200">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Clock3 className="w-4 h-4 text-amber-600" /> Job Edit Approvals
@@ -5476,107 +5503,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             onAct={(action) => void actOnJobEditRequest(jobEditDetails.id, action)}
           />
         )}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <History className="w-4 h-4 text-blue-600" /> MPR Edit Log
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Every change made to a submitted MPR row (mostly Delivery Date updates, since other fields lock after
-                submission), grouped by the day it was edited.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={editLogSearch}
-                  onChange={(e) => setEditLogSearch(e.target.value)}
-                  placeholder="Search Job No, MPR No, User..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleExportEditLogExcel}
-                disabled={mprEditLogByDay().length === 0}
-                title="Download this log as an Excel file"
-                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              >
-                <FileDown className="w-3.5 h-3.5" /> Export Excel
-              </button>
-            </div>
-          </div>
-
-          {loadingMprEditLog ? (
-            <p className="text-xs text-slate-400 text-center py-12">Loading edit log...</p>
-          ) : mprEditLogByDay().length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-12">No MPR edits recorded yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-200">
-              {mprEditLogByDay().map(([day, records]) => (
-                <div key={day}>
-                  <div className="px-6 py-2.5 bg-slate-50 flex items-center gap-2 sticky top-0">
-                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-xs font-bold text-slate-700">{day}</span>
-                    <span className="text-[10px] text-slate-400">
-                      ({records.length} edit{records.length === 1 ? '' : 's'})
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-white text-slate-500 text-[11px] uppercase tracking-wider">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Time</th>
-                          <th className="px-4 py-2 text-left">Job No</th>
-                          <th className="px-4 py-2 text-left">MPR No</th>
-                          <th className="px-4 py-2 text-left">Item Name</th>
-                          <th className="px-4 py-2 text-left">Job Owner</th>
-                          <th className="px-4 py-2 text-left">Field Changed</th>
-                          <th className="px-4 py-2 text-left">From</th>
-                          <th className="px-4 py-2 text-left">To</th>
-                          <th className="px-4 py-2 text-left">Edited By</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-sm">
-                        {records.map((h) => (
-                          <tr key={h.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">
-                              {new Date(h.edited_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-blue-600 text-xs">{h.job_no || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
-                                {h.mpr_no || '—'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs">{h.item_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-600 text-xs">{h.entry_owner_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                {FIELD_LABELS[h.field_name] || h.field_name}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-500 text-xs max-w-[160px] truncate" title={h.old_value || ''}>
-                              {h.old_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs max-w-[160px] truncate font-medium" title={h.new_value || ''}>
-                              {h.new_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">{h.editor_name || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </>
+</>}
+        />
       )}
 
       {/* TAB 2: PROJECTS */}
@@ -6760,8 +6688,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             )}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900">User Management</h3>
               <p className="text-xs text-slate-500">
@@ -6770,6 +6698,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
               </p>
             </div>
+          </div>
+          {/* Search, filters and buttons stay at the top while the list
+              scrolls (a computer); the column titles stick right under them. */}
+          <div ref={usersBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
                 without touching the `users` state other tabs on this page depend on. */}
             {/* Phone: search on its own line, Role + Department side by side,
@@ -6912,7 +6844,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               <table className="hidden md:table w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                <thead className="sticky z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + usersBarH }}>
                   <tr>
                     <th className="pl-5 pr-1 py-2.5 w-8">
                       {(() => {
@@ -6936,6 +6868,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       })()}
                     </th>
                     <th className="px-3 py-2.5 text-left">User</th>
+                    <th className="px-3 py-2.5 text-left">Department</th>
                     <th className="px-3 py-2.5 text-left w-28">Role</th>
                     <th className="px-3 py-2.5 text-left">Access</th>
                     {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
@@ -6966,6 +6899,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
                           </div>
                         </div>
+                      </td>
+                      {/* From the linked Employee record; none = not an employee. */}
+                      <td className="px-3 py-3 text-xs">
+                        {u.department ? <span className="text-slate-700">{u.department}</span> : <span className="text-slate-400">—</span>}
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
@@ -7056,6 +6993,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 truncate">{u.username ? `${u.username}${u.email ? ` · ${u.email}` : ''}` : u.email || '—'}</div>
+                      {u.department && <div className="text-[11px] text-slate-600 truncate">{u.department}</div>}
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>

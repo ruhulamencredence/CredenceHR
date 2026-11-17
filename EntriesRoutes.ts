@@ -15,6 +15,7 @@
 // toDateOnlyString are plain top-level helpers there, not closures) and
 // threaded through as deps rather than duplicated or re-imported directly.
 
+import { recordEditAttempt } from "./MprEditLogRoutes";
 import type { Express } from "express";
 import { leadTimeProblem } from "./deliveryDateConditions";
 import { isEntryLocked as teamEntryLocked, isProjectLocked, isJobSubmitted, jobProjectId, onTeam, teamScopeSql, unlockIfEmpty } from "./PepmTeam";
@@ -1086,7 +1087,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // Job Name and Job Duration are shared by every MPR row of the same Job, so a change
   // to either is applied — and logged in entry_edit_history — for every entry under
   // that Job, not just the row that was open when the edit was made.
-  app.put("/api/entries/:id", authenticateToken, async (req: any, res) => {
+  // A refused edit is kept as "Tried, not saved" (MPR Edit Log).
+  app.put("/api/entries/:id", authenticateToken, recordEditAttempt(queryDB), async (req: any, res) => {
     try {
       const { id } = req.params;
       const { item_name, delivery_date, job_name, job_duration, mpr_id, budget_item_id, requisitioned_qty } = req.body;

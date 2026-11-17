@@ -429,7 +429,7 @@ Admin Panel → PEPM Manage → Data Import → **Condition Set**-এ দুট�
 Admin Panel → Monthly Attendance Report-এর তৃতীয় ট্যাব **Department Summary** (Attendance Reports module-এর layer `dept_summary`; সাধারণ পড়া, তাই layer না রাখা অ্যাকাউন্ট ডিফল্টে পায়; Superadmin সবসময়)।
 
 - **One day:** বাছা দিনে প্রতি department-এ কতজন Present, Absent, Leave, Delay, Extreme Delay। **Whole month:** মাসের প্রতিটি দিন যোগ করে (person-days), আজ পর্যন্ত।
-- **Superadmin-এর হাজিরা (১৭ নভেম্বর):** Monthly আর Daily Attendance Report (`AttendanceRoutes.ts`) আগে শুধু `user` / `admin` login নিত, তাই কর্মী হলেও Superadmin-এর হাজিরা আসত না। এখন যে Superadmin login-এর সাথে Employee record যুক্ত (`all_employees.user_id`), তিনি সবার মতো রিপোর্টে আছেন; Employee record ছাড়া Superadmin (system account) আগের মতো বাদ। রিপোর্টের কর্মী বাছাইয়ের তালিকা আগে থেকেই এই নিয়মে চলত (Employee ID থাকলে Superadmin দেখায়)।
+- **Superadmin-এর হাজিরা (১৭ নভেম্বর):** Monthly আর Daily Attendance Report (`AttendanceRoutes.ts`) আগে শুধু `user` / `admin` login নিত, তাই কর্মী হলেও Superadmin-এর হাজিরা আসত না। এখন যে Superadmin login-এর সাথে Employee record যুক্ত (`all_employees.user_id`), তিনি সবার মতো রিপোর্টে আছেন; Employee record ছাড়া Superadmin (system account) আগের মতো বাদ। রিপোর্টের কর্মী বাছাইয়ের তালিকা আগে থেকেই এই নিয়মে চলত (Employee ID থাকলে Superadmin দেখায়)। একই login-এ একাধিক Employee record যুক্ত থাকলে (যেমন merge-এর পর বন্ধ করা পুরনো কপি) যেকোনো একটা চালু থাকলেই login চালু ধরা হয়, Department চালু record-এর — আগে বন্ধ কপিটা থাকলে login "inactive" হয়ে রিপোর্ট থেকে বাদ পড়ত, যদিও Timesheet / ছুটি দেখাত। রিপোর্ট শুধু যে company-তে কাজ চলছে তার কর্মী দেখায়; অন্য company-র কর্মী (Superadmin হলেও) সেই company-তে গিয়ে দেখা যায়।
 - Present / Absent / Leave আসে Monthly report-এর একই হিসাব থেকে (`computeMonthlyReport`: Weekend/Holiday, Duty Roster, approved leave, joining date); Delay / Extreme Delay payroll-এর late policy থেকে (`computeLateDatesByEmployee`, salary month অনুযায়ী)। Delay-এর দিনও Present-এ গোনা। Attendance % = (Present + Leave) ÷ working days। শুধু Active কর্মী।
 - Filter: Departments (একাধিক), Project। Department সীমা থাকা Admin শুধু নিজের department দেখেন।
 - যেকোনো সংখ্যায় চাপলে কারা — দিনে কে কখন ঢুকেছে বা কোন ছুটি, মাসে কার কত দিন। PDF (department টেবিল) ও Excel (Summary + People শিট)।
@@ -740,6 +740,35 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 ## App খুললে কী লোড হয়
 
 App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashboard-এর কার্ডের ডাটা আসে। Check In/Out (তালিকাসহ), Bill Claim, Leave Application, Timesheet, Employee Directory, Notice Board-এর code আর ডাটা আসে সেই পাতা প্রথমবার খুললে; এরপর পাতাটা রেখে দেওয়া হয়, ফিরে এলে সঙ্গে সঙ্গে দেখায় (`UserPanel.tsx` seen)। PEPM-এর Budget / MPR No / entries আসে Budget, Jobs, Entries বা Job Edit খুললে। ফোনে শুধু ফোনের Dashboard আর ডেস্কটপে শুধু ডেস্কটপেরটা বসে (`src/lib/useMdUp.ts`) — আগে দুটোই বসে দুবার ডাটা আনত। Pending Approvals-এ গাড়ি ও driver-এর তালিকা আসে শুধু গাড়ি বসানোর মতো আবেদন থাকলে।
+
+## MPR Edit Log — নতুন পাতা (১৭ নভেম্বর)
+
+Admin Panel → PEPM Management → MPR Edit Log (`src/components/MprEditLog.tsx`, server `MprEditLogRoutes.ts`)। চারটা ভাগ:
+
+- **Pending approvals** — Job Edit-এর Add MPR / Delete MPR / New Job অনুরোধ, আগের মতো Approve / Reject (`/api/job-edits`)।
+- **Edit history** (`GET /api/mpr-edit-log`) — এক save = এক কার্ড: একই মানুষ একই MPR সারিতে একই মিনিটে যা বদলেছেন। আগের মান কাটা, নতুন মোটা; Delivery Date কত দিন পিছাল / এগোল, Qty কত বাড়ল। উপরে সংখ্যা (save, আজ, Delivery Date পিছিয়েছে, Tried — not saved, কতজন)। ফিল্টার: Today / 7 days (default) / This month / All time, Project, কী বদলেছে, কে বদলেছেন, Job / MPR / item — computer-এ header-এর নিচে আটকে থাকে। ৫০টা করে ("Show more")। Export Excel = ফিল্টারে যা আছে, প্রতি বদল এক সারি।
+- **Tried — not saved** — `PUT /api/entries/:id` বদল ফিরিয়ে দিলে (৪০০ / ৪০৩ / ৪০৯: Budget জমা হয়ে lock, নিয়ম ভাঙা…) কে, কখন, কী বদলাতে চেয়েছিলেন আর server-এর কারণ `entry_edit_attempts`-এ থাকে (`recordEditAttempt`), history-তে লাল কার্ড। তাই "করেছিলাম, হয়নি" আর "করিনি" আলাদা করা যায়।
+- **Full history** (`GET /api/mpr-edit-log/entry/:id`) — এক MPR সারির শুরু থেকে সব save আর ফেরানো চেষ্টা, liquid-glass side sheet-এ।
+- **Needs update** (`GET /api/mpr-edit-log/needs-update`) — Delivery Date পার, মাল পুরো আসেনি (Material Dispatch-এর `md_received_qty` + Close short করা অংশ < চাওয়া Qty); কত দিন পার, কতটা এসেছে, শেষ edit কবে বা "Never edited" / "tried, not saved"। পুরনো আগে।
+- **People** (`GET /api/mpr-edit-log/people?days=7|30|month`) — MPR-এর মালিক ধরে: এখন overdue, সময়ের মধ্যে কয়টার তারিখ পার হয়েছে, তার কয়টা "সময়মতো" (মাল তারিখের মধ্যে এসেছে, বা Delivery Date পুরনো তারিখের দিন বা আগে বদলানো), কয়টা save, কয়টা ফেরানো চেষ্টা, শেষ edit।
+
+অনুমতি: `editlog` module-এ এখন layer — `read` (Edit history ও Pending approvals; layer না দেওয়া পুরনো account-এ আগের মতো থাকে) আর `mpr_followup` (Needs update ও People, explicit-only — টিক দিয়ে দিতে হয়)। API একই layer যাচাই করে।
+
+## Undelivered MPR ও Close short (১৭ নভেম্বর)
+
+Budget-এর শেষ Delivery Date-এর মধ্যে যে MPR-এর মাল (বা বাকি Qty) আর আনা সম্ভব নয়, তা আগে Budget থেকে বাদও যেত না, আলাদাও রাখা যেত না। এখন Admin Panel → PEPM Management → Reports → **Undelivered MPR** (`src/components/MprUndelivered.tsx`, server `MprDispatchRoutes.ts`):
+
+- **Undelivered** (`GET /api/mpr/undelivered?budget_id=&project_id=&show=passed|all`) — Budget বেছে (`GET /api/mpr/undelivered/budgets`) সেই Budget-এর যে MPR সারির মাল পুরো আসেনি: চাওয়া, এসেছে (received dispatch), পথে (sent), এখনো বাকি; default-এ শুধু Delivery Date পার বা Budget-এর শেষ তারিখের পরে পড়া সারি, চাইলে সব। উপরে সংখ্যা (সারি, পুরো আসেনি, বাকির মূল্য, Set aside)। Export Excel।
+- **Close short** — সারি টিক দিয়ে "Close short…" (liquid-glass popup): প্রতিটা সারিতে কতটা set aside (সর্বোচ্চ = বাকি − পথে থাকা; পথে থাকলে সতর্কতা — আগে সেই dispatch Cancel করতে হবে) আর কারণ লেখা বাধ্যতামূলক (`POST /api/mpr/close-short`)। `entries.closed_short_qty / _at / _by / _reason`-এ থাকে; সারির Material Dispatch target চাওয়া Qty থেকে সেটুকু কমে (`targetOf`), তাই Purchase আর তা পাঠাতে পারে না, "Needs update"-এও আর বাকি দেখায় না। কিছু মোছে না; Budget-এর allocation আটকেই থাকে (পরে Carry forward ইত্যাদি সিদ্ধান্তের জন্য)। Dispatch timeline-এ "Closed short (set aside)" আর MPR Edit Log-এ "Close short" হিসেবে লেখা থাকে।
+- **Set aside** — কী set aside হয়েছে, কে, কবে, কেন। Budget-এর শেষ Delivery Date পার না হওয়া পর্যন্ত **Undo** (`POST /api/mpr/close-short/undo`, confirm চায়) — Qty আবার বাকি হয়।
+
+অনুমতি: PEPM Reports-এর নতুন layer `close_short` ("Undelivered MPR & Close short", explicit-only — টিক দিয়ে দিতে হয়)। পাতা দেখা আর Close short / Undo — দুটোই এই layer চায়, UI আর API দুই জায়গায়।
+
+## Credence Mail: সহকর্মীর কাছে ভেতরে, নাকি mail server দিয়ে (১৭ নভেম্বর)
+
+আমাদের domain-এর (Mail Administration → Our domains) এক ঠিকানা থেকে আরেক ঠিকানায় mail এখন **শুধু তখন CredenceHR-এর ভেতরে** যায়, যখন প্রাপক Credence Mail ব্যবহার করেন: নিজের আসল mailbox Credence Mail-এ যুক্ত (inside-only নয়), Mail চালু (`can_use_mail` বা Superadmin), login block নয়। বাকি সবার কাছে — কখনো Credence Mail খোলেননি, mailbox সরিয়ে (log out) দিয়েছেন, বা Mail বন্ধ — mail **mail server (SMTP) দিয়ে** তাঁর আসল mailbox-এ যায়: Outlook / ফোনে দেখা যায়, পরে Credence Mail-এ mailbox যুক্ত করলে সেখান থেকেই আসে। আগে এমন কারো জন্য ঠিকানা login বা Employee record-এ পেলেই একটা inside-only mailbox বানিয়ে mail ভেতরে রাখা হতো, তাই তিনি Credence Mail না খোলা পর্যন্ত কোথাও দেখতেন না।
+
+Mail Administration → Internal delivery → **"A colleague not using Credence Mail"**: *Through the mail server* (default) / *Keep it inside CredenceHR* (আগের নিয়ম — যাঁদের আসল mailbox নেই তাঁদের জন্য; `mail_system_settings.unconnected_route` = `server` / `inside`, বদলাতে আগের মতো `mail_settings` layer)। যিনি নিজে শুধু inside-only mailbox থেকে লেখেন (mail server-এ ঢোকার উপায় নেই), তাঁর mail সহকর্মীর কাছে আগের মতো ভেতরেই যায়। আগে বানানো inside-only mailbox আর তাতে জমা mail যেমন ছিল থাকে। Mail লেখার পাতা আর Mail Administration-এর "Check an address" কারণ বলে: "… hasn't connected their mailbox in Credence Mail — it goes to their mailbox through the mail server" বা "… has Credence Mail turned off …" (`whyOutside`, `internalTargets` — `MailRoutes.ts`)।
 
 ## Chat-এর তালিকা: Archive, Pin, Unread, Favorites, List, Delete (১৭ নভেম্বর)
 
