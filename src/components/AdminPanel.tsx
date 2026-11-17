@@ -98,6 +98,7 @@ const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) =
 const FeedbackAdmin = lazyPanel(() => import('./feedback/FeedbackAdmin').then((m) => ({ default: m.FeedbackAdmin })));
 const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport').then((m) => ({ default: m.BudgetSubmissionReport })));
 const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
+const MprUndelivered = lazyPanel(() => import('./MprUndelivered').then((m) => ({ default: m.MprUndelivered })));
 const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
 const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
 const AccountMergePopup = lazyPanel(() => import('./AccountMergePopup').then((m) => ({ default: m.AccountMergePopup })));
@@ -3412,7 +3413,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // Dispatch Material (Purchase) — its own tick too.
       dispatch: reportLayer('dispatch_material'),
       // P.O Import — its own tick too (MprPoImport.tsx).
-      poImport: reportLayer('po_import')
+      poImport: reportLayer('po_import'),
+      // Undelivered MPR & Close short — its own tick too (MprUndelivered.tsx).
+      closeShort: reportLayer('close_short')
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
@@ -3458,14 +3461,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // blank when there's no match, which is accurate (that import data doesn't exist).
   // Reports tab: the MPR Entries report or the per-Project Budget
   // Submission Status (BudgetSubmissionReport).
-  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import'>('entries');
+  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import' | 'undelivered'>('entries');
   // The reports this account may open, in page order; a view it can't open
   // falls back to the first one it can.
   const reportViews = ([
     ['entries', 'MPR Entries Report', reportCan.read],
     ['submission', 'Budget Submission Status', reportCan.submission],
     ['dispatch', 'Dispatch Material', reportCan.dispatch],
-    ['po_import', 'P.O Import', reportCan.poImport]
+    ['po_import', 'P.O Import', reportCan.poImport],
+    ['undelivered', 'Undelivered MPR', reportCan.closeShort]
   ] as const).filter(([, , ok]) => ok);
   const reportView = reportViews.some(([k]) => k === reportViewPicked) ? reportViewPicked : reportViews[0]?.[0] || 'entries';
 
@@ -3681,6 +3685,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
+      {activeTab === 'reports' && reportView === 'undelivered' && reportCan.closeShort && <MprUndelivered token={token} projects={projects} />}
       {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => void loadShared(['entries'])} />}
 
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (

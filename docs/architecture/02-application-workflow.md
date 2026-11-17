@@ -754,6 +754,16 @@ Admin Panel → PEPM Management → MPR Edit Log (`src/components/MprEditLog.tsx
 
 অনুমতি: `editlog` module-এ এখন layer — `read` (Edit history ও Pending approvals; layer না দেওয়া পুরনো account-এ আগের মতো থাকে) আর `mpr_followup` (Needs update ও People, explicit-only — টিক দিয়ে দিতে হয়)। API একই layer যাচাই করে।
 
+## Undelivered MPR ও Close short (১৭ নভেম্বর)
+
+Budget-এর শেষ Delivery Date-এর মধ্যে যে MPR-এর মাল (বা বাকি Qty) আর আনা সম্ভব নয়, তা আগে Budget থেকে বাদও যেত না, আলাদাও রাখা যেত না। এখন Admin Panel → PEPM Management → Reports → **Undelivered MPR** (`src/components/MprUndelivered.tsx`, server `MprDispatchRoutes.ts`):
+
+- **Undelivered** (`GET /api/mpr/undelivered?budget_id=&project_id=&show=passed|all`) — Budget বেছে (`GET /api/mpr/undelivered/budgets`) সেই Budget-এর যে MPR সারির মাল পুরো আসেনি: চাওয়া, এসেছে (received dispatch), পথে (sent), এখনো বাকি; default-এ শুধু Delivery Date পার বা Budget-এর শেষ তারিখের পরে পড়া সারি, চাইলে সব। উপরে সংখ্যা (সারি, পুরো আসেনি, বাকির মূল্য, Set aside)। Export Excel।
+- **Close short** — সারি টিক দিয়ে "Close short…" (liquid-glass popup): প্রতিটা সারিতে কতটা set aside (সর্বোচ্চ = বাকি − পথে থাকা; পথে থাকলে সতর্কতা — আগে সেই dispatch Cancel করতে হবে) আর কারণ লেখা বাধ্যতামূলক (`POST /api/mpr/close-short`)। `entries.closed_short_qty / _at / _by / _reason`-এ থাকে; সারির Material Dispatch target চাওয়া Qty থেকে সেটুকু কমে (`targetOf`), তাই Purchase আর তা পাঠাতে পারে না, "Needs update"-এও আর বাকি দেখায় না। কিছু মোছে না; Budget-এর allocation আটকেই থাকে (পরে Carry forward ইত্যাদি সিদ্ধান্তের জন্য)। Dispatch timeline-এ "Closed short (set aside)" আর MPR Edit Log-এ "Close short" হিসেবে লেখা থাকে।
+- **Set aside** — কী set aside হয়েছে, কে, কবে, কেন। Budget-এর শেষ Delivery Date পার না হওয়া পর্যন্ত **Undo** (`POST /api/mpr/close-short/undo`, confirm চায়) — Qty আবার বাকি হয়।
+
+অনুমতি: PEPM Reports-এর নতুন layer `close_short` ("Undelivered MPR & Close short", explicit-only — টিক দিয়ে দিতে হয়)। পাতা দেখা আর Close short / Undo — দুটোই এই layer চায়, UI আর API দুই জায়গায়।
+
 ## Credence Mail: সহকর্মীর কাছে ভেতরে, নাকি mail server দিয়ে (১৭ নভেম্বর)
 
 আমাদের domain-এর (Mail Administration → Our domains) এক ঠিকানা থেকে আরেক ঠিকানায় mail এখন **শুধু তখন CredenceHR-এর ভেতরে** যায়, যখন প্রাপক Credence Mail ব্যবহার করেন: নিজের আসল mailbox Credence Mail-এ যুক্ত (inside-only নয়), Mail চালু (`can_use_mail` বা Superadmin), login block নয়। বাকি সবার কাছে — কখনো Credence Mail খোলেননি, mailbox সরিয়ে (log out) দিয়েছেন, বা Mail বন্ধ — mail **mail server (SMTP) দিয়ে** তাঁর আসল mailbox-এ যায়: Outlook / ফোনে দেখা যায়, পরে Credence Mail-এ mailbox যুক্ত করলে সেখান থেকেই আসে। আগে এমন কারো জন্য ঠিকানা login বা Employee record-এ পেলেই একটা inside-only mailbox বানিয়ে mail ভেতরে রাখা হতো, তাই তিনি Credence Mail না খোলা পর্যন্ত কোথাও দেখতেন না।

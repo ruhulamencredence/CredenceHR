@@ -123,7 +123,7 @@ const fieldTone = (f: string) =>
       : f.startsWith('job_edit')
         ? 'bg-emerald-50 text-emerald-700'
         : f.startsWith('close_short')
-          ? 'bg-fuchsia-50 text-fuchsia-700'
+          ? 'bg-pink-50 text-pink-700'
           : 'bg-slate-100 text-slate-700';
 
 export const MprEditLog: React.FC<{
@@ -605,7 +605,7 @@ const NeedsUpdate: React.FC<{ token: string; projects: { id: number; project_nam
                     <td className="px-4 py-2.5">{r.owner_name || '—'}</td>
                     <td className="px-4 py-2.5 tabular-nums">{shortDate(r.delivery_date)}</td>
                     <td className="px-4 py-2.5 tabular-nums font-bold text-rose-700">{r.overdue_days} day{r.overdue_days === 1 ? '' : 's'}</td>
-                    <td className="px-4 py-2.5 tabular-nums">{r.received} / {r.qty}{r.closed_short > 0 && <div className="text-[11px] text-fuchsia-700">{r.closed_short} set aside</div>}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{r.received} / {r.qty}{r.closed_short > 0 && <div className="text-[11px] text-pink-700">{r.closed_short} set aside</div>}</td>
                     <td className="px-4 py-2.5 text-xs">{lastEdit(r)}</td>
                   </tr>
                 ))}

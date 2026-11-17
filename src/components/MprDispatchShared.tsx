@@ -127,7 +127,7 @@ export async function mdFetch<T>(token: string, path: string, method = 'GET', bo
 }
 
 interface TimelineEvent {
-  action: 'request' | 'queue' | 'unqueue' | 'confirm' | 'dispatch' | 'receive' | 'cancel';
+  action: 'request' | 'queue' | 'unqueue' | 'confirm' | 'dispatch' | 'receive' | 'cancel' | 'close_short' | 'close_short_undo';
   qty: number | null;
   detail: string;
   at: string | null;
@@ -140,7 +140,10 @@ const EVENT: Record<TimelineEvent['action'], { label: string; icon: React.Compon
   confirm: { label: 'Confirmed by the project', icon: BadgeCheck, cls: 'bg-teal-100 text-teal-700' },
   dispatch: { label: 'Dispatched', icon: Truck, cls: 'bg-sky-100 text-sky-700' },
   receive: { label: 'Received', icon: PackageCheck, cls: 'bg-emerald-100 text-emerald-700' },
-  cancel: { label: 'Dispatch cancelled', icon: XCircle, cls: 'bg-rose-100 text-rose-700' }
+  cancel: { label: 'Dispatch cancelled', icon: XCircle, cls: 'bg-rose-100 text-rose-700' },
+  // Undelivered MPR -> Close short: the rest set aside / owed again.
+  close_short: { label: 'Closed short (set aside)', icon: ListMinus, cls: 'bg-pink-100 text-pink-700' },
+  close_short_undo: { label: 'Set-aside Qty owed again', icon: ListPlus, cls: 'bg-slate-100 text-slate-600' }
 };
 
 // One MPR row's whole story: asked for, every dispatch, every receipt.
