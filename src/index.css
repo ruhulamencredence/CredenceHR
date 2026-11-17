@@ -1652,6 +1652,21 @@ html[data-lglass] .gsidebar {
   -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
   border-right: 1px solid rgba(255,255,255,.8) !important;
 }
+/* The phone's slide-in menu sits over the coloured page: at 35–55% white the
+   orange header and cards showed through and the menu looked washed out.
+   Nearly solid frosted white, a short accent band at the top only (the white
+   logo stays visible on it), a crisp edge and a soft shadow. */
+html[data-lglass] .gsidebar.fixed {
+  background:
+    /* glass sheen: a soft light streak across the top corner */
+    linear-gradient(125deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 38%),
+    linear-gradient(180deg, rgba(var(--g-accent-rgb), .80) 0, rgba(var(--g-accent-rgb), .45) 64px, rgba(var(--g-accent-rgb), .08) 150px, rgba(var(--g-accent-rgb), 0) 210px),
+    /* see-through enough for the page's colours to glow softly behind, opaque enough for crisp text */
+    linear-gradient(180deg, rgba(255,255,255,.80), rgba(255,255,255,.70)) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(170%) brightness(1.04); backdrop-filter: blur(48px) saturate(170%) brightness(1.04);
+  border-right: 1px solid rgba(255,255,255,.85) !important;
+  box-shadow: inset -1px 0 0 rgba(15,23,42,.06), inset 0 1px 0 rgba(255,255,255,.9), 12px 0 40px rgba(15,23,42,.22) !important;
+}
 html[data-lglass] .gsidebar [class*="text-white"] { color: #334155 !important; }
 html[data-lglass] .gsidebar :is([class*="bg-white/15"], [class*="bg-white/20"]) { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
 html[data-lglass] .gsidebar input[type="text"] { color: #334155 !important; background-color: rgba(255,255,255,.6) !important; box-shadow: inset 0 0 0 1px rgba(15,23,42,.06) !important; }
