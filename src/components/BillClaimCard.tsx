@@ -232,8 +232,10 @@ useLiveRefresh(() => fetchClaims(true));
           </div>
 
           {/* Desktop — a real row table instead of the mobile card list, same
-              pattern ClaimsPanel.tsx uses for Check In/Out. */}
-          <div className="hidden md:block max-h-72 overflow-y-auto overflow-x-auto">
+              pattern ClaimsPanel.tsx uses for Check In/Out. It reaches down to
+              the bottom of the window (it used to stop at 18rem, a short box
+              on a big screen) and scrolls inside after that. */}
+          <div className="hidden md:block max-h-[max(18rem,calc(100dvh-18rem))] overflow-y-auto overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0">
                 <tr>
