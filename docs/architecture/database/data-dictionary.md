@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৬টি টেবিল, ২৮৭৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৭টি টেবিল, ২৮৮৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -332,6 +332,22 @@ Unique: `uq_mail_blob_sha`(sha256)
 | `path` | varchar(255) | না |  | |
 | `uidvalidity` | bigint(20) | না | default 0 | |
 | `last_uid` | bigint(20) | না | default 0 | |
+
+### `mail_folders`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `account_id` | int(11) | না |  | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `path` | varchar(500) | না |  | |
+| `name` | varchar(255) | না |  | |
+| `parent_id` | int(11) | হ্যাঁ |  | |
+| `selectable` | tinyint(1) | না | default 1 | |
+| `system_role` | varchar(20) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uq_mail_folder_path`(account_id,path)
 
 ### `mail_groups`
 
@@ -1492,6 +1508,7 @@ Unique: `unique_user_employee`(user_id,employee_pk)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK  | |
 | `buffer_minutes` | int(11) | না | default 30 | |
+| `after_minutes` | int(11) | না | default 0 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 

@@ -9,14 +9,13 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft, Reply, ReplyAll, Forward, Star, Trash2, MailOpen, Mail, ShieldAlert, Inbox, Archive, Paperclip, Download, Loader2, Clock, ChevronDown, ChevronUp, AlertCircle,
-  MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban
-} from 'lucide-react';
+  MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban, FolderInput } from 'lucide-react';
 import { MailBody } from './MailBody';
 import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, mailPhotoUrl, saveBlob, shortMailDate } from '../../lib/mailApi';
 
 export type ReaderAction =
   | 'reply' | 'replyAll' | 'forward' | 'star' | 'unread' | 'trash' | 'spam' | 'notSpam' | 'archive' | 'inbox' | 'unschedule'
-  | 'task' | 'event' | 'contact' | 'rule' | 'block';
+  | 'task' | 'event' | 'contact' | 'rule' | 'block' | 'folder';
 
 const initials = (s: string) =>
   (s || '?')
@@ -181,7 +180,9 @@ export const MailReader: React.FC<{
   // Pictures that show without asking (own mail, our domains, trusted senders).
   picturesOk?: (m: MailMessage) => boolean;
   onTrustSender?: (email: string) => void;
-}> = ({ token, thread, folder, error, readOnly, onBack, onAction, picturesOk, onTrustSender }) => {
+  // My folders on: "Move to folder" in the toolbar.
+  canFolders?: boolean;
+}> = ({ token, thread, folder, error, readOnly, onBack, onAction, picturesOk, onTrustSender, canFolders }) => {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [more, setMore] = useState(false);
   const last = thread && thread.length ? thread[thread.length - 1] : null;
@@ -195,7 +196,7 @@ export const MailReader: React.FC<{
   if (!last) return <div className="p-6 text-sm text-slate-500">This mail is no longer here.</div>;
 
   const head = thread[0];
-  const ownLabels = [...new Set(thread.flatMap((m) => m.labels))].filter((l) => !SYSTEM_LABELS.has(l));
+  const ownLabels = [...new Set(thread.flatMap((m) => m.labels))].filter((l) => !SYSTEM_LABELS.has(l) && !/^Folder:\d+$/.test(l));
   const inSpam = last.labels.includes('Spam');
   const inTrash = last.labels.includes('Trash');
   const scheduled = last.labels.includes('Scheduled');
@@ -222,6 +223,9 @@ export const MailReader: React.FC<{
                 {folder !== 'Archive' && folder !== 'Sent' && <button type="button" className={btn} onClick={() => onAction('archive', last)} title="Archive"><Archive className="w-4 h-4" /></button>}
                 {folder !== 'Sent' && <button type="button" className={btn} onClick={() => onAction('spam', last)} title="Report spam"><ShieldAlert className="w-4 h-4" /></button>}
               </>
+            )}
+            {canFolders && folder !== 'Drafts' && (
+              <button type="button" className={btn} onClick={() => onAction('folder', last)} title="Move to folder" aria-label="Move to folder"><FolderInput className="w-4 h-4" /></button>
             )}
             <button type="button" className={btn} onClick={() => onAction('unread', last)} title={last.isRead ? 'Mark as unread' : 'Mark as read'}>
               {last.isRead ? <Mail className="w-4 h-4" /> : <MailOpen className="w-4 h-4" />}

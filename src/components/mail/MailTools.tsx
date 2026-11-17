@@ -12,7 +12,8 @@ import {
   Filter, Plus, Trash2, Pencil, FileText, Users, Search, Mail, Phone, Building2, ListChecks, CalendarDays, Check, MapPin, Loader2, ChevronLeft, ChevronRight, Clock, Link2
 } from 'lucide-react';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { MAIL_CATEGORIES, MailContact, MailEvent, MailFilter, MailTask, MailTemplate, mailFetch } from '../../lib/mailApi';
+import { MAIL_CATEGORIES, MailContact, MailEvent, MailFilter, MailFolder, MailTask, MailTemplate, mailFetch } from '../../lib/mailApi';
+import { flatTree, folderPath } from './MailFolders';
 import { MailPopup, Tabs, Toggle, EmptyNote, RowsSkeleton, inputCls, labelCls, primaryBtn, ghostBtn } from './MailPopup';
 import { MailAvatar } from './MailReader';
 
@@ -38,7 +39,7 @@ function useList<T>(token: string, path: string) {
 // ===========================================================================
 const emptyRule = (): Omit<MailFilter, 'id'> => ({ name: '', conditions: {}, actions: { applyLabels: [] }, isActive: true });
 
-const RuleForm: React.FC<{ token: string; rule: Partial<MailFilter>; onSaved: () => void; onCancel: () => void }> = ({ token, rule, onSaved, onCancel }) => {
+const RuleForm: React.FC<{ token: string; rule: Partial<MailFilter>; onSaved: () => void; onCancel: () => void; folders?: MailFolder[] }> = ({ token, rule, onSaved, onCancel, folders }) => {
   const [r, setR] = useState<Omit<MailFilter, 'id'>>({ ...emptyRule(), ...rule, conditions: { ...(rule.conditions || {}) }, actions: { applyLabels: [], ...(rule.actions || {}) } });
   const [labelsInput, setLabelsInput] = useState((rule.actions?.applyLabels || []).join(', '));
   const [busy, setBusy] = useState(false);
@@ -53,7 +54,7 @@ const RuleForm: React.FC<{ token: string; rule: Partial<MailFilter>; onSaved: ()
     if (!r.name.trim()) return setError('Give the rule a name.');
     if (!c.from && !c.to && !c.subjectContains && !c.bodyContains && !c.hasAttachment) return setError('Add at least one condition.');
     const applyLabels = labelsInput.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 10);
-    if (!a.archive && !a.markRead && !a.star && !applyLabels.length && !a.categorize) return setError('Pick at least one thing the rule does.');
+    if (!a.archive && !a.markRead && !a.star && !applyLabels.length && !a.categorize && !a.moveToFolder) return setError('Pick at least one thing the rule does.');
     setBusy(true);
     try {
       const body = { ...r, actions: { ...a, applyLabels } };
@@ -87,6 +88,17 @@ const RuleForm: React.FC<{ token: string; rule: Partial<MailFilter>; onSaved: ()
       <div className="liquid-glass-inset rounded-[24px] p-4 space-y-3">
         <div className="text-xs font-semibold text-slate-700">…then</div>
         <Toggle checked={!!a.archive} onChange={(v) => setA({ archive: v })} label="Skip the Inbox (Archive it)" />
+        {folders && folders.length > 0 && (
+          <div>
+            <label className={labelCls} htmlFor="rule-folder">Move it to folder</label>
+            <select id="rule-folder" value={a.moveToFolder || ''} onChange={(e) => setA({ moveToFolder: e.target.value ? Number(e.target.value) : undefined })} className={inputCls}>
+              <option value="">(leave it in Inbox)</option>
+              {[...new Set(folders.map((f) => f.accountId))].flatMap((acc) =>
+                flatTree(folders, acc).filter(({ f }) => f.selectable).map(({ f }) => <option key={f.id} value={f.id}>{folderPath(folders, f.id)}</option>)
+              )}
+            </select>
+          </div>
+        )}
         <Toggle checked={!!a.markRead} onChange={(v) => setA({ markRead: v })} label="Mark it as read" />
         <Toggle checked={!!a.star} onChange={(v) => setA({ star: v })} label="Star it" />
         <div>
@@ -115,11 +127,11 @@ const describeRule = (f: MailFilter) => {
   const c = f.conditions || {};
   const a = f.actions || {};
   const when = [c.from && `from “${c.from}”`, c.to && `to “${c.to}”`, c.subjectContains && `subject has “${c.subjectContains}”`, c.bodyContains && `text has “${c.bodyContains}”`, c.hasAttachment && 'has an attachment'].filter(Boolean).join(', ');
-  const then = [a.archive && 'archive', a.markRead && 'mark read', a.star && 'star', ...(a.applyLabels || []).map((l) => `label ${l}`), a.categorize && `to ${a.categorize}`].filter(Boolean).join(', ');
+  const then = [a.archive && 'archive', a.moveToFolder && 'move to a folder', a.markRead && 'mark read', a.star && 'star', ...(a.applyLabels || []).map((l) => `label ${l}`), a.categorize && `to ${a.categorize}`].filter(Boolean).join(', ');
   return `${when || 'any mail'} → ${then || 'nothing'}`;
 };
 
-export const MailRulesPopup: React.FC<{ token: string; onClose: () => void; onChanged: () => void; prefill?: Partial<MailFilter> | null }> = ({ token, onClose, onChanged, prefill }) => {
+export const MailRulesPopup: React.FC<{ token: string; onClose: () => void; onChanged: () => void; prefill?: Partial<MailFilter> | null; folders?: MailFolder[] }> = ({ token, onClose, onChanged, prefill, folders }) => {
   const { items, error, load, setError } = useList<MailFilter>(token, '/filters');
   const [editing, setEditing] = useState<Partial<MailFilter> | null>(prefill || null);
   const saved = () => {
@@ -143,7 +155,7 @@ export const MailRulesPopup: React.FC<{ token: string; onClose: () => void; onCh
   return (
     <MailPopup title={editing ? (editing.id ? 'Edit rule' : 'New rule') : 'Rules'} icon={<Filter className="w-4 h-4 text-sky-600" />} onClose={onClose}>
       {editing ? (
-        <RuleForm token={token} rule={editing} onSaved={saved} onCancel={() => (prefill && !editing.id ? onClose() : setEditing(null))} />
+        <RuleForm token={token} rule={editing} folders={folders} onSaved={saved} onCancel={() => (prefill && !editing.id ? onClose() : setEditing(null))} />
       ) : (
         <div className="space-y-3">
           <p className="text-xs text-slate-600">Rules sort new mail for you as it arrives — label it, star it, mark it read or keep it out of the Inbox.</p>
