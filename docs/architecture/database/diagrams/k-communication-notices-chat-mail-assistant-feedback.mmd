@@ -87,6 +87,10 @@ erDiagram
     int user_id PK,FK
     int room_id PK,FK
     datetime muted_until
+    tinyint archived
+    datetime pinned_at
+    tinyint marked_unread
+    tinyint favorite
   }
   chat_rooms {
     int id PK

@@ -310,9 +310,9 @@
 <g id="edge66" class="edge">
 <title>chat_messages&#45;&gt;chat_message_reactions</title>
 <g id="a_edge66"><a xlink:title="message_id">
-<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M3894.93,-7625.51C3935.48,-7598.76 3986.42,-7559.65 4020.05,-7514.11 4055.66,-7465.88 4046.96,-7444.17 4068.71,-7388.31 4106.72,-7290.68 4094.19,-7254.36 4154.71,-7168.84 4200.35,-7104.33 4367.17,-6991.47 4423.78,-6936.33 4521.55,-6841.09 4627.02,-6720.85 4683.95,-6654.34"/>
-<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3894.66,-7629.27 3891.37,-7624.25 3892.37,-7623.6 3895.67,-7628.61 3894.66,-7629.27"/>
-<polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="3892.51,-7627.09 3895.02,-7625.44"/>
+<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M3894.87,-7642.07C3939.04,-7624.13 3995.63,-7594.16 4029.22,-7549.51 4073.56,-7490.56 4046.43,-7458.62 4068.71,-7388.31 4100.36,-7288.44 4094.19,-7254.36 4154.71,-7168.84 4200.35,-7104.33 4367.17,-6991.47 4423.78,-6936.33 4521.55,-6841.09 4627.02,-6720.85 4683.95,-6654.34"/>
+<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3893.93,-7645.69 3891.68,-7640.12 3892.79,-7639.67 3895.04,-7645.24 3893.93,-7645.69"/>
+<polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="3892.25,-7643.13 3895.03,-7642.01"/>
 <polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4683.89,-6654.41 4689.84,-6651.6 4686.01,-6651.92 4687.62,-6650.05 4687.62,-6650.05 4687.62,-6650.05 4686.01,-6651.92 4685.74,-6648.09 4683.89,-6654.41"/>
 </a>
 </g>
@@ -368,9 +368,9 @@
 <g id="edge78" class="edge">
 <title>chat_messages&#45;&gt;chat_starred_messages</title>
 <g id="a_edge78"><a xlink:title="message_id">
-<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M3833.29,-7588.08C3839.42,-7495.81 3860.29,-7337.69 3930.36,-7223.44 3968.3,-7161.57 4016.08,-7179.73 4055.99,-7119.11 4141.56,-6989.12 4072.18,-6915.01 4154.98,-6783.24 4216.35,-6685.56 4322.98,-6601.65 4390.26,-6554.79"/>
-<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3836.13,-7590.66 3830.14,-7590.27 3830.22,-7589.07 3836.21,-7589.46 3836.13,-7590.66"/>
-<polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="3833.1,-7591.06 3833.29,-7588.07"/>
+<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M3843.28,-7588.19C3852.54,-7534.92 3866.12,-7461.92 3881.08,-7398.31 3899.57,-7319.71 3886.36,-7291.15 3930.36,-7223.44 3969.9,-7162.58 4016.08,-7179.73 4055.99,-7119.11 4141.56,-6989.12 4072.18,-6915.01 4154.98,-6783.24 4216.35,-6685.56 4322.98,-6601.65 4390.26,-6554.79"/>
+<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3845.85,-7590.95 3839.94,-7589.93 3840.14,-7588.74 3846.06,-7589.77 3845.85,-7590.95"/>
+<polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="3842.79,-7591.03 3843.3,-7588.07"/>
 <polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4390.28,-6554.78 4396.75,-6553.58 4392.97,-6552.92 4394.99,-6551.51 4394.99,-6551.51 4394.99,-6551.51 4392.97,-6552.92 4393.68,-6549.14 4390.28,-6554.78"/>
 </a>
 </g>
@@ -437,19 +437,29 @@
 <!-- chat_room_settings -->
 <g id="node14" class="node">
 <title>chat_room_settings</title>
-<polygon fill="white" stroke="none" points="3893.46,-7436.91 3893.46,-7510.91 4016.85,-7510.91 4016.85,-7436.91 3893.46,-7436.91"/>
-<polygon fill="none" stroke="#7c3aed" points="3893.46,-7436.91 3893.46,-7510.91 4016.85,-7510.91 4016.85,-7436.91 3893.46,-7436.91"/>
-<polygon fill="#e9d5ff" stroke="none" points="3894.46,-7491.91 3894.46,-7509.91 4015.85,-7509.91 4015.85,-7491.91 3894.46,-7491.91"/>
-<text xml:space="preserve" text-anchor="start" x="3907.64" y="-7498.91" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">chat_room_settings</text>
-<text xml:space="preserve" text-anchor="start" x="3897.46" y="-7478.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#b91c1c">user_id</text>
-<text xml:space="preserve" text-anchor="start" x="3955.16" y="-7478.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
-<text xml:space="preserve" text-anchor="start" x="3999.51" y="-7478.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">PK</text>
-<text xml:space="preserve" text-anchor="start" x="3897.46" y="-7460.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#b91c1c">room_id</text>
-<text xml:space="preserve" text-anchor="start" x="3955.16" y="-7460.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
-<text xml:space="preserve" text-anchor="start" x="3999.51" y="-7460.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">PK</text>
-<text xml:space="preserve" text-anchor="start" x="3897.46" y="-7442.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">muted_until</text>
-<text xml:space="preserve" text-anchor="start" x="3955.16" y="-7442.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">datetime</text>
-<text xml:space="preserve" text-anchor="start" x="4003.4" y="-7442.91" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
+<polygon fill="white" stroke="none" points="3884.28,-7401.51 3884.28,-7546.31 4026.02,-7546.31 4026.02,-7401.51 3884.28,-7401.51"/>
+<polygon fill="none" stroke="#7c3aed" points="3884.28,-7401.51 3884.28,-7546.31 4026.02,-7546.31 4026.02,-7401.51 3884.28,-7401.51"/>
+<polygon fill="#e9d5ff" stroke="none" points="3885.28,-7527.31 3885.28,-7545.31 4025.02,-7545.31 4025.02,-7527.31 3885.28,-7527.31"/>
+<text xml:space="preserve" text-anchor="start" x="3907.64" y="-7534.31" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">chat_room_settings</text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7514.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#b91c1c">user_id</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7514.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
+<text xml:space="preserve" text-anchor="start" x="4008.68" y="-7514.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">PK</text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7496.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#b91c1c">room_id</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7496.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
+<text xml:space="preserve" text-anchor="start" x="4008.68" y="-7496.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">PK</text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7478.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">muted_until</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7478.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">datetime</text>
+<text xml:space="preserve" text-anchor="start" x="4012.57" y="-7478.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7460.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">archived</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7460.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">tinyint</text>
+<text xml:space="preserve" text-anchor="start" x="4012.57" y="-7460.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7442.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">pinned_at</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7442.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">datetime</text>
+<text xml:space="preserve" text-anchor="start" x="4012.57" y="-7442.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7424.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">marked_unread</text>
+<text xml:space="preserve" text-anchor="start" x="3964.33" y="-7424.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">tinyint</text>
+<text xml:space="preserve" text-anchor="start" x="4012.57" y="-7424.31" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
+<text xml:space="preserve" text-anchor="start" x="3888.28" y="-7407.31" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +2 কলাম</text>
 </g>
 <!-- chat_rooms -->
 <g id="node15" class="node">
@@ -537,10 +547,10 @@
 <g id="edge76" class="edge">
 <title>chat_rooms&#45;&gt;chat_room_settings</title>
 <g id="a_edge76"><a xlink:title="room_id">
-<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4447.9,-7362.12C4337.64,-7361.37 4136.22,-7363.62 4068.71,-7388.31 4042.31,-7397.96 4016.93,-7415.97 3996.88,-7432.98"/>
+<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4447.9,-7362.12C4337.64,-7361.37 4136.22,-7363.62 4068.71,-7388.31 4055.73,-7393.06 4042.99,-7399.82 4031.01,-7407.5"/>
 <polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4450.24,-7359.13 4450.19,-7365.13 4448.99,-7365.13 4449.04,-7359.13 4450.24,-7359.13"/>
 <polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="4450.82,-7362.14 4447.82,-7362.12"/>
-<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3996.91,-7432.95 3990.6,-7434.83 3994.44,-7435.09 3992.57,-7436.7 3992.57,-7436.7 3992.57,-7436.7 3994.44,-7435.09 3994.13,-7438.92 3996.91,-7432.95"/>
+<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4031.16,-7407.4 4024.67,-7408.44 4028.43,-7409.19 4026.37,-7410.55 4026.37,-7410.55 4026.37,-7410.55 4028.43,-7409.19 4027.63,-7412.95 4031.16,-7407.4"/>
 </a>
 </g>
 </g>
@@ -3716,7 +3726,7 @@
 <text xml:space="preserve" text-anchor="start" x="4116.98" y="-4043.47" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">role</text>
 <text xml:space="preserve" text-anchor="start" x="4221.39" y="-4043.47" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">enum</text>
 <text xml:space="preserve" text-anchor="start" x="4264.62" y="-4043.47" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
-<text xml:space="preserve" text-anchor="start" x="4116.98" y="-4026.47" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +70 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="4116.98" y="-4026.47" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +71 কলাম</text>
 </g>
 <!-- users&#45;&gt;app_feedback -->
 <g id="edge19" class="edge">
@@ -3821,10 +3831,10 @@
 <g id="edge77" class="edge">
 <title>users&#45;&gt;chat_room_settings</title>
 <g id="a_edge77"><a xlink:title="user_id">
-<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4204.14,-4168.18C4210.98,-4237.93 4218.51,-4344.67 4212.68,-4437.28 4147.89,-5466.95 3986.49,-5710.64 3921.7,-6740.3 3912.51,-6886.36 3895.25,-6986.24 3930.36,-7338.64 3933.46,-7369.76 3939.88,-7404.45 3945.41,-7430.91"/>
+<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4204.14,-4168.18C4210.98,-4237.93 4218.51,-4344.67 4212.68,-4437.28 4147.89,-5466.95 3986.49,-5710.64 3921.7,-6740.3 3912.51,-6886.36 3895.25,-6986.24 3930.36,-7338.64 3932.19,-7357.1 3935.2,-7376.82 3938.5,-7395.33"/>
 <polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4200.93,-4166.19 4206.9,-4165.6 4207.01,-4166.79 4201.04,-4167.38 4200.93,-4166.19"/>
 <polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="4203.85,-4165.3 4204.15,-4168.28"/>
-<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3945.42,-7430.98 3944.02,-7437.4 3946.1,-7434.17 3946.61,-7436.58 3946.61,-7436.58 3946.61,-7436.58 3946.1,-7434.17 3949.3,-7436.29 3945.42,-7430.98"/>
+<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3938.51,-7395.39 3936.92,-7401.78 3939.09,-7398.61 3939.53,-7401.03 3939.53,-7401.03 3939.53,-7401.03 3939.09,-7398.61 3942.24,-7400.82 3938.51,-7395.39"/>
 </a>
 </g>
 </g>
@@ -3865,10 +3875,10 @@
 <g id="edge140" class="edge">
 <title>users&#45;&gt;feedback_prompts</title>
 <g id="a_edge140"><a xlink:title="user_id">
-<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4204.14,-4168.18C4210.98,-4237.93 4218.51,-4344.67 4212.68,-4437.28 4147.89,-5466.95 4009.8,-5712.37 3921.7,-6740.3 3895.35,-7047.67 3897.25,-7125.29 3890.26,-7433.71 3889.45,-7469.43 3888.93,-7478.4 3890.26,-7514.11 3891.47,-7546.92 3893.69,-7555.02 3895.73,-7587.8 3901.51,-7681.06 3906.56,-7789.84 3909.32,-7852.75"/>
+<path fill="none" stroke="#6b6b80" stroke-width="0.8" d="M4204.14,-4168.18C4210.98,-4237.93 4218.51,-4344.67 4212.68,-4437.28 4129.52,-5758.91 3921.89,-6074.7 3881.08,-7398.31 3879.01,-7465.47 3868.88,-7483.42 3881.08,-7549.51 3884.39,-7567.42 3891.97,-7569.97 3895.73,-7587.8 3915.1,-7679.81 3915.68,-7789.99 3913.91,-7853.32"/>
 <polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="4200.93,-4166.19 4206.9,-4165.6 4207.01,-4166.79 4201.04,-4167.38 4200.93,-4166.19"/>
 <polyline fill="none" stroke="#6b6b80" stroke-width="0.8" points="4203.85,-4165.3 4204.15,-4168.28"/>
-<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3909.32,-7852.81 3906.89,-7858.92 3909.46,-7856.07 3909.57,-7858.54 3909.57,-7858.54 3909.57,-7858.54 3909.46,-7856.07 3912.28,-7858.68 3909.32,-7852.81"/>
+<polygon fill="#6b6b80" stroke="#6b6b80" stroke-width="0.8" points="3913.91,-7853.04 3911.04,-7858.96 3913.82,-7856.31 3913.74,-7858.77 3913.74,-7858.77 3913.74,-7858.77 3913.82,-7856.31 3916.43,-7859.12 3913.91,-7853.04"/>
 </a>
 </g>
 </g>
@@ -6362,7 +6372,7 @@
 <text xml:space="preserve" text-anchor="start" x="6607.54" y="-3978.89" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#1d4ed8">driver_user_id</text>
 <text xml:space="preserve" text-anchor="start" x="6737.52" y="-3978.89" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
 <text xml:space="preserve" text-anchor="start" x="6754.36" y="-3978.89" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">FK</text>
-<text xml:space="preserve" text-anchor="start" x="6607.54" y="-3961.89" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +30 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="6607.54" y="-3961.89" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +55 কলাম</text>
 </g>
 <!-- users&#45;&gt;vehicle_requisitions -->
 <g id="edge274" class="edge">
@@ -6543,7 +6553,7 @@
 <text xml:space="preserve" text-anchor="start" x="5112.15" y="-5657.36" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">status</text>
 <text xml:space="preserve" text-anchor="start" x="5183.75" y="-5657.36" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">varchar</text>
 <text xml:space="preserve" text-anchor="start" x="5226.99" y="-5657.36" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
-<text xml:space="preserve" text-anchor="start" x="5112.15" y="-5640.36" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +6 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="5112.15" y="-5640.36" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +7 কলাম</text>
 </g>
 <!-- users&#45;&gt;document_signers -->
 <g id="edge101" class="edge">
