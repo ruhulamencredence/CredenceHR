@@ -9,7 +9,7 @@
 // and a laptop shows twice. Refreshes itself every 30 seconds. Also where
 // the Superadmin sets how long a sign-in lasts and ends one (SessionSecurity.ts).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ChevronDown, Globe, LogOut, Monitor, RefreshCw, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
 import { useCardOpen } from '../lib/useCardOpen';
 import { useHrApi, Notice, inputCls } from './HrOpsShared';
@@ -203,6 +203,18 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
+  // The sticky search bar's height: the table's column titles stick just
+  // below it, which sits under the app's 4rem header (computer screens; a
+  // phone shows cards instead of the table).
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(48);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setBarH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const [msg, setMsg] = useState<Msg>(null);
 
   const load = useCallback(() => {
@@ -303,7 +315,11 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Range tabs + search stay at the top while the list scrolls, and the
+          table's column titles stay right under them (sticky; the table box
+          clips instead of scrolling sideways so the sticky titles follow
+          the page, not the box). */}
+      <div ref={barRef} className="md:sticky md:top-16 z-20 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm flex flex-wrap items-center gap-2">
         <div className="inline-flex p-0.5 rounded-lg bg-slate-100">
           {RANGES.map(([key, label]) => (
             <button
@@ -370,9 +386,9 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
           </div>
 
           {/* Wider screens: table. */}
-          <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
+          <div className="hidden md:block overflow-clip rounded-xl border border-slate-200">
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500">
+              <thead className="sticky z-10 bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
                 <tr>
                   <th className="px-3 py-2 font-semibold">Account</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
