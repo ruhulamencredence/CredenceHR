@@ -1382,10 +1382,19 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     // Superadmin who is one is in the report like everyone else; a
     // Superadmin login with no Employee record (a system account) isn't.
     const employeeUserIds = new Set<number>();
+    // A login linked to more than one Employee record (an old copy left
+    // inactive, e.g. after a merge) is active if any of them is — it used to
+    // count as inactive and drop out, though Timesheet and leave showed it.
+    // Its department is the active record's.
+    const activeUserIds = new Set<number>();
+    for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
     for (const e of allEmployeesForDept) {
-      if (e.user_id != null) employeeUserIds.add(Number(e.user_id));
-      if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-      if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+      if (e.user_id == null) continue;
+      const id = Number(e.user_id);
+      const live = Number(e.is_active) !== 0;
+      employeeUserIds.add(id);
+      if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+      if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
     }
     const statusMatches = (id: number) =>
       empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
@@ -1744,10 +1753,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const inactiveUserIds = new Set<number>();
       // Superadmins who are employees count too (see the monthly report).
       const employeeUserIds = new Set<number>();
+      // Two Employee records on one login: active if any is (monthly report).
+      const activeUserIds = new Set<number>();
+      for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
       for (const e of allEmployeesForDept) {
-        if (e.user_id != null) employeeUserIds.add(Number(e.user_id));
-        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+        if (e.user_id == null) continue;
+        const id = Number(e.user_id);
+        const live = Number(e.is_active) !== 0;
+        employeeUserIds.add(id);
+        if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+        if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
       }
       const statusMatches = (id: number) =>
         empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
