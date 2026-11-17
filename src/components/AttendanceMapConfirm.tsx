@@ -13,6 +13,7 @@ import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '
 import { X, MapPin, Check, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl } from '../lib/api';
+import { useKeyboardGap, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
@@ -152,6 +153,12 @@ export default function AttendanceMapConfirm({
   token
 }: AttendanceMapConfirmProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const keyboard = useKeyboardGap();
+  // The map gets smaller while the keyboard is up; Leaflet redraws its tiles for the new size.
+  useEffect(() => {
+    const t = window.setTimeout(() => mapRef.current?.invalidateSize(), 60);
+    return () => window.clearTimeout(t);
+  }, [keyboard.open]);
   const mapRef = useRef<L.Map | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
@@ -350,7 +357,12 @@ export default function AttendanceMapConfirm({
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-        paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
+        // Typing the Reason / Remarks: the popup ends above the on-screen
+        // keyboard (some Android WebViews don't shrink the page for it, so
+        // the box stayed under the keyboard) and the box is scrolled into view.
+        paddingBottom: keyboard.gap
+          ? `${keyboard.gap + 8}px`
+          : 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
       <div
@@ -378,12 +390,12 @@ export default function AttendanceMapConfirm({
           </button>
         </div>
 
-        <div className="p-5 space-y-3 overflow-y-auto min-h-0">
+        <div className="p-5 space-y-3 overflow-y-auto min-h-0" onFocusCapture={scrollFocusedFieldIntoView}>
           <div className="relative">
             <div
               ref={mapContainerRef}
               className="w-full rounded-xl border border-slate-200 overflow-hidden"
-              style={{ height: 'clamp(160px, 34vh, 320px)' }}
+              style={{ height: keyboard.open ? '110px' : 'clamp(160px, 34vh, 320px)' }}
             />
             {!ready && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50 rounded-xl">
