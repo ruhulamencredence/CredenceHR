@@ -6949,6 +6949,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       })()}
                     </th>
                     <th className="px-3 py-2.5 text-left">User</th>
+                    <th className="px-3 py-2.5 text-left">Department</th>
                     <th className="px-3 py-2.5 text-left w-28">Role</th>
                     <th className="px-3 py-2.5 text-left">Access</th>
                     {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
@@ -6979,6 +6980,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
                           </div>
                         </div>
+                      </td>
+                      {/* From the linked Employee record; none = not an employee. */}
+                      <td className="px-3 py-3 text-xs">
+                        {u.department ? <span className="text-slate-700">{u.department}</span> : <span className="text-slate-400">—</span>}
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
@@ -7069,6 +7074,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 truncate">{u.username ? `${u.username}${u.email ? ` · ${u.email}` : ''}` : u.email || '—'}</div>
+                      {u.department && <div className="text-[11px] text-slate-600 truncate">{u.department}</div>}
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
