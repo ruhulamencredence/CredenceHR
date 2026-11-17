@@ -8,22 +8,22 @@
 <!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২৬৮** |
-| কলাম | **২,৮৯৯** |
-| ঘোষিত Foreign Key | **২৮১** (ON DELETE: CASCADE ১৭২, SET NULL ৯৫, RESTRICT ১৪) |
+| টেবিল | **২৬৯** |
+| কলাম | **২,৮৯২** |
+| ঘোষিত Foreign Key | **২৮৪** (ON DELETE: CASCADE ১৭৫, SET NULL ৯৫, RESTRICT ১৪) |
 | `company_id` আছে এমন টেবিল (multi-company) | ৬৪ |
 | ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ৩০টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
-| সবচেয়ে বেশি কলামের টেবিল | `users` (৭৬), `all_employees` (৫১), `payrolls` (৪৩) |
+| সবচেয়ে বেশি কলামের টেবিল | `users` (৭৬), `all_employees` (৫০), `payrolls` (৪৩) |
 <!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৬৮<!--/n--> টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২৬৯<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
 [SVG (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.svg) · [Graphviz সোর্স](diagrams/full-application-er.dot) · PNG/PDF: GitHub → Actions → সবশেষ **Docs sync** রান → Artifacts → `CredenceHR-documentation` (repo-তে রাখা হয় না, প্রতিবার ৬MB করে বাড়ত)
 
 - ১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে **`users`** (সব মডিউল এর সাথে জোড়া)।
 - প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা `data-dictionary.md`-তে।
-- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৮১<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
+- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৮৪<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
 
 ![পুরো ডাটাবেস](diagrams/full-application-er.svg)
 
@@ -48,7 +48,7 @@
 প্রতিটি diagram-এ: **PK**, **FK** আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু `id` সহ দেখানো। পুরো কলাম তালিকা `data-dictionary.md`-তে।
 
 <!-- AUTO:modules -->
-### K. Communication: Notices, Chat, Mail, Assistant, Feedback (43টি টেবিল)
+### K. Communication: Notices, Chat, Mail, Assistant, Feedback (45টি টেবিল)
 
 নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।
 
@@ -60,7 +60,7 @@
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`app_feedback`, `assistant_learned`, `assistant_support_messages`, `assistant_support_sessions`, `chat_message_hidden`, `chat_message_reactions`, `chat_messages`, `chat_pinned_messages`, `chat_push_tokens`, `chat_room_members`, `chat_room_reads`, `chat_room_settings`, `chat_rooms`, `chat_starred_messages`, `chat_wallpapers`, `feedback_prompts`, `feedback_settings`, `mail_accounts`, `mail_admin_log`, `mail_blobs`, `mail_contacts`, `mail_events`, `mail_files`, `mail_filters`, `mail_folder_state`, `mail_folders`, `mail_groups`, `mail_messages`, `mail_personal_groups`, `mail_settings`, `mail_signature_images`, `mail_system_settings`, `mail_tasks`, `mail_templates`, `mail_vacation_log`, `notice_animations`, `notice_dismissals`, `notice_files`, `notice_reads`, `notice_targets`, `notices`, `report_email_log`, `ride_saved_places`
+`app_feedback`, `assistant_learned`, `assistant_support_messages`, `assistant_support_sessions`, `chat_list_rooms`, `chat_lists`, `chat_message_hidden`, `chat_message_reactions`, `chat_messages`, `chat_pinned_messages`, `chat_push_tokens`, `chat_room_members`, `chat_room_reads`, `chat_room_settings`, `chat_rooms`, `chat_starred_messages`, `chat_wallpapers`, `feedback_prompts`, `feedback_settings`, `mail_accounts`, `mail_admin_log`, `mail_blobs`, `mail_contacts`, `mail_events`, `mail_files`, `mail_filters`, `mail_folder_state`, `mail_folders`, `mail_groups`, `mail_messages`, `mail_personal_groups`, `mail_settings`, `mail_signature_images`, `mail_system_settings`, `mail_tasks`, `mail_templates`, `mail_vacation_log`, `notice_animations`, `notice_dismissals`, `notice_files`, `notice_reads`, `notice_targets`, `notices`, `report_email_log`, `ride_saved_places`
 
 </details>
 
@@ -144,7 +144,7 @@ Check In/Out (movement claim), Bill Claim (employee claim → approval → bill 
 
 </details>
 
-### B. Company, Organisation & Employees (27টি টেবিল)
+### B. Company, Organisation & Employees (26টি টেবিল)
 
 কোম্পানি-গ্রুপ, সংগঠন কাঠামো আর কর্মীর মূল রেকর্ড। `users` = লগইন, `all_employees` = HR-এর কর্মী-রেকর্ড; `all_employees.user_id` দিয়ে জোড়া।
 
@@ -156,7 +156,7 @@ Check In/Out (movement claim), Bill Claim (employee claim → approval → bill 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`all_employees`, `branches`, `companies`, `company_groups`, `department_team_auto`, `department_team_auto_done`, `department_team_members`, `department_teams`, `departments`, `designations`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
+`all_employees`, `branches`, `companies`, `company_groups`, `department_team_auto`, `department_team_auto_done`, `department_team_members`, `department_teams`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `loan_events`, `projects`, `server_profiles`
 
 </details>
 
@@ -261,7 +261,7 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | <!--n:tables-->২৬৮<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২৬৯<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -274,6 +274,6 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৬৮<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২৬৯<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
 জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

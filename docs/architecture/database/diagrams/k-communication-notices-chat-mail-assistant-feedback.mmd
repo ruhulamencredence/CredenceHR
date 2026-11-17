@@ -32,6 +32,15 @@ erDiagram
     varchar status
     varchar topic
   }
+  chat_list_rooms {
+    int list_id PK,FK
+    int room_id PK,FK
+  }
+  chat_lists {
+    int id PK
+    int user_id FK
+    varchar name
+  }
   chat_message_hidden {
     int message_id PK,FK
     int user_id PK,FK
@@ -314,6 +323,9 @@ erDiagram
   }
   users ||--o{ app_feedback : "user_id"
   users ||..o{ assistant_support_sessions : "user_id"
+  chat_lists ||--o{ chat_list_rooms : "list_id"
+  chat_rooms ||--o{ chat_list_rooms : "room_id"
+  users ||--o{ chat_lists : "user_id"
   chat_messages ||--o{ chat_message_hidden : "message_id"
   users ||--o{ chat_message_hidden : "user_id"
   chat_messages ||--o{ chat_message_reactions : "message_id"

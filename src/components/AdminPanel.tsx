@@ -2180,14 +2180,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setEditingBranch(null);
       setBranchLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
-      setMessage({ type: 'success', text: 'Branch saved successfully.' });
+      // A renamed branch: say what else took the new name (server's `renamed`).
+      const rn = data.renamed || {};
+      const also = [
+        rn.employees ? `${rn.employees} employee${rn.employees === 1 ? '' : 's'}` : '',
+        rn.team_rules ? `${rn.team_rules} team new-joiner rule${rn.team_rules === 1 ? '' : 's'}` : '',
+        rn.office_machines ? `${rn.office_machines} office machine${rn.office_machines === 1 ? '' : 's'}` : '',
+        rn.sims ? `${rn.sims} SIM${rn.sims === 1 ? '' : 's'}` : ''
+      ].filter(Boolean);
+      setMessage({ type: 'success', text: also.length ? `Branch saved. The new name is also on ${also.join(', ')}.` : 'Branch saved successfully.' });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     }
   };
 
   const handleDeleteBranch = async (id: number) => {
-    if (!(await confirmDialog('Are you sure you want to delete this branch?'))) return;
+    const b = (branches as any[]).find((x) => x.id === id);
+    if (
+      !(await confirmDialog(
+        `Delete the branch "${b?.branch_name || ''}"? Its employees keep "${b?.branch_name || 'it'}" written as their branch, but are no longer linked to it (attendance project, reports by branch). To give it a new name instead, edit it.`,
+        { confirmLabel: 'Delete', tone: 'danger' }
+      ))
+    )
+      return;
     try {
       const res = await fetch(apiUrl(`/api/branches/${id}`), {
         method: 'DELETE',

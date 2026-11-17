@@ -1378,16 +1378,30 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
     const departmentByUserId = new Map<number, string>();
     const inactiveUserIds = new Set<number>();
+    // Logins that are a real employee (an Employee record is linked) — a
+    // Superadmin who is one is in the report like everyone else; a
+    // Superadmin login with no Employee record (a system account) isn't.
+    const employeeUserIds = new Set<number>();
+    // A login linked to more than one Employee record (an old copy left
+    // inactive, e.g. after a merge) is active if any of them is — it used to
+    // count as inactive and drop out, though Timesheet and leave showed it.
+    // Its department is the active record's.
+    const activeUserIds = new Set<number>();
+    for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
     for (const e of allEmployeesForDept) {
-      if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-      if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+      if (e.user_id == null) continue;
+      const id = Number(e.user_id);
+      const live = Number(e.is_active) !== 0;
+      employeeUserIds.add(id);
+      if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+      if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
     }
     const statusMatches = (id: number) =>
       empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
     const filteredUsers = users.filter(
       (u: any) =>
-        (u.role === "user" || u.role === "admin") &&
+        (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
         (!user_id || u.id === user_id) &&
         (!department || departmentByUserId.get(u.id) === department) &&
         statusMatches(u.id) &&
@@ -1737,9 +1751,18 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
       const inactiveUserIds = new Set<number>();
+      // Superadmins who are employees count too (see the monthly report).
+      const employeeUserIds = new Set<number>();
+      // Two Employee records on one login: active if any is (monthly report).
+      const activeUserIds = new Set<number>();
+      for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
       for (const e of allEmployeesForDept) {
-        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+        if (e.user_id == null) continue;
+        const id = Number(e.user_id);
+        const live = Number(e.is_active) !== 0;
+        employeeUserIds.add(id);
+        if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+        if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
       }
       const statusMatches = (id: number) =>
         empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
@@ -1752,7 +1775,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       const relevantUsers = users.filter(
         (u: any) =>
-          (u.role === "user" || u.role === "admin") &&
+          (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
           statusMatches(u.id) &&

@@ -2278,6 +2278,13 @@ export interface ChatRoom {
   muted_until?: string | null;
   // Disappearing messages for new messages (seconds; 0 = off).
   disappear_seconds?: number;
+  // This account's own chat list (chat/ChatListActions.tsx): archived,
+  // pinned on top, marked as unread, in Favorites, in its own lists.
+  archived?: boolean;
+  pinned?: boolean;
+  marked_unread?: boolean;
+  favorite?: boolean;
+  list_ids?: number[];
 }
 
 export interface ChatRoomMember {

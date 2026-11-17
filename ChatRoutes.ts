@@ -258,7 +258,16 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
       ["ALTER TABLE chat_messages ADD INDEX idx_chat_messages_expires (expires_at)", "ER_DUP_KEYNAME"],
       // Group invite link: anyone with Chat who has the code can join.
       ["ALTER TABLE chat_rooms ADD COLUMN invite_code VARCHAR(40) NULL", "ER_DUP_FIELDNAME"],
-      ["ALTER TABLE chat_rooms ADD UNIQUE INDEX uniq_chat_rooms_invite (invite_code)", "ER_DUP_KEYNAME"]
+      ["ALTER TABLE chat_rooms ADD UNIQUE INDEX uniq_chat_rooms_invite (invite_code)", "ER_DUP_KEYNAME"],
+      // The chat list, each account's own (like WhatsApp): Archive, Pin (at
+      // most 3, on top), Mark as unread, Favorites, and "Delete chat" — the
+      // chat leaves this account's list until a message newer than
+      // hidden_after_id arrives.
+      ["ALTER TABLE chat_room_settings ADD COLUMN archived TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_room_settings ADD COLUMN pinned_at DATETIME NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_room_settings ADD COLUMN marked_unread TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_room_settings ADD COLUMN favorite TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_room_settings ADD COLUMN hidden_after_id INT NULL", "ER_DUP_FIELDNAME"]
     ] as [string, string][]) {
       await dbPool.query(sql).catch((err: any) => {
         if (err?.code !== ignore) console.warn("⚠️ Chat: " + err.message);
@@ -321,6 +330,26 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
         muted_until DATETIME NULL,
         PRIMARY KEY (user_id, room_id),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+      )
+    `);
+    // Each account's own chat lists ("Site team", …) and the chats in them.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_lists (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        name VARCHAR(40) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_chat_lists_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_list_rooms (
+        list_id INT NOT NULL,
+        room_id INT NOT NULL,
+        PRIMARY KEY (list_id, room_id),
+        FOREIGN KEY (list_id) REFERENCES chat_lists(id) ON DELETE CASCADE,
         FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
       )
     `);
@@ -577,20 +606,30 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         `SELECT r.id, r.type, r.title, r.parent_room_id, r.created_by,
                 (r.avatar_data IS NOT NULL) AS has_avatar, r.avatar_version, r.description,
                 r.info_admins_only, r.send_admins_only, r.disappear_seconds,
-                (SELECT st.muted_until FROM chat_room_settings st WHERE st.user_id = m.user_id AND st.room_id = r.id AND st.muted_until > NOW()) AS muted_until,
+                IF(st.muted_until > NOW(), st.muted_until, NULL) AS muted_until,
+                COALESCE(st.archived, 0) AS archived, st.pinned_at, COALESCE(st.marked_unread, 0) AS marked_unread,
+                COALESCE(st.favorite, 0) AS favorite, st.hidden_after_id,
                 m.role AS my_role,
                 lm.id AS last_message_id, IF(lm.unsent_at IS NULL, lm.content, 'This message was deleted') AS last_message_content,
                 lm.message_type AS last_message_type, lm.sender_id AS last_message_sender_id,
                 lm.created_at AS last_message_at
          FROM chat_room_members m
          JOIN chat_rooms r ON r.id = m.room_id
+         LEFT JOIN chat_room_settings st ON st.user_id = m.user_id AND st.room_id = r.id
          LEFT JOIN chat_messages lm ON lm.id = (
            SELECT id FROM chat_messages WHERE room_id = r.id AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY id DESC LIMIT 1
          )
          WHERE m.user_id = ?
+           -- "Delete chat": gone from this list until a newer message comes.
+           AND (st.hidden_after_id IS NULL OR COALESCE(lm.id, 0) > st.hidden_after_id)
          ORDER BY COALESCE(lm.created_at, r.created_at) DESC`,
         [userId]
       );
+      // This account's own chat lists, per room.
+      const listRows: any[] =
+        (await queryDB("SELECT lr.room_id, lr.list_id FROM chat_list_rooms lr JOIN chat_lists l ON l.id = lr.list_id WHERE l.user_id = ?", [userId]).catch(() => [])) || [];
+      const listsOf = new Map<number, number[]>();
+      for (const x of listRows) listsOf.set(Number(x.room_id), [...(listsOf.get(Number(x.room_id)) || []), Number(x.list_id)]);
 
       const unreadRows = await queryDB(
         `SELECT cm.room_id, COUNT(*) AS unread
@@ -600,6 +639,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          WHERE cm.sender_id != ? AND cm.deleted_at IS NULL AND cm.message_type <> 'system'
            AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
            AND (rr.last_read_message_id IS NULL OR cm.id > rr.last_read_message_id)
+           -- Not ones this account cleared or deleted the chat for.
+           AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = rm.user_id)
          GROUP BY cm.room_id`,
         [userId, userId, userId]
       );
@@ -627,6 +668,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
           ...r,
           wallpaper: wallpaperOf.get(Number(r.id)) || wallpaperOf.get(0) || null,
           unread_count: unreadByRoom.get(r.id) || 0,
+          archived: !!Number(r.archived),
+          pinned: !!r.pinned_at,
+          marked_unread: !!Number(r.marked_unread),
+          favorite: !!Number(r.favorite),
+          list_ids: listsOf.get(Number(r.id)) || [],
           other_participant: r.type === "direct" ? otherParticipantByRoom.get(r.id) || null : null
         }))
       );
@@ -648,7 +694,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          WHERE cm.sender_id != ? AND cm.deleted_at IS NULL AND cm.message_type <> 'system'
            AND (cm.expires_at IS NULL OR cm.expires_at > NOW())
            AND (rr.last_read_message_id IS NULL OR cm.id > rr.last_read_message_id)
-           AND NOT EXISTS (SELECT 1 FROM chat_room_settings st WHERE st.user_id = rm.user_id AND st.room_id = cm.room_id AND st.muted_until > NOW())`,
+           AND NOT EXISTS (SELECT 1 FROM chat_room_settings st WHERE st.user_id = rm.user_id AND st.room_id = cm.room_id AND st.muted_until > NOW())
+           AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = rm.user_id)`,
         [userId, userId, userId]
       );
       // Muted chats keep their own unread number in the list but don't add to the bell.
@@ -675,6 +722,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (type === "direct") {
         if (ids.length !== 1) return res.status(400).json({ error: "Direct chat needs exactly one other member." });
         const roomId = await findOrCreateDirectRoom(queryDB, userId, ids[0]);
+        // Starting the chat again after "Delete chat" brings it back to the list.
+        await queryDB("UPDATE chat_room_settings SET hidden_after_id = NULL WHERE user_id = ? AND room_id = ?", [userId, roomId]).catch(() => {});
         return res.json({ id: roomId, type: "direct" });
       }
 
@@ -940,6 +989,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         return res.status(403).json({ error: "Not a member of this room." });
       }
       await upsertRead(queryDB, roomId, req.user.id, messageId);
+      // Opening a chat marked as unread reads it.
+      await queryDB("UPDATE chat_room_settings SET marked_unread = 0 WHERE user_id = ? AND room_id = ? AND marked_unread = 1", [req.user.id, roomId]).catch(() => {});
       io.to(`room:${roomId}`).emit("message_read", { roomId, userId: req.user.id, messageId });
       res.json({ success: true });
     } catch (err: any) {
@@ -1416,6 +1467,138 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       res.status(500).json({ error: err.message });
     }
   });
+  // ---- The chat list, each account's own: Archive, Pin, Mark as unread,
+  // Favorites, Delete chat and the account's own lists. Nothing here
+  // changes anything for the other people in the chat.
+  const MAX_PINS = 3;
+  const ensureSettings = (userId: number, roomId: number) =>
+    queryDB("INSERT IGNORE INTO chat_room_settings (user_id, room_id) VALUES (?, ?)", [userId, roomId]);
+  // Body: any of { archived, pinned, marked_unread, favorite } (true / false).
+  app.put("/api/chat/rooms/:id/prefs", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const userId = Number(req.user.id);
+      if (!(await isMember(queryDB, roomId, userId))) return res.status(403).json({ error: "Not a member of this room." });
+      const b = req.body || {};
+      await ensureSettings(userId, roomId);
+      if (typeof b.pinned === "boolean") {
+        if (b.pinned) {
+          const n: any[] = await queryDB(
+            "SELECT COUNT(*) AS n FROM chat_room_settings st JOIN chat_room_members m ON m.room_id = st.room_id AND m.user_id = st.user_id WHERE st.user_id = ? AND st.pinned_at IS NOT NULL AND st.room_id <> ?",
+            [userId, roomId]
+          );
+          if (Number(n[0]?.n || 0) >= MAX_PINS) return res.status(400).json({ error: `You can pin up to ${MAX_PINS} chats. Unpin one first.` });
+          // A pinned chat isn't archived.
+          await queryDB("UPDATE chat_room_settings SET pinned_at = COALESCE(pinned_at, NOW()), archived = 0 WHERE user_id = ? AND room_id = ?", [userId, roomId]);
+        } else await queryDB("UPDATE chat_room_settings SET pinned_at = NULL WHERE user_id = ? AND room_id = ?", [userId, roomId]);
+      }
+      if (typeof b.archived === "boolean")
+        // An archived chat isn't pinned.
+        await queryDB(`UPDATE chat_room_settings SET archived = ?${b.archived ? ", pinned_at = NULL" : ""} WHERE user_id = ? AND room_id = ?`, [b.archived ? 1 : 0, userId, roomId]);
+      if (typeof b.marked_unread === "boolean")
+        await queryDB("UPDATE chat_room_settings SET marked_unread = ? WHERE user_id = ? AND room_id = ?", [b.marked_unread ? 1 : 0, userId, roomId]);
+      if (typeof b.favorite === "boolean")
+        await queryDB("UPDATE chat_room_settings SET favorite = ? WHERE user_id = ? AND room_id = ?", [b.favorite ? 1 : 0, userId, roomId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // "Delete chat" (one-to-one): its messages are hidden for this account and
+  // the chat leaves the list; a new message from the other person brings it
+  // back. A group is left first (Exit group), which removes it from the list.
+  app.post("/api/chat/rooms/:id/delete-for-me", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const userId = Number(req.user.id);
+      if (!(await isMember(queryDB, roomId, userId))) return res.status(403).json({ error: "Not a member of this room." });
+      const room = ((await queryDB("SELECT type FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+      if (!room) return res.status(404).json({ error: "Chat not found." });
+      if (room.type !== "direct") return res.status(400).json({ error: "Exit the group first, then delete it." });
+      await queryDB("INSERT IGNORE INTO chat_message_hidden (message_id, user_id) SELECT id, ? FROM chat_messages WHERE room_id = ?", [userId, roomId]);
+      const last: any[] = await queryDB("SELECT COALESCE(MAX(id), 0) AS id FROM chat_messages WHERE room_id = ?", [roomId]);
+      await ensureSettings(userId, roomId);
+      await queryDB(
+        "UPDATE chat_room_settings SET hidden_after_id = ?, pinned_at = NULL, archived = 0, marked_unread = 0, favorite = 0 WHERE user_id = ? AND room_id = ?",
+        [Number(last[0]?.id || 0), userId, roomId]
+      );
+      await queryDB("DELETE lr FROM chat_list_rooms lr JOIN chat_lists l ON l.id = lr.list_id WHERE l.user_id = ? AND lr.room_id = ?", [userId, roomId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // This account's own chat lists.
+  app.get("/api/chat/lists", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      res.json((await queryDB("SELECT id, name FROM chat_lists WHERE user_id = ? ORDER BY name", [req.user.id])) || []);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  const listName = (v: any) => String(v ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
+  app.post("/api/chat/lists", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const name = listName(req.body?.name);
+      if (!name) return res.status(400).json({ error: "Give the list a name." });
+      const n: any[] = await queryDB("SELECT COUNT(*) AS n FROM chat_lists WHERE user_id = ?", [req.user.id]);
+      if (Number(n[0]?.n || 0) >= 20) return res.status(400).json({ error: "You can have up to 20 lists." });
+      const dup: any[] = await queryDB("SELECT id FROM chat_lists WHERE user_id = ? AND LOWER(name) = LOWER(?)", [req.user.id, name]);
+      if (dup.length) return res.status(400).json({ error: `You already have a list called "${name}".` });
+      const r: any = await queryDB("INSERT INTO chat_lists (user_id, name) VALUES (?, ?)", [req.user.id, name]);
+      res.json({ id: Number(r.insertId), name });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  const ownList = async (listId: number, userId: number) =>
+    !!((await queryDB("SELECT id FROM chat_lists WHERE id = ? AND user_id = ?", [listId, userId])) || [])[0];
+  app.patch("/api/chat/lists/:listId", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const listId = Number(req.params.listId);
+      if (!(await ownList(listId, req.user.id))) return res.status(404).json({ error: "List not found." });
+      const name = listName(req.body?.name);
+      if (!name) return res.status(400).json({ error: "Give the list a name." });
+      await queryDB("UPDATE chat_lists SET name = ? WHERE id = ?", [name, listId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/lists/:listId", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const listId = Number(req.params.listId);
+      if (!(await ownList(listId, req.user.id))) return res.status(404).json({ error: "List not found." });
+      await queryDB("DELETE FROM chat_lists WHERE id = ?", [listId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // Put a chat in a list (PUT) or take it out (DELETE).
+  app.put("/api/chat/lists/:listId/rooms/:id", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const listId = Number(req.params.listId);
+      const roomId = Number(req.params.id);
+      if (!(await ownList(listId, req.user.id))) return res.status(404).json({ error: "List not found." });
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      await queryDB("INSERT IGNORE INTO chat_list_rooms (list_id, room_id) VALUES (?, ?)", [listId, roomId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/lists/:listId/rooms/:id", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const listId = Number(req.params.listId);
+      if (!(await ownList(listId, req.user.id))) return res.status(404).json({ error: "List not found." });
+      await queryDB("DELETE FROM chat_list_rooms WHERE list_id = ? AND room_id = ?", [listId, Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/chat/rooms/:id/search", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
