@@ -674,6 +674,21 @@ Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (<cod
 <li><strong>People</strong> (<code>GET /api/mpr-edit-log/people?days=7|30|month</code>) — MPR-এর মালিক ধরে: এখন overdue, সময়ের মধ্যে কয়টার তারিখ পার হয়েছে, তার কয়টা "সময়মতো" (মাল তারিখের মধ্যে এসেছে, বা Delivery Date পুরনো তারিখের দিন বা আগে বদলানো), কয়টা save, কয়টা ফেরানো চেষ্টা, শেষ edit।</li>
 </ul>
 <p>অনুমতি: <code>editlog</code> module-এ এখন layer — <code>read</code> (Edit history ও Pending approvals; layer না দেওয়া পুরনো account-এ আগের মতো থাকে) আর <code>mpr_followup</code> (Needs update ও People, explicit-only — টিক দিয়ে দিতে হয়)। API একই layer যাচাই করে।</p>
+<h2 id="book-a-ride-round-trip-drop-pick-up-one-way">Book a Ride: Round trip, Drop &amp; pick up, One way (১৮ নভেম্বর)</h2>
+<p>আগে একটা booking মানে গাড়ি পুরো সময় যাত্রীর কাছে থাকত; কেউ গাড়ি ছেড়ে দিলে পরে আবার ডাকলে system জানত না। এখন booking-এ <strong>Trip</strong> বাছাই (<code>src/components/RideTrip.tsx</code>, server <code>VehicleManagementRoutes.ts</code>):</p>
+<ul>
+<li><strong>Round trip — car waits</strong> — আগের মতো (Est. Duration, ফেরার সময়, late return)।</li>
+<li><strong>Drop &amp; pick up later</strong> — নামিয়ে দিয়ে গাড়ি ফিরে আসে, পরে আবার এসে নেয়। Pick-up: নির্দিষ্ট সময়ে, অথবা "I'll tell you" (যাত্রী "Pick me up now" চাপবেন)। Duration লাগে না।</li>
+<li><strong>One way</strong> — শুধু নামিয়ে দেওয়া।</li>
+</ul>
+<p>যাত্রী বাছেন; approver (My Approvals-এর card-এ "Trip … Change"), "Approved by Me", Vehicle Management (Ride Requests) বা Vehicle Maintainer ride শুরুর আগে বদলাতে পারেন (<code>PUT /api/vehicles/requisitions/:id/trip</code>) — যাত্রী alert পান, কে বদলেছেন (<code>trip_changed_by</code>) আর যাত্রী কী চেয়েছিলেন (<code>trip_type_asked</code>) থাকে।</p>
+<p>Drop &amp; pick up — এক ride, দুই ভাগ:
+1. গাড়ি দেওয়া → Start Ride → <strong>"Dropped — head back"</strong> (driver; যাত্রী বা Vehicle Management-ও পারেন, <code>POST …/:id/dropped</code>) → status <code>dropped</code>, গাড়ি তখনই Available। যাত্রী, driver, যিনি গাড়ি দিয়েছিলেন আর Pick-ups-এর লোক alert পান।
+2. Pick-up-এর গাড়ি দেওয়া (<code>PUT …/:id/pickup-assign</code>; একই গাড়ি/driver default, অন্যটাও চলে) — Vehicle Management → Pick-ups, অথবা Book a Ride → My Trips (যিনি drop চালিয়েছেন বা গাড়ি দিয়েছিলেন)। আগের গাড়ি/driver <code>drop_*</code>-এ যায়, ride আবার <code>assigned</code> (<code>leg = 'pickup'</code>) — তারপর আগের মতো "Set off for pick-up" (Start Ride), "Picked up", "Back — ride done" (Completed)।
+3. মাঝে যাত্রী: <strong>Pick me up now</strong> (<code>…/pickup-now</code>), <strong>Change time</strong> (<code>…/pickup-time</code>), <strong>Not needed</strong> (<code>…/pickup-not-needed</code> — ride বন্ধ, দেওয়া গাড়ি ছাড়া হয়)।
+4. Reminder (প্রতি মিনিটের ride check): pick-up-এর সময় কাছে আর গাড়ি দেওয়া হয়নি → Pick-ups-এর লোক, যিনি গাড়ি দিয়েছিলেন, drop driver; pick-up-এর সময় এসেছে কিন্তু রওনা হয়নি → pick-up driver। Pick-up ভাগ "never started" হিসেবে নিজে বন্ধ হয় না।</p>
+<p>Round trip চলার সময় <strong>Release car, pick me up later</strong> (যাত্রী বা driver, কারণ বাধ্যতামূলক, <code>…/release</code>) — ride Drop &amp; pick up হয়ে যায় (<code>released_mid_ride</code>, <code>release_reason</code>, <code>waited_minutes</code>), অথবা "Not needed" বাছলে One way হয়ে তখনই বন্ধ। Drop &amp; pick up / One way-এ late return বা HR notice flag হয় না।</p>
+<p>Vehicle Management-এ দুটো নতুন tab, প্রতিটার নিজের explicit-only tick: <strong>Pick-ups</strong> (layer <code>pickups</code>, <code>GET /api/vehicles/pickups</code> — বাকি pick-up, কোনটায় গাড়ি নেই, গাড়ি দেওয়া, সময় বদল) আর <strong>Drop &amp; pick up report</strong> (layer <code>trip_report</code>, <code>GET /api/vehicles/trip-report?from=&amp;to=</code> — ride, Drop &amp; pick up, Released mid-ride, খালি যাত্রা, drop থেকে pick-up পর্যন্ত গাড়ি free থাকার সময়, pick-up গড়ে কত দেরি, "Pick me up now", Not needed, Round trip-এ গাড়ির অপেক্ষা; মানুষ ধরে; Excel)।</p>
 <h2 id="undelivered-mpr-close-short">Undelivered MPR ও Close short (১৭ নভেম্বর)</h2>
 <p>Budget-এর শেষ Delivery Date-এর মধ্যে যে MPR-এর মাল (বা বাকি Qty) আর আনা সম্ভব নয়, তা আগে Budget থেকে বাদও যেত না, আলাদাও রাখা যেত না। এখন Admin Panel → PEPM Management → Reports → <strong>Undelivered MPR</strong> (<code>src/components/MprUndelivered.tsx</code>, server <code>MprDispatchRoutes.ts</code>):</p>
 <ul>
