@@ -50,7 +50,9 @@ portal like the other popups.
 Light Glass + the orange theme: the phone menu was 35–55 % white, so the orange header and cards behind it showed
 through and the text looked faded. Now (`src/index.css`, `html[data-lglass] .gsidebar.fixed`, phone menu only — the
 computer sidebar is as before) it is nearly solid frosted white (94 % → 92 %), with a short accent-coloured band at the
-top so the white Credence logo stays visible, a thin edge and a soft shadow.
+top so the white Credence logo stays visible, a thin edge and a soft shadow. The owner found that too solid ("the glass
+feel is gone"), so the final one sits in between: 80 % → 70 % white with a stronger blur (48 px, saturation 170 %), so the
+page's colours glow softly through while the text stays crisp, plus a glass sheen across the top corner.
 
 - `scripts/lightglass-phone-menu.cjs` (Pixel 7, Light Glass, orange): screenshot before / after — menu text dark on
   white, the page behind no longer showing through, logo on the accent band.

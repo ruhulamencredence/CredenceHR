@@ -1658,11 +1658,14 @@ html[data-lglass] .gsidebar {
    logo stays visible on it), a crisp edge and a soft shadow. */
 html[data-lglass] .gsidebar.fixed {
   background:
-    linear-gradient(180deg, rgba(var(--g-accent-rgb), .88) 0, rgba(var(--g-accent-rgb), .55) 64px, rgba(var(--g-accent-rgb), .10) 150px, rgba(var(--g-accent-rgb), 0) 210px),
-    linear-gradient(180deg, rgba(255,255,255,.94), rgba(248,250,252,.92)) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(140%); backdrop-filter: blur(40px) saturate(140%);
-  border-right: 1px solid rgba(15,23,42,.07) !important;
-  box-shadow: 12px 0 40px rgba(15,23,42,.22) !important;
+    /* glass sheen: a soft light streak across the top corner */
+    linear-gradient(125deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 38%),
+    linear-gradient(180deg, rgba(var(--g-accent-rgb), .80) 0, rgba(var(--g-accent-rgb), .45) 64px, rgba(var(--g-accent-rgb), .08) 150px, rgba(var(--g-accent-rgb), 0) 210px),
+    /* see-through enough for the page's colours to glow softly behind, opaque enough for crisp text */
+    linear-gradient(180deg, rgba(255,255,255,.80), rgba(255,255,255,.70)) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(170%) brightness(1.04); backdrop-filter: blur(48px) saturate(170%) brightness(1.04);
+  border-right: 1px solid rgba(255,255,255,.85) !important;
+  box-shadow: inset -1px 0 0 rgba(15,23,42,.06), inset 0 1px 0 rgba(255,255,255,.9), 12px 0 40px rgba(15,23,42,.22) !important;
 }
 html[data-lglass] .gsidebar [class*="text-white"] { color: #334155 !important; }
 html[data-lglass] .gsidebar :is([class*="bg-white/15"], [class*="bg-white/20"]) { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
