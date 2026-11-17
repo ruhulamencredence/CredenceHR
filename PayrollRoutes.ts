@@ -2936,10 +2936,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     ).filter((e: any) => e.department === me.department && e.user_id != null);
   }
 
-  // The viewer's own Delay / Extreme Delay and the Leave of the people this
-  // account may see, in [from, to] (at most ~6 weeks, one calendar grid):
+  // The viewer's own Present / Absent / Delay / Extreme Delay and the Leave
+  // of the people this account may see, in [from, to] (at most ~6 weeks, one
+  // calendar grid):
   //   { me: user_id, people: [{ user_id, name, department }],
-  //     days: { "YYYY-MM-DD": [{ user_id, kind: "delay" | "extreme" | "leave",
+  //     days: { "YYYY-MM-DD": [{ user_id, kind: "present" | "absent" | "delay" | "extreme" | "leave",
   //                               leave_type?, status? }] } }
   app.get("/api/calendar-attendance", authenticateToken, async (req: any, res) => {
     try {
@@ -2957,7 +2958,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const me = Number(req.user.id);
       if (employees.length === 0) return res.json({ me, people, days: {} });
 
-      type Mark = { user_id: number; kind: "delay" | "extreme" | "leave"; leave_type?: string; status?: string };
+      type Mark = { user_id: number; kind: "delay" | "extreme" | "leave" | "present" | "absent"; leave_type?: string; status?: string };
       const days: Record<string, Mark[]> = {};
       const userIdByEmployeeId = new Map<number, number>(employees.map((e: any) => [Number(e.id), Number(e.user_id)]));
       // One mark per person per day: Leave wins over a late check-in.
@@ -3014,6 +3015,31 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           }
         }
         monthYear = shiftMonthYear(monthYear, 1);
+      }
+
+      // The viewer's own Present / Absent days (Employee 360's day-by-day
+      // attendance: office machine, Check In / Out, Site Attendance, Leave,
+      // holidays and the Duty Roster). A late day is already Delay /
+      // Extreme above. Absent only up to yesterday (today isn't over), and
+      // only for someone with any attendance in the range — a person whose
+      // attendance isn't recorded at all isn't shown absent every day
+      // (the payroll counts them present the same way).
+      if (self.length > 0) {
+        try {
+          const emp: any = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [Number(self[0].id)])) as any[])[0];
+          if (emp) {
+            const { loadAttendanceData, computeAttendanceDays } = await import("./HrOps360Routes");
+            const today = new Date(Date.now() + 6 * 3600 * 1000).toISOString().slice(0, 10);
+            const dayRows = computeAttendanceDays(await loadAttendanceData(queryDB, from, to, emp), emp, from, to, today, (k) => k);
+            const anyPresent = dayRows.some((d) => d.status === "present");
+            for (const d of dayRows) {
+              if (d.status === "present") add(d.date, { user_id: me, kind: "present" });
+              else if (d.status === "absent" && anyPresent && d.date < today) add(d.date, { user_id: me, kind: "absent" });
+            }
+          }
+        } catch (e: any) {
+          console.warn("⚠️ Calendar present / absent: " + (e?.message || e));
+        }
       }
 
       res.json({ me, people, days });
