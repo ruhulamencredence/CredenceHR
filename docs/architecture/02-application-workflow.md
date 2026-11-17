@@ -754,6 +754,26 @@ Admin Panel → PEPM Management → MPR Edit Log (`src/components/MprEditLog.tsx
 
 অনুমতি: `editlog` module-এ এখন layer — `read` (Edit history ও Pending approvals; layer না দেওয়া পুরনো account-এ আগের মতো থাকে) আর `mpr_followup` (Needs update ও People, explicit-only — টিক দিয়ে দিতে হয়)। API একই layer যাচাই করে।
 
+## Book a Ride: Round trip, Drop & pick up, One way (১৮ নভেম্বর)
+
+আগে একটা booking মানে গাড়ি পুরো সময় যাত্রীর কাছে থাকত; কেউ গাড়ি ছেড়ে দিলে পরে আবার ডাকলে system জানত না। এখন booking-এ **Trip** বাছাই (`src/components/RideTrip.tsx`, server `VehicleManagementRoutes.ts`):
+
+- **Round trip — car waits** — আগের মতো (Est. Duration, ফেরার সময়, late return)।
+- **Drop & pick up later** — নামিয়ে দিয়ে গাড়ি ফিরে আসে, পরে আবার এসে নেয়। Pick-up: নির্দিষ্ট সময়ে, অথবা "I'll tell you" (যাত্রী "Pick me up now" চাপবেন)। Duration লাগে না।
+- **One way** — শুধু নামিয়ে দেওয়া।
+
+যাত্রী বাছেন; approver (My Approvals-এর card-এ "Trip … Change"), "Approved by Me", Vehicle Management (Ride Requests) বা Vehicle Maintainer ride শুরুর আগে বদলাতে পারেন (`PUT /api/vehicles/requisitions/:id/trip`) — যাত্রী alert পান, কে বদলেছেন (`trip_changed_by`) আর যাত্রী কী চেয়েছিলেন (`trip_type_asked`) থাকে।
+
+Drop & pick up — এক ride, দুই ভাগ:
+1. গাড়ি দেওয়া → Start Ride → **"Dropped — head back"** (driver; যাত্রী বা Vehicle Management-ও পারেন, `POST …/:id/dropped`) → status `dropped`, গাড়ি তখনই Available। যাত্রী, driver, যিনি গাড়ি দিয়েছিলেন আর Pick-ups-এর লোক alert পান।
+2. Pick-up-এর গাড়ি দেওয়া (`PUT …/:id/pickup-assign`; একই গাড়ি/driver default, অন্যটাও চলে) — Vehicle Management → Pick-ups, অথবা Book a Ride → My Trips (যিনি drop চালিয়েছেন বা গাড়ি দিয়েছিলেন)। আগের গাড়ি/driver `drop_*`-এ যায়, ride আবার `assigned` (`leg = 'pickup'`) — তারপর আগের মতো "Set off for pick-up" (Start Ride), "Picked up", "Back — ride done" (Completed)।
+3. মাঝে যাত্রী: **Pick me up now** (`…/pickup-now`), **Change time** (`…/pickup-time`), **Not needed** (`…/pickup-not-needed` — ride বন্ধ, দেওয়া গাড়ি ছাড়া হয়)।
+4. Reminder (প্রতি মিনিটের ride check): pick-up-এর সময় কাছে আর গাড়ি দেওয়া হয়নি → Pick-ups-এর লোক, যিনি গাড়ি দিয়েছিলেন, drop driver; pick-up-এর সময় এসেছে কিন্তু রওনা হয়নি → pick-up driver। Pick-up ভাগ "never started" হিসেবে নিজে বন্ধ হয় না।
+
+Round trip চলার সময় **Release car, pick me up later** (যাত্রী বা driver, কারণ বাধ্যতামূলক, `…/release`) — ride Drop & pick up হয়ে যায় (`released_mid_ride`, `release_reason`, `waited_minutes`), অথবা "Not needed" বাছলে One way হয়ে তখনই বন্ধ। Drop & pick up / One way-এ late return বা HR notice flag হয় না।
+
+Vehicle Management-এ দুটো নতুন tab, প্রতিটার নিজের explicit-only tick: **Pick-ups** (layer `pickups`, `GET /api/vehicles/pickups` — বাকি pick-up, কোনটায় গাড়ি নেই, গাড়ি দেওয়া, সময় বদল) আর **Drop & pick up report** (layer `trip_report`, `GET /api/vehicles/trip-report?from=&to=` — ride, Drop & pick up, Released mid-ride, খালি যাত্রা, drop থেকে pick-up পর্যন্ত গাড়ি free থাকার সময়, pick-up গড়ে কত দেরি, "Pick me up now", Not needed, Round trip-এ গাড়ির অপেক্ষা; মানুষ ধরে; Excel)।
+
 ## Undelivered MPR ও Close short (১৭ নভেম্বর)
 
 Budget-এর শেষ Delivery Date-এর মধ্যে যে MPR-এর মাল (বা বাকি Qty) আর আনা সম্ভব নয়, তা আগে Budget থেকে বাদও যেত না, আলাদাও রাখা যেত না। এখন Admin Panel → PEPM Management → Reports → **Undelivered MPR** (`src/components/MprUndelivered.tsx`, server `MprDispatchRoutes.ts`):

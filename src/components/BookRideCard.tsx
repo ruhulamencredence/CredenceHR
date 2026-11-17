@@ -27,7 +27,7 @@ export interface Ride {
   destination: string;
   ride_date: string;
   start_time: string;
-  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired' | 'dropped';
   vehicle_no: string | null;
   vehicle_model: string | null;
   driver_name: string | null;
@@ -37,7 +37,9 @@ export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
   pending: { text: 'Awaiting approval', color: 'bg-yellow-100 text-yellow-800' },
   approved: { text: 'Awaiting vehicle', color: 'bg-teal-100 text-teal-800' },
   assigned: { text: 'Car assigned — not started', color: 'bg-indigo-100 text-indigo-800' },
-  ongoing: { text: 'Ride ongoing', color: 'bg-green-100 text-green-800' }
+  ongoing: { text: 'Ride ongoing', color: 'bg-green-100 text-green-800' },
+  // Drop & pick up: dropped, the pick-up still to come.
+  dropped: { text: 'Dropped — pick-up later', color: 'bg-sky-100 text-sky-800' }
 };
 
 // This account's own rides still in progress (awaiting approval, awaiting a

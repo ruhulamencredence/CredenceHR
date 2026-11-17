@@ -28,6 +28,7 @@ import { RideBookingFlow } from './RideBookingFlow';
 import { ArrowLeft, CalendarDays, ChevronRight, Car, X, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
 import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 import { SearchSelect } from './Combobox';
+import { TripRide, TripBadge, TripLegs, ChangeTripPopup, ReleaseCarPopup, PickupTimePopup, PickupAssignPopup, rideCall } from './RideTrip';
 import {
   RIDE_CARD,
   RIDE_WELL,
@@ -45,7 +46,8 @@ import {
 } from './rideTheme';
 import { personLabel } from '../lib/personLabel';
 
-interface Requisition {
+// Trip fields (Round trip / Drop & pick up / One way) come from TripRide.
+interface Requisition extends TripRide {
   id: number;
   employee_name?: string | null;
   purpose: string;
@@ -55,7 +57,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired' | 'dropped';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending'.
   pending_with: string | null;
@@ -97,7 +99,9 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
   cancelled: 'Cancelled',
   completed: 'Completed',
   // Start time (+ grace) passed before it was approved / given a vehicle.
-  expired: 'Expired — Not Confirmed in Time'
+  expired: 'Expired — Not Confirmed in Time',
+  // Drop & pick up: dropped, the car went back; the pick-up is to come.
+  dropped: 'Dropped — Pick-up Later'
 };
 
 
@@ -314,6 +318,80 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
     }
   }
 
+  // Drop & pick up popups (RideTrip.tsx) and their one-tap actions.
+  const [tripPop, setTripPop] = useState<{ kind: 'change' | 'release' | 'time' | 'assign'; r: Requisition } | null>(null);
+  const [pickupCars, setPickupCars] = useState<{ vehicles: AvailableVehicle[]; drivers: DriverOption[] }>({ vehicles: [], drivers: [] });
+  const refreshRides = () => {
+    void loadRequisitions(true);
+    void loadMyTrips();
+    void loadAwaitingAssignment(true);
+    if (tab === 'maintainer') void loadMaintainerData();
+  };
+  async function tripAct(path: string, method: string, confirmText?: string, destructive = false) {
+    if (confirmText && !(await confirmDialog(confirmText, destructive ? { tone: 'danger' } : undefined))) return;
+    setError(null);
+    try {
+      await rideCall(path, method);
+      refreshRides();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+  async function openPickupAssign(r: Requisition) {
+    setError(null);
+    try {
+      const [v, d] = await Promise.all([
+        fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders() }).then((x) => x.json()),
+        fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders() }).then((x) => x.json())
+      ]);
+      setPickupCars({ vehicles: Array.isArray(v) ? v : [], drivers: Array.isArray(d) ? d : [] });
+      setTripPop({ kind: 'assign', r });
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+  // A round trip shows how long the car is held; the others show their trip.
+  const estText = (r: Requisition) => ((r.trip_type || 'round') === 'round' ? `Est. ${formatDuration(r.estimated_duration_hours)}` : r.trip_type === 'one_way' ? 'One way' : 'Drop & pick up');
+  const isPickupWaiting = (r: Requisition) => r.status === 'dropped' || (r.status === 'assigned' && r.leg === 'pickup');
+  const tripOf = (r: Requisition) => r.trip_type || 'round';
+  // The passenger's buttons for the trip (Ride Status).
+  const passengerTripButtons = (r: Requisition) => (
+    <>
+      {(r.status === 'pending' || r.status === 'approved' || (r.status === 'assigned' && r.leg !== 'pickup')) && (
+        <button onClick={() => setTripPop({ kind: 'change', r })} className={BTN_GHOST_SM}>
+          Change trip
+        </button>
+      )}
+      {r.status === 'ongoing' && r.leg !== 'pickup' && tripOf(r) === 'round' && (
+        <button onClick={() => setTripPop({ kind: 'release', r })} className={BTN_GHOST_SM}>
+          Release car, pick me up later
+        </button>
+      )}
+      {r.status === 'ongoing' && r.leg !== 'pickup' && tripOf(r) === 'drop_pickup' && (
+        <button onClick={() => tripAct(`/${r.id}/dropped`, 'POST', 'Mark that you were dropped? The car goes back and is free until your pick-up.')} className={BTN_PRIMARY_SM}>
+          I've been dropped
+        </button>
+      )}
+      {isPickupWaiting(r) && (
+        <>
+          <button onClick={() => tripAct(`/${r.id}/pickup-now`, 'POST')} className={BTN_PRIMARY_SM}>
+            Pick me up now
+          </button>
+          <button onClick={() => setTripPop({ kind: 'time', r })} className={BTN_GHOST_SM}>
+            Change time
+          </button>
+          <button onClick={() => tripAct(`/${r.id}/pickup-not-needed`, 'POST', 'Not needed? You come back on your own and the ride closes.', true)} className={BTN_GHOST_SM}>
+            Not needed
+          </button>
+        </>
+      )}
+    </>
+  );
+  // Whether the usual "Ride Completed" fits: a round trip, a one-way drop,
+  // or the pick-up leg — not a drop & pick up still on its drop.
+  const canComplete = (r: Requisition) => r.status === 'ongoing' && (tripOf(r) !== 'drop_pickup' || r.leg === 'pickup');
+  const completeLabel = (r: Requisition, fallback: string) => (tripOf(r) === 'one_way' ? 'Dropped — ride done' : r.leg === 'pickup' ? 'Back — ride done' : fallback);
+
   async function loadMyTrips() {
     try {
       const res = await fetch(apiUrl('/api/vehicles/requisitions/my-trips'), { headers: authHeaders() });
@@ -516,7 +594,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
     statusFilter === 'all'
       ? requisitions
       : statusFilter === 'active'
-        ? requisitions.filter((r) => r.status === 'assigned' || r.status === 'ongoing')
+        ? requisitions.filter((r) => r.status === 'assigned' || r.status === 'ongoing' || r.status === 'dropped')
         : requisitions.filter((r) => r.status === statusFilter);
   const emptyState = (text: string) => (
     <div className={`${card} px-6 py-10 flex flex-col items-center text-center`}>
@@ -555,8 +633,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
       <div className="flex items-start justify-between gap-3">
         <RideRoute from={r.pickup_location} to={r.destination} compact />
         {showStatus && (
-          <div className="shrink-0">
+          <div className="shrink-0 flex flex-col items-end gap-1">
             <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
+            <TripBadge r={r} />
           </div>
         )}
       </div>
@@ -565,10 +644,12 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
           <CalendarDays className="w-3.5 h-3.5" /> {when(r)}
         </span>
         <span className="inline-flex items-center gap-1">
-          <Timer className="w-3.5 h-3.5" /> Est. {hours(r.estimated_duration_hours)}
+          <Timer className="w-3.5 h-3.5" /> {estText(r)}
         </span>
       </div>
       {r.purpose && <p className="mt-2 text-sm text-slate-600">{r.purpose}</p>}
+      {!showStatus && <div className="mt-2"><TripBadge r={r} /></div>}
+      <TripLegs r={r} />
       <div className="mt-3">{footer}</div>
     </div>
   );
@@ -590,7 +671,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
     else onBack?.();
   };
   useBackButtonClose(phone, () => backRef.current());
-  const openRides = requisitions.filter((r) => r.status === 'pending' || r.status === 'approved' || r.status === 'assigned' || r.status === 'ongoing').length;
+  const openRides = requisitions.filter((r) => r.status === 'pending' || r.status === 'approved' || r.status === 'assigned' || r.status === 'ongoing' || r.status === 'dropped').length;
 
   const TABS = [
     { key: 'book' as const, label: 'Book a Ride', icon: Car, count: 0 },
@@ -724,7 +805,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
             [
               ['all', 'All', requisitions.length],
               ['pending', 'Pending', counts.pending || 0],
-              ['active', 'Active', (counts.assigned || 0) + (counts.ongoing || 0)],
+              ['active', 'Active', (counts.assigned || 0) + (counts.ongoing || 0) + (counts.dropped || 0)],
               ['completed', 'Completed', counts.completed || 0],
               ...(wideWeb ? [['approved', 'Awaiting car', counts.approved || 0]] : [])
             ] as [typeof statusFilter, string, number][]
@@ -779,7 +860,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     {String(r.ride_date).slice(0, 10)}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5 pl-5">
-                    {r.start_time} · Est. {hours(r.estimated_duration_hours)}
+                    {r.start_time} · {estText(r)}
                   </div>
                 </div>
                 <div className="min-w-0 text-sm text-slate-700">
@@ -802,6 +883,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 </div>
                 <div className="min-w-0 space-y-1">
                   <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
+                  <TripBadge r={r} />
                   {r.status === 'pending' && r.pending_with && (
                     <div className="text-xs text-amber-700 truncate" title={r.pending_with}>
                       Waiting on: <span className="font-medium">{r.pending_with}</span>
@@ -823,13 +905,14 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   )}
                   {r.status === 'completed' && (
                     <div className={`text-xs ${r.returned_late ? 'text-amber-700' : 'text-slate-500'}`}>
-                      {r.returned_late ? 'Returned late' : 'Returned on time'}
+                      {tripOf(r) !== 'round' ? 'Ride closed' : r.returned_late ? 'Returned late' : 'Returned on time'}
                       {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
                     </div>
                   )}
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
-                  {(r.status === 'pending' || r.status === 'approved' || r.status === 'assigned') && (
+                  {passengerTripButtons(r)}
+                  {(r.status === 'pending' || r.status === 'approved' || (r.status === 'assigned' && r.leg !== 'pickup')) && (
                     <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                       Cancel
                     </button>
@@ -846,10 +929,12 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                           <Navigation className="w-3.5 h-3.5" /> Live Map
                         </button>
                       )}
-                      <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
-                        Mark Returned
-                      </button>
-                      {r.time_extension_status === 'none' && (
+                      {canComplete(r) && (
+                        <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
+                          {completeLabel(r, 'Mark Returned')}
+                        </button>
+                      )}
+                      {r.time_extension_status === 'none' && tripOf(r) === 'round' && (
                         <button
                           onClick={() => {
                             setExtendingFor(extendingFor === r.id ? null : r.id);
@@ -864,6 +949,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   )}
                 </div>
               </div>
+              <TripLegs r={r} />
               {renderExtensionForm(r)}
             </div>
           ))}
@@ -881,16 +967,18 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
               </div>
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
+                <TripBadge r={r} />
               </div>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
                 <span className="inline-flex items-center gap-1">
                   <CalendarDays className="w-3.5 h-3.5" /> {when(r)}
                 </span>
                 <span className="inline-flex items-center gap-1">
-                  <Timer className="w-3.5 h-3.5" /> Est. {hours(r.estimated_duration_hours)}
+                  <Timer className="w-3.5 h-3.5" /> {estText(r)}
                 </span>
               </div>
               {r.purpose && <div className="text-sm text-slate-600 mt-2">{r.purpose}</div>}
+              <TripLegs r={r} />
 
               {r.status === 'pending' && r.pending_with && (
                 <div className="text-xs text-amber-700 mt-1.5">
@@ -915,7 +1003,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   </div>
                   {r.status === 'assigned' && <div className="text-indigo-700 font-medium">Starts when the driver presses Start Ride</div>}
                   {r.started_at && <div className="text-slate-500">Started {new Date(r.started_at).toLocaleString()}</div>}
-                  {r.expected_return_at && <div className="text-slate-500">Expected back by {new Date(r.expected_return_at).toLocaleString()}</div>}
+                  {r.expected_return_at && tripOf(r) === 'round' && <div className="text-slate-500">Expected back by {new Date(r.expected_return_at).toLocaleString()}</div>}
                 </div>
               )}
 
@@ -928,7 +1016,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
 
               {r.status === 'completed' && (
                 <div className={`text-xs mt-2 ${r.returned_late ? 'text-amber-700' : 'text-slate-500'}`}>
-                  {r.returned_late ? 'Returned late' : 'Returned on time'}
+                  {tripOf(r) !== 'round' ? 'Ride closed' : r.returned_late ? 'Returned late' : 'Returned on time'}
                   {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
                 </div>
               )}
@@ -939,7 +1027,8 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     <MapIcon className="w-3.5 h-3.5" /> Ride Details & Map
                   </button>
                 )}
-                {(r.status === 'pending' || r.status === 'approved' || r.status === 'assigned') && (
+                {passengerTripButtons(r)}
+                {(r.status === 'pending' || r.status === 'approved' || (r.status === 'assigned' && r.leg !== 'pickup')) && (
                   <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                     Cancel Request
                   </button>
@@ -951,10 +1040,12 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                         <Navigation className="w-3.5 h-3.5" /> Live Map
                       </button>
                     )}
-                    <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
-                      Ride Completed
-                    </button>
-                    {r.time_extension_status === 'none' && (
+                    {canComplete(r) && (
+                      <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
+                        {completeLabel(r, 'Ride Completed')}
+                      </button>
+                    )}
+                    {r.time_extension_status === 'none' && tripOf(r) === 'round' && (
                       <button
                         onClick={() => {
                           setExtendingFor(extendingFor === r.id ? null : r.id);
@@ -1008,6 +1099,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     >
                       <Car className="w-3.5 h-3.5" /> Assign Vehicle &amp; Driver
                     </button>
+                    <button onClick={() => setTripPop({ kind: 'change', r })} className={BTN_GHOST_SM}>
+                      Change trip
+                    </button>
                     <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                       Cancel Ride
                     </button>
@@ -1041,29 +1135,58 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     {r.started_at && <div className="text-slate-500">Started {new Date(r.started_at).toLocaleString()}</div>}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {r.status === 'assigned' ? (
+                    {r.status === 'dropped' ? (
+                      // Dropped, pick-up still to come: give it a car (the same one by default).
+                      <>
+                        <button onClick={() => void openPickupAssign(r)} className={BTN_PRIMARY_SM}>
+                          <Car className="w-3.5 h-3.5" /> Give pick-up a car
+                        </button>
+                        <button onClick={() => setTripPop({ kind: 'time', r })} className={BTN_GHOST_SM}>
+                          Change time
+                        </button>
+                      </>
+                    ) : r.status === 'assigned' ? (
                       <>
                         <button onClick={() => startRide(r.id)} className={BTN_PRIMARY_SM}>
-                          <Play className="w-3.5 h-3.5" /> Start Ride
+                          <Play className="w-3.5 h-3.5" /> {r.leg === 'pickup' ? 'Set off for pick-up' : 'Start Ride'}
                         </button>
-                        <button
-                          onClick={async () => {
-                            await cancelRequisition(r.id);
-                            void loadMyTrips();
-                          }}
-                          className={BTN_GHOST_SM}
-                        >
-                          Cancel Ride
-                        </button>
+                        {r.leg !== 'pickup' && (
+                          <button
+                            onClick={async () => {
+                              await cancelRequisition(r.id);
+                              void loadMyTrips();
+                            }}
+                            className={BTN_GHOST_SM}
+                          >
+                            Cancel Ride
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
                         <button onClick={() => setViewingMapFor(r.id)} className={BTN_SOFT_SM}>
                           <Navigation className="w-3.5 h-3.5" /> Live Map
                         </button>
-                        <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
-                          Ride Completed
-                        </button>
+                        {r.leg !== 'pickup' && tripOf(r) === 'drop_pickup' && (
+                          <button onClick={() => tripAct(`/${r.id}/dropped`, 'POST', 'Dropped the passenger? The car heads back and is free until the pick-up.')} className={BTN_PRIMARY_SM}>
+                            Dropped — head back
+                          </button>
+                        )}
+                        {r.leg === 'pickup' && !r.picked_up_at && (
+                          <button onClick={() => tripAct(`/${r.id}/picked-up`, 'POST')} className={BTN_SOFT_SM}>
+                            Picked up
+                          </button>
+                        )}
+                        {canComplete(r) && (
+                          <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
+                            {completeLabel(r, 'Ride Completed')}
+                          </button>
+                        )}
+                        {r.leg !== 'pickup' && tripOf(r) === 'round' && (
+                          <button onClick={() => setTripPop({ kind: 'release', r })} className={BTN_GHOST_SM}>
+                            Release car
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -1284,6 +1407,12 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
         </div>
       )}
 
+      {tripPop?.kind === 'change' && <ChangeTripPopup r={tripPop.r} onClose={() => setTripPop(null)} onDone={() => { setTripPop(null); refreshRides(); }} />}
+      {tripPop?.kind === 'release' && <ReleaseCarPopup r={tripPop.r} onClose={() => setTripPop(null)} onDone={() => { setTripPop(null); refreshRides(); }} />}
+      {tripPop?.kind === 'time' && <PickupTimePopup r={tripPop.r} onClose={() => setTripPop(null)} onDone={() => { setTripPop(null); refreshRides(); }} />}
+      {tripPop?.kind === 'assign' && (
+        <PickupAssignPopup r={tripPop.r} vehicles={pickupCars.vehicles} drivers={pickupCars.drivers} onClose={() => setTripPop(null)} onDone={() => { setTripPop(null); refreshRides(); }} />
+      )}
       {viewingMapFor != null && <LiveRideMap requisitionId={viewingMapFor} onClose={() => setViewingMapFor(null)} />}
       {viewingDetailsFor != null && <RideDetails requisitionId={viewingDetailsFor} onClose={() => setViewingDetailsFor(null)} />}
     </div>
