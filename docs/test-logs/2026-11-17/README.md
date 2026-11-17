@@ -26,6 +26,9 @@ Every step is checked on the IMAP server itself (`imapflow`), the way Outlook / 
   New sub-folder with "Inside" already set; tree; tick + "Move to folder" → on the server; drag a mail onto the folder →
   on the server; open the folder (title = path, its 2 mails, Inbox mail not there); reader "Move to folder"; Rename;
   Delete (red confirm "no mail is deleted") → folders gone, mail back in INBOX, screen back on Inbox; no page errors.
+- `scripts/mail-folders-outside.mjs`: **5/5** — sub-folders made outside CredenceHR (straight on the IMAP server, as
+  Outlook / cPanel webmail do), two levels deep: all appear, nested the same way (Clients > ABC Ltd > Invoices); their
+  mail comes in when the folder is synced; renamed and deleted there → followed here.
 
 Fixed while testing: the folder's "⋯" menu was trapped inside the glass sidebar (couldn't be clicked) → drawn in a
 portal like the other popups.
