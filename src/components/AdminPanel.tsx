@@ -1,3 +1,4 @@
+import { useElementHeight } from '../lib/useElementHeight';
 import { AttendanceEditPopup } from './AttendanceEditPopup';
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
@@ -542,6 +543,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
+  // Users / Monthly Leave Application: the sticky search bar's height, so
+  // the table's column titles stick right under it (lib/useElementHeight.ts).
+  const [usersBarRef, usersBarH] = useElementHeight();
+  const [leaveBarRef, leaveBarH] = useElementHeight();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'designations' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
@@ -4827,8 +4832,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           viewing report, the same "Monthly Attendance Report" pattern applied
           to Leave Applications instead of attendance. */}
       {activeTab === 'leave_applications' && (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <CalendarClock className="w-5 h-5 text-blue-600" />
@@ -4839,6 +4844,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {leaveApplicationsReportDepartments.length > 0 && ' Only Departments you have access to are listed below.'}
               </p>
             </div>
+          </div>
+          {/* Search + Department stay at the top while the list scrolls (a
+              computer); the table's column titles stick right under them. */}
+          <div ref={leaveBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             <div className="flex flex-wrap gap-3 items-center">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -4873,9 +4882,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               {/* Desktop — unchanged full table. */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="hidden md:block overflow-x-clip">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <thead className="sticky z-10 bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + leaveBarH }}>
                     <tr>
                       <th className="px-4 py-3">Employee</th>
                       <th className="px-4 py-3">Department</th>
@@ -6760,8 +6769,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             )}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900">User Management</h3>
               <p className="text-xs text-slate-500">
@@ -6770,6 +6779,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
               </p>
             </div>
+          </div>
+          {/* Search, filters and buttons stay at the top while the list
+              scrolls (a computer); the column titles stick right under them. */}
+          <div ref={usersBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
                 without touching the `users` state other tabs on this page depend on. */}
             {/* Phone: search on its own line, Role + Department side by side,
@@ -6912,7 +6925,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               <table className="hidden md:table w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                <thead className="sticky z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + usersBarH }}>
                   <tr>
                     <th className="pl-5 pr-1 py-2.5 w-8">
                       {(() => {
