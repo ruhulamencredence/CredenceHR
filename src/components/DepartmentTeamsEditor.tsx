@@ -16,8 +16,8 @@
 // one by default, or all) to tick and add at once, and can add a rule so new
 // joiners there join this team by themselves (department_team_auto).
 
-import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Trash2, X, UserPlus, Sparkles } from 'lucide-react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Plus, Trash2, X, UserPlus, Sparkles, ChevronDown } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { SearchSelect } from './Combobox';
@@ -62,6 +62,18 @@ export const DepartmentTeamsEditor = forwardRef<
   const [people, setPeople] = useState<Person[]>([]);
   const [pool, setPool] = useState<Person[]>([]);
   const [error, setError] = useState('');
+  // Which teams are open. A department with one team shows it open; with
+  // more, each is a one-line summary until tapped. A new team opens on top.
+  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
+  const [focusKey, setFocusKey] = useState('');
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    if (!focusKey) return;
+    const el = cardRefs.current.get(focusKey);
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el?.querySelector<HTMLInputElement>('input[data-team-name]')?.focus({ preventScroll: true });
+    setFocusKey('');
+  }, [focusKey]);
 
   useEffect(() => {
     let alive = true;
@@ -73,8 +85,7 @@ export const DepartmentTeamsEditor = forwardRef<
         if (!alive) return;
         setPeople(j.people || []);
         setPool(j.pool || j.people || []);
-        setTeams(
-          (j.teams || []).map((t: any) => ({
+        const loaded: Team[] = (j.teams || []).map((t: any) => ({
             key: `t${t.id}`,
             id: t.id,
             name: t.name,
@@ -82,8 +93,9 @@ export const DepartmentTeamsEditor = forwardRef<
             everyone_else: !!t.everyone_else,
             member_ids: t.member_ids || [],
             auto: t.auto || []
-          }))
-        );
+          }));
+        setTeams(loaded);
+        setOpenKeys(new Set(loaded.length === 1 ? [loaded[0].key] : []));
       })
       .catch((e) => alive && (setError(e.message), setTeams([])));
     return () => {
@@ -145,21 +157,53 @@ export const DepartmentTeamsEditor = forwardRef<
         <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">
           Teams <span className="normal-case tracking-normal font-normal text-slate-500">— each with its own Supervisor and members</span>
         </p>
-        <button
-          type="button"
-          onClick={() => setTeams((ts) => [...(ts || []), { key: `n${++seq}`, id: null, name: '', supervisor_user_id: '', everyone_else: false, member_ids: [], auto: [] }])}
-          className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-dashed border-orange-300 bg-orange-50 text-orange-700 text-xs font-semibold"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add team
-        </button>
+        <div className="flex items-center gap-2">
+          {teams.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setOpenKeys(openKeys.size === teams.length ? new Set() : new Set(teams.map((t) => t.key)))}
+              className="text-xs font-semibold text-slate-600 hover:underline"
+            >
+              {openKeys.size === teams.length ? 'Collapse all' : 'Open all'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const key = `n${++seq}`;
+              // On top, open, and the name box focused — no scrolling down to find it.
+              setTeams((ts) => [{ key, id: null, name: '', supervisor_user_id: '', everyone_else: false, member_ids: [], auto: [] }, ...(ts || [])]);
+              setOpenKeys((o) => new Set([...o, key]));
+              setFocusKey(key);
+            }}
+            className="inline-flex items-center gap-1 h-8 px-3 rounded-full border border-dashed border-orange-300 bg-orange-50 text-orange-700 text-xs font-semibold"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add team
+          </button>
+        </div>
       </div>
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {!teams.length && <p className="text-xs text-slate-500">No teams yet. Without a team, everyone's requests go to the Head of Department, then the workflow.</p>}
       <div className="grid gap-3">
-        {teams.map((t, i) => (
-          <div key={t.key} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
+        {teams.map((t, i) => {
+          const isOpen = openKeys.has(t.key);
+          const toggle = () => setOpenKeys((o) => { const y = new Set(o); isOpen ? y.delete(t.key) : y.add(t.key); return y; });
+          const sup = supervisors.find((x) => x.value === t.supervisor_user_id)?.label.split(' · ')[0] || '';
+          return (
+          <div key={t.key} ref={(el) => { if (el) cardRefs.current.set(t.key, el); else cardRefs.current.delete(t.key); }} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
             <div className="flex items-center gap-2">
-              <input aria-label={`Team ${i + 1} name`} className={`${field} font-semibold`} value={t.name} onChange={(e) => set(t.key, { name: e.target.value })} placeholder="e.g. Accounts team" />
+              <button type="button" aria-expanded={isOpen} onClick={toggle} className="flex-1 min-w-0 flex items-center gap-2 text-left rounded-xl px-1 py-0.5 hover:bg-white/70">
+                <ChevronDown className={`w-4 h-4 shrink-0 text-slate-500 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+                <span className="min-w-0">
+                  <span className={`block text-sm font-bold truncate ${t.name.trim() ? 'text-slate-900' : 'text-slate-400 italic'}`}>{t.name.trim() || 'New team — give it a name'}</span>
+                  <span className="block text-[11px] text-slate-500 truncate">
+                    {sup ? `Supervisor: ${sup}` : <span className="text-orange-600 font-semibold">No supervisor</span>}
+                    {` · ${t.member_ids.length} ${t.member_ids.length === 1 ? 'member' : 'members'}`}
+                    {t.auto.length > 0 && ` · new joiners at ${t.auto.length} ${t.auto.length === 1 ? 'project' : 'projects'}`}
+                    {t.everyone_else && ' · everyone else'}
+                  </span>
+                </span>
+              </button>
               <button
                 type="button"
                 aria-label={`Remove team ${t.name || i + 1}`}
@@ -171,6 +215,11 @@ export const DepartmentTeamsEditor = forwardRef<
               >
                 <Trash2 className="w-4 h-4" />
               </button>
+            </div>
+            {isOpen && (<>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Team name</label>
+              <input data-team-name aria-label={`Team ${i + 1} name`} className={`${field} font-semibold`} value={t.name} onChange={(e) => set(t.key, { name: e.target.value })} placeholder="e.g. Accounts team" />
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Supervisor</label>
@@ -269,8 +318,10 @@ export const DepartmentTeamsEditor = forwardRef<
                 Also everyone else in {departmentName} (people in no other team, new hires too)
               </span>
             </label>
+            </>)}
           </div>
-        ))}
+          );
+        })}
       </div>
       {!catchAll && noTeam.length > 0 && (
         <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-800">
