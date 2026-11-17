@@ -4,6 +4,8 @@
   "assistant_learned",
   "assistant_support_messages",
   "assistant_support_sessions",
+  "chat_list_rooms",
+  "chat_lists",
   "chat_message_hidden",
   "chat_message_reactions",
   "chat_messages",

@@ -22,8 +22,9 @@ import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer, Archive, Pin
 } from 'lucide-react';
+import { ChatListChips, ChatRoomMenu, chipMatches, isUnread, useChatLists, type ChatChip } from './chat/ChatListActions';
 import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
 import { formatDate } from '../lib/formatDate';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
@@ -197,6 +198,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [roomDepts, setRoomDepts] = useState<string[]>([]);
   // Phone bottom bar: which list the room column shows, and the "+" menu.
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
+  // The chat list, each account's own (chat/ChatListActions.tsx): the
+  // Archived view, the filter chip, and the open menu of one chat (anchor =
+  // the ⌄ on a computer; null = the sheet on a phone).
+  const [showArchived, setShowArchived] = useState(false);
+  const [chip, setChip] = useState<ChatChip>('all');
+  const chatLists = useChatLists(token);
+  const [rowMenu, setRowMenu] = useState<{ room: ChatRoom; anchor: DOMRect | null } | null>(null);
+  const longPress = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean; x: number; y: number }>({ timer: null, fired: false, x: 0, y: 0 });
+  useBackButtonClose(showArchived && !rowMenu, () => setShowArchived(false));
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   // The list header's "+" menu (new chat / group / community / join).
   const [headMenuOpen, setHeadMenuOpen] = useState(false);
@@ -1031,9 +1041,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const byDept = roomDepts.length
       ? byTab.filter((r) => r.type === 'direct' && !!r.other_participant && roomDepts.includes(deptOf.get(r.other_participant.id) || ''))
       : byTab;
-    if (!q) return byDept;
-    return byDept.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory]);
+    // Archived chats only in the Archived view (a search finds them too);
+    // the filter chip; pinned chats on top (first pinned first).
+    const byArchive = byDept.filter((r) => (q ? true : showArchived ? !!r.archived : !r.archived));
+    const byChip = showArchived ? byArchive : byArchive.filter((r) => chipMatches(r, chip));
+    const found = q ? byChip.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q)) : byChip;
+    return showArchived ? found : [...found.filter((r) => r.pinned), ...found.filter((r) => !r.pinned)];
+  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory, showArchived, chip]);
+  const archivedRooms = rooms.filter((r) => r.archived);
+  const archivedUnread = archivedRooms.filter(isUnread).length;
+  const pinnedCount = rooms.filter((r) => r.pinned).length;
   const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
     window.dispatchEvent(
       new CustomEvent('credence:start-call', {
@@ -1127,6 +1144,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
           )}
+          {listTab !== 'calls' && !showArchived && (
+            <ChatListChips chip={chip} setChip={setChip} rooms={rooms} lists={chatLists.lists} onCreate={chatLists.create} onRemove={chatLists.remove} />
+          )}
         </div>
         <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {listTab === 'calls' && canCall && callSetupMissing(callSetup) && (
@@ -1153,11 +1173,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </button>
             </div>
           )}
-          {filteredRooms.length === 0 && (
+          {listTab !== 'calls' && showArchived && (
+            <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 bg-slate-50/70">
+              <button type="button" onClick={() => setShowArchived(false)} className="p-1.5 -ml-1.5 rounded-full hover:bg-slate-200/60" aria-label="Back to chats">
+                <ArrowLeft className="w-4 h-4 text-slate-600" />
+              </button>
+              <span className="text-sm font-bold text-slate-800">Archived</span>
+              <span className="ml-auto text-[11px] text-slate-500">Stay here when new messages come</span>
+            </div>
+          )}
+          {listTab !== 'calls' && !showArchived && !roomSearch.trim() && archivedRooms.length > 0 && (
+            <button type="button" onClick={() => setShowArchived(true)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 hover:bg-slate-50 text-left">
+              <span className="w-11 flex justify-center shrink-0">
+                <Archive className="w-5 h-5 text-slate-500" />
+              </span>
+              <span className="flex-1 text-sm font-semibold text-slate-700">Archived</span>
+              <span className={`text-xs font-bold ${archivedUnread ? 'text-emerald-600' : 'text-slate-400'}`}>{archivedUnread || archivedRooms.length}</span>
+            </button>
+          )}
+          {filteredRooms.length === 0 && showArchived && <div className="p-8 text-center text-sm text-slate-400">No archived chats.</div>}
+          {filteredRooms.length === 0 && !showArchived && (
             <div className="p-8 text-center text-sm text-slate-400">
               {roomDepts.length > 0
                 ? 'No chat with anyone in these departments yet — tap + to start one.'
-                : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+                : chip !== 'all' && listTab !== 'calls'
+                  ? chip === 'unread' ? 'No unread chats.' : chip === 'favorites' ? 'No favourites yet — open a chat\'s menu (⌄, or hold it on a phone) and Add to Favorites.' : 'No chats in this list yet — open a chat\'s menu and Add to list.'
+                  : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
             </div>
           )}
           {filteredRooms.map((room) => {
@@ -1176,8 +1217,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               <button
                 key={room.id}
                 type="button"
-                onClick={() => openRoom(room.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-50 text-left ${
+                onClick={() => {
+                  // A hold that opened the menu isn't also a tap.
+                  if (longPress.current.fired) {
+                    longPress.current.fired = false;
+                    return;
+                  }
+                  openRoom(room.id);
+                }}
+                // Computer: right-click opens the chat's menu.
+                onContextMenu={(e) => {
+                  if (listTab === 'calls') return;
+                  e.preventDefault();
+                  setRowMenu({ room, anchor: new DOMRect(e.clientX, e.clientY, 0, 0) });
+                }}
+                // Phone: hold the chat for half a second.
+                onTouchStart={(e) => {
+                  if (listTab === 'calls') return;
+                  const t = e.touches[0];
+                  longPress.current.fired = false;
+                  longPress.current.x = t.clientX;
+                  longPress.current.y = t.clientY;
+                  if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                  longPress.current.timer = setTimeout(() => {
+                    longPress.current.fired = true;
+                    try { navigator.vibrate?.(15); } catch { /* no vibration */ }
+                    setRowMenu({ room, anchor: null });
+                  }, 500);
+                }}
+                onTouchMove={(e) => {
+                  const t = e.touches[0];
+                  if (Math.abs(t.clientX - longPress.current.x) > 10 || Math.abs(t.clientY - longPress.current.y) > 10) {
+                    if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                }}
+                className={`group/row w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-50 text-left select-none ${
                   activeRoomId === room.id ? 'bg-blue-50' : ''
                 }`}
               >
@@ -1227,11 +1304,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     <span className="text-xs text-slate-500 truncate">{previewPrefix}{previewText}</span>
                     <span className="shrink-0 flex items-center gap-1">
                       {isMuted(room) && <BellOff className="w-3.5 h-3.5 text-slate-400" aria-label="Muted" />}
+                      {room.pinned && !showArchived && <Pin className="w-3.5 h-3.5 text-slate-400 rotate-45" aria-label="Pinned" />}
                       {room.unread_count > 0 && (
                         <span className={`${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1`}>
                           {room.unread_count > 99 ? '99+' : room.unread_count}
                         </span>
                       )}
+                      {room.unread_count === 0 && room.marked_unread && (
+                        <span className={`w-3 h-3 rounded-full ${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'}`} aria-label="Marked as unread" />
+                      )}
+                      {/* Computer: the chat's menu, shown on hover. */}
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Options for ${name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowMenu({ room, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setRowMenu({ room, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                          }
+                        }}
+                        className={`hidden md:inline-flex w-0 opacity-0 overflow-hidden group-hover/row:w-6 group-hover/row:opacity-100 focus:w-6 focus:opacity-100 h-6 items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 transition-all ${
+                          rowMenu?.room.id === room.id ? '!w-6 !opacity-100' : ''
+                        }`}
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </span>
                     </span>
                   </div>
                 </div>
@@ -1240,6 +1343,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             );
           })}
         </div>
+
+        {rowMenu && (
+          <ChatRoomMenu
+            token={token}
+            room={rooms.find((r) => r.id === rowMenu.room.id) || rowMenu.room}
+            roomName={roomDisplayName(rowMenu.room, user.id)}
+            anchor={rowMenu.anchor}
+            pinnedCount={pinnedCount}
+            lists={chatLists.lists}
+            onCreateList={chatLists.create}
+            onClose={() => setRowMenu(null)}
+            onChanged={fetchRooms}
+            onGone={(id) => {
+              if (activeRoomId === id) {
+                setActiveRoomId(null);
+                setMessages([]);
+              }
+            }}
+            onCleared={(id) => {
+              if (activeRoomId === id) setMessages((prev) => prev.filter((m) => m.starred));
+            }}
+            userId={user.id}
+          />
+        )}
 
         {/* Phone bottom bar (full-screen Chat only): a floating glass pill
             with Chats / Groups / Calls / your photo — the active one widens

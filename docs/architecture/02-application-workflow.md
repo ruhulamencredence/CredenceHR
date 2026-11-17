@@ -429,6 +429,7 @@ Admin Panel → PEPM Manage → Data Import → **Condition Set**-এ দুট�
 Admin Panel → Monthly Attendance Report-এর তৃতীয় ট্যাব **Department Summary** (Attendance Reports module-এর layer `dept_summary`; সাধারণ পড়া, তাই layer না রাখা অ্যাকাউন্ট ডিফল্টে পায়; Superadmin সবসময়)।
 
 - **One day:** বাছা দিনে প্রতি department-এ কতজন Present, Absent, Leave, Delay, Extreme Delay। **Whole month:** মাসের প্রতিটি দিন যোগ করে (person-days), আজ পর্যন্ত।
+- **Superadmin-এর হাজিরা (১৭ নভেম্বর):** Monthly আর Daily Attendance Report (`AttendanceRoutes.ts`) আগে শুধু `user` / `admin` login নিত, তাই কর্মী হলেও Superadmin-এর হাজিরা আসত না। এখন যে Superadmin login-এর সাথে Employee record যুক্ত (`all_employees.user_id`), তিনি সবার মতো রিপোর্টে আছেন; Employee record ছাড়া Superadmin (system account) আগের মতো বাদ। রিপোর্টের কর্মী বাছাইয়ের তালিকা আগে থেকেই এই নিয়মে চলত (Employee ID থাকলে Superadmin দেখায়)।
 - Present / Absent / Leave আসে Monthly report-এর একই হিসাব থেকে (`computeMonthlyReport`: Weekend/Holiday, Duty Roster, approved leave, joining date); Delay / Extreme Delay payroll-এর late policy থেকে (`computeLateDatesByEmployee`, salary month অনুযায়ী)। Delay-এর দিনও Present-এ গোনা। Attendance % = (Present + Leave) ÷ working days। শুধু Active কর্মী।
 - Filter: Departments (একাধিক), Project। Department সীমা থাকা Admin শুধু নিজের department দেখেন।
 - যেকোনো সংখ্যায় চাপলে কারা — দিনে কে কখন ঢুকেছে বা কোন ছুটি, মাসে কার কত দিন। PDF (department টেবিল) ও Excel (Summary + People শিট)।
@@ -739,6 +740,19 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 ## App খুললে কী লোড হয়
 
 App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashboard-এর কার্ডের ডাটা আসে। Check In/Out (তালিকাসহ), Bill Claim, Leave Application, Timesheet, Employee Directory, Notice Board-এর code আর ডাটা আসে সেই পাতা প্রথমবার খুললে; এরপর পাতাটা রেখে দেওয়া হয়, ফিরে এলে সঙ্গে সঙ্গে দেখায় (`UserPanel.tsx` seen)। PEPM-এর Budget / MPR No / entries আসে Budget, Jobs, Entries বা Job Edit খুললে। ফোনে শুধু ফোনের Dashboard আর ডেস্কটপে শুধু ডেস্কটপেরটা বসে (`src/lib/useMdUp.ts`) — আগে দুটোই বসে দুবার ডাটা আনত। Pending Approvals-এ গাড়ি ও driver-এর তালিকা আসে শুধু গাড়ি বসানোর মতো আবেদন থাকলে।
+
+## Chat-এর তালিকা: Archive, Pin, Unread, Favorites, List, Delete (১৭ নভেম্বর)
+
+WhatsApp-এর মতো, প্রত্যেকের নিজের — অন্য কারো chat-এ কিছু বদলায় না, Chat module যাঁর আছে তিনিই পান (নতুন permission নেই, `requireChat` আর room-এর সদস্য হওয়া যাচাই)। Computer-এ chat-এর সারির উপর mouse নিলে ⌄ (বা right-click), ফোনে সারি আধা সেকেন্ড চেপে ধরলে নিচ থেকে liquid-glass sheet (`src/components/chat/ChatListActions.tsx`):
+
+- **Archive / Unarchive** — তালিকার উপরে "Archived" সারিতে যায় (পাশে না-পড়া chat-এর সংখ্যা), নতুন মেসেজ এলেও সেখানেই থাকে; search করলে archive-এর chat-ও পাওয়া যায়। Archive করলে Pin ওঠে।
+- **Pin / Unpin** — তালিকার উপরে, পাশে 📌, সর্বোচ্চ ৩টা (server-ও আটকায়)।
+- **Mark as unread / read** — সবুজ বিন্দু; chat খুললে (`POST /api/chat/rooms/:id/read`) নিজে থেকে মোছে।
+- **Favorites আর নিজের List** — উপরের chip: All · Unread · Favorites · নিজের list-গুলো · "+ List"; "Add to list"-এ টিক দিয়ে যোগ / বাদ, সেখানেই "New list"। List মুছলে chat থাকে। প্রতিজনের সর্বোচ্চ ২০টা list, একই নাম দুবার নয়।
+- **Clear chat** — আগের মতো শুধু নিজের জন্য মেসেজ মোছে (star থাকে), এখন তালিকা থেকেও।
+- **Delete chat** (one-to-one) — নিজের জন্য সব মেসেজ লুকায় আর chat তালিকা থেকে সরে; অন্যজন আবার লিখলে (বা নিজে আবার New Chat করলে) ফিরে আসে, পুরনো মেসেজ ছাড়া। Group / community-তে এর জায়গায় **Exit group**।
+
+Server (`ChatRoutes.ts`): `chat_room_settings`-এ নতুন কলাম `archived`, `pinned_at`, `marked_unread`, `favorite`, `hidden_after_id` (Delete chat: এই id-এর চেয়ে নতুন মেসেজ না আসা পর্যন্ত লুকানো); নতুন টেবিল `chat_lists`, `chat_list_rooms`। `PUT /api/chat/rooms/:id/prefs` (`archived` / `pinned` / `marked_unread` / `favorite`), `POST /api/chat/rooms/:id/delete-for-me`, `GET|POST /api/chat/lists`, `PATCH|DELETE /api/chat/lists/:listId`, `PUT|DELETE /api/chat/lists/:listId/rooms/:id` — list শুধু নিজের (`user_id` যাচাই)। `GET /api/chat/rooms` প্রতিটা room-এ `archived`, `pinned`, `marked_unread`, `favorite`, `list_ids` দেয়। না-পড়া সংখ্যা (তালিকা আর bell) এখন নিজের লুকানো / clear করা মেসেজ গোনে না।
 
 ## Chat attachment: ফাইল folder-এ, ডাটাবেসে শুধু path
 
