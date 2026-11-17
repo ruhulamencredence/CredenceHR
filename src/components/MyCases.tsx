@@ -479,12 +479,13 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
       </div>
 
       {showRaise && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && setShowRaise(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-3">
+        <div className="liquid-glass-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && setShowRaise(false)}>
+          <div className="w-full max-w-lg max-h-full flex" onClick={(e) => e.stopPropagation()}>
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 space-y-3 overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-900">Raise a Grievance</h2>
-              <button type="button" onClick={() => setShowRaise(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" aria-label="Close">
-                <X className="w-5 h-5" />
+              <h2 className="text-base font-bold text-slate-900">Raise a Grievance</h2>
+              <button type="button" onClick={() => setShowRaise(false)} className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500 shrink-0" aria-label="Close">
+                <X className="w-4 h-4" />
               </button>
             </div>
             <label className="block">
@@ -524,18 +525,19 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
               Raise anonymously (HR won't see your name)
             </label>
             <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={() => setShowRaise(false)} className="px-4 py-2 text-sm font-semibold rounded-xl bg-slate-100 text-slate-700">
+              <button type="button" onClick={() => setShowRaise(false)} className="liquid-glass-chip rounded-full px-4 py-2 text-sm font-semibold text-slate-700">
                 Cancel
               </button>
               <button
                 type="button"
                 disabled={busy === 'raise'}
                 onClick={raise}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 text-white disabled:opacity-50"
+                className="liquid-glass-button rounded-full flex items-center gap-1.5 px-5 py-2 text-sm font-semibold disabled:opacity-50"
               >
                 {busy === 'raise' && <Spinner size={14} />} Submit
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}

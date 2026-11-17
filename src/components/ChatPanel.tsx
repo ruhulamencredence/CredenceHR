@@ -2307,7 +2307,11 @@ const MemberPickerModal: React.FC<{
         className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
         // Fixed height (not max-height): the popup used to grow and shrink
         // with every letter typed in the search box, so it jumped around.
-        style={{ height: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : 'min(80dvh, 600px)', maxHeight: '80dvh' }}
+        // 100% = the box this popup covers: the screen, or — opened from the
+        // dashboard's chat head — the chat window, which shrinks to the part
+        // above the keyboard; a fixed 600px sheet stood taller than that
+        // window and its title and search box were cut off at the top.
+        style={{ height: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : 'min(100%, 80dvh, 600px)', maxHeight: '100%' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pt-4 pb-3 flex items-center justify-between shrink-0">
