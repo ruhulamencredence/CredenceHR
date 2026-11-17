@@ -92,13 +92,28 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
         first = second;
       }
     }
+    // The way to fix it depends on the device: an iPhone (Safari / Home
+    // Screen app) has no lock icon, its switch is in the iPhone Settings.
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (navigator as any).maxTouchPoints > 1);
+    const android = /Android/i.test(ua);
     if (first?.code === 1) {
       throw new Error(
-        "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
+        ios
+          ? 'Location is blocked for this site on your iPhone. Open iPhone Settings → Privacy → Location Services: turn Location Services on, then open Safari Websites and choose "While Using the App" (and turn on Precise Location). Come back, reload the page and try again.'
+          : android
+            ? 'Location is blocked for this site. Tap the icon to the left of the web address → Permissions → Location → Allow, make sure the phone\'s Location is on, then reload and try again.'
+            : "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
       );
     }
     if (first?.code === 2) {
-      throw new Error("Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again.");
+      throw new Error(
+        ios
+          ? "Your iPhone couldn't find your position. Turn on Settings → Privacy → Location Services, go outside or near a window, then try again."
+          : android
+            ? "Your phone couldn't find your position. Turn on Location in the quick settings, then try again."
+            : "Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again."
+      );
     }
     throw new Error('Getting your location took too long. Please try again.');
   }
