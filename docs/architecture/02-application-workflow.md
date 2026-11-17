@@ -650,13 +650,16 @@ flowchart TD
   O([কর্মী app খোলে]) --> C{"server-এর APK কি ফোনের app-এর<br/>চেয়ে নতুন? (App.getInfo().build)"}
   V --> C
   C -- না / আজ Later চেপেছে --> N["কিছু দেখায় না"]
-  C -- হ্যাঁ --> P{"ফোনের app কতটা পুরনো?"}
+  C -- হ্যাঁ --> R{"ফোনের app min_version_code-এর<br/>চেয়ে পুরনো? (default: ১৪ নভেম্বরের আগের)"}
+  R -- হ্যাঁ --> Q["Update required: Later / বন্ধ নেই,<br/>update না করলে app চলে না"]
+  R -- না --> P{"ফোনের app কতটা পুরনো?"}
   P -- versionCode 1 (এই ব্যবস্থার আগের APK) --> L["Update popup: link Copy / Share<br/>→ Chrome-এ খুলে install"]
   P -- নতুন APK --> U["Update popup: Update now<br/>→ ফোনের browser নামায় → Install"]
 ```
 
 - প্রতিটা build-এর versionCode আগেরটার চেয়ে বড় (২০২৬-এর ১ জানুয়ারি থেকে কত মিনিট, `android/app/build.gradle`)। GitHub আর Android Studio দুই জায়গাতেই এক নিয়ম।
 - পর্দাগুলো server থেকে আসে, তাই এই popup-এর আগে বানানো পুরনো APK-তেও popup দেখায় (`src/components/AppUpdatePrompt.tsx`)। শুধু এক চাপে নামানোটা নতুন APK-তে হয় (`MainActivity.java`-র DownloadListener)।
+- **Update required (১৭ নভেম্বর):** `GET /api/app/android-latest` এখন `min_version_code` দেয় — default 456877, অর্থাৎ ১৪ নভেম্বর ২০২৬-এর আগে বানানো app (Employee Tracking-এ "Old app — update needed"); server-এর `ANDROID_MIN_BUILD` দিয়ে বদলানো যায় (0 = কাউকে বাধ্য করা হয় না), আর server-এর APK-এর versionCode-এর বেশি কখনো নয়, তাই update করার মতো কিছু থাকলেই চাওয়া হয়। ফোনের app এর চেয়ে পুরনো হলে popup-এর নাম "Update required", বন্ধ করার বোতাম আর "Later" নেই, সব পর্দার উপরে থাকে — update না করে app ব্যবহার করা যায় না (versionCode 1-এর app link Copy / Share করে)। পর্দা server থেকে আসে বলে পুরনো app-ও এটা দেখায়; তবে পুরনো app-এর নিজের (native) tracking service আগের মতো চলতে পারে যতক্ষণ না update হয়।
 - "Later" চাপলে ওই version-এর জন্য এক দিন আর দেখায় না। Popup সব app ব্যবহারকারীর জন্য, কোনো অনুমতির দরকার নেই, কারণ APK নিজেই লগইন পাতায় সবার জন্য খোলা।
 - **iPhone:** App Store ছাড়া iPhone-এ app দেওয়া যায় না (Apple-এর সই লাগে)। তাই iPhone/iPad-এ login পাতা Safari-র "Add to Home Screen"-এর তিন ধাপ দেখায় (`AddToHomeScreen.tsx`), আর একই web app আইকন থেকে পুরো পর্দায় খোলে (`manifest.webmanifest`)। Home Screen থেকে খুললে APK বা iPhone কোনো বোতামই দেখায় না। Phone-এর width-এ web header-ও app-এর মতো purple (আগে সাদা ছিল, status bar-ও সাদা দেখাত)। iPhone-এ notification আসে Web Push দিয়ে (iOS 16.4+, শুধু Home Screen থেকে খোলা app-এ); Apple-এর push সার্ভার VAPID-এর `sub`-এ `example.com` নেয় না, তাই `WEB_PUSH_CONTACT` না থাকলে সাইটের নিজের ঠিকানা যায়।
 - **ফাইল নামানো (PDF / Excel) app-এ:** APK আর iPhone app-এর WebView ব্রাউজারের মতো ফাইল নামায় না, তাই সব Excel (`saveWorkbookCrossPlatform`) আর PDF (`savePdfCrossPlatform`, `src/lib/saveFile.ts`) app-এ ফাইলটা ফোনে রেখে Share sheet খোলে (Save to Files / Downloads, Drive, WhatsApp…); ব্রাউজার আর Home Screen web app-এ সাধারণ download।
