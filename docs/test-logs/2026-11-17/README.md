@@ -78,3 +78,17 @@ changes and is never reused; look-alikes merged; rename everywhere; level; inact
   many employees) → code kept and employees follow, adding a look-alike asks with "Add anyway", employee form: typing finds
   the designation, a new name is noted "added to Designations when you save", no page errors.
 
+
+## Reliever picker under the keyboard (Leave application, phone)
+
+The list of a type-to-search picker (`SearchSelect` / `Combobox`, src/components/Combobox.tsx) worked out its room from
+the screen height only. In the app the on-screen keyboard doesn't shrink `window.innerHeight`, so the list opened
+downwards under the keyboard, and it was placed only once — when the keyboard then slid up and the popup scrolled the
+field to the middle, the list stayed where it had been (or jumped off the field). Now it measures the space above the
+keyboard (`--kb` from lib/keyboardInsetVar.ts), opens upwards when there's more room there, shrinks its height to the
+room left, and places itself again when the keyboard opens/closes and shortly after focus. Every picker in the app gets
+this, not only Reliever.
+
+- `scripts/reliever-keyboard.cjs`: **7/7** (Pixel 7, keyboard 330 px simulated) — Leave → Apply Leave → Reliever, typing:
+  the list ends above the keyboard, doesn't cover the field, stays on screen; with the field just above the keyboard
+  the list opens above it. The same script against the old Combobox: **FAIL** "list ends above the keyboard".
