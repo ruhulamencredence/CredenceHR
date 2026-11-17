@@ -51,9 +51,6 @@ export interface TrackingWindow {
   // ISO times (UTC); null = no end / nothing within the next week.
   until: string | null;
   next_start: string | null;
-  // The person's own time, for the phone's notification:
-  // "Sat–Thu, 9:00 AM – 6:00 PM", "Mon 10:00 PM – Tue 6:00 AM", "Always on".
-  label: string | null;
 }
 
 export interface Buffers {
@@ -119,31 +116,6 @@ export async function getBuffers(queryDB: Query): Promise<Buffers> {
   return { before: num(r?.buffer_minutes, DEFAULT_BUFFER), after: num(r?.after_minutes, DEFAULT_AFTER) };
 }
 
-// "09:00" -> "9:00 AM"
-const ampm = (t: string) => {
-  const h = Number(t.slice(0, 2));
-  return `${h % 12 || 12}:${t.slice(3, 5)} ${h < 12 ? "AM" : "PM"}`;
-};
-const DAY_NAME = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-// Bangladesh office week starts on Saturday.
-const WEEK_ORDER = [6, 0, 1, 2, 3, 4, 5];
-export function daysText(days: number[]): string {
-  const idx = WEEK_ORDER.map((d, i) => (days.includes(d) ? i : -1)).filter((i) => i >= 0);
-  if (idx.length === 7) return "Every day";
-  const names = idx.map((i) => DAY_NAME[WEEK_ORDER[i]]);
-  const contiguous = idx.length > 2 && idx.every((v, i) => i === 0 || v === idx[i - 1] + 1);
-  return contiguous ? `${names[0]}–${names[names.length - 1]}` : names.join(", ");
-}
-// One shift (local ms, no buffer): "Mon, 9:00 AM – 6:00 PM" or, past
-// midnight, "Mon 10:00 PM – Tue 6:00 AM".
-const hmOfLocal = (ms: number) => new Date(ms).toISOString().slice(11, 16);
-const dayOfLocal = (ms: number) => DAY_NAME[new Date(ms).getUTCDay()];
-function shiftLabel(s: number, e: number): string {
-  return dayStartLocal(s) === dayStartLocal(e - 1)
-    ? `${dayOfLocal(s)}, ${ampm(hmOfLocal(s))} – ${ampm(hmOfLocal(e))}`
-    : `${dayOfLocal(s)} ${ampm(hmOfLocal(s))} – ${dayOfLocal(e)} ${ampm(hmOfLocal(e))}`;
-}
-
 // Bangladesh wall clock as "local ms" (UTC ms + 6 h), and back.
 const localNow = (nowUtc: number) => nowUtc + TZ_MS;
 const ymdOfLocal = (localMs: number) => new Date(localMs).toISOString().slice(0, 10);
@@ -185,7 +157,7 @@ function mergeWindows(raw: [number, number][], buf: Buffers): [number, number][]
   return merged;
 }
 
-const ALWAYS: TrackingWindow = { mode: "always", on: true, until: null, next_start: null, label: "Always on" };
+const ALWAYS: TrackingWindow = { mode: "always", on: true, until: null, next_start: null };
 
 function windowFrom(row: ScheduleRow | null, shifts: Shift[], nowUtc: number, buf: Buffers): TrackingWindow {
   if (!row || row.mode === "always") return { ...ALWAYS };
@@ -193,16 +165,9 @@ function windowFrom(row: ScheduleRow | null, shifts: Shift[], nowUtc: number, bu
   const raw = shiftsFor(row, shifts, now);
   const ws = mergeWindows(raw, buf);
   const cur = ws.find((w) => w[0] <= now && now < w[1]);
-  // The shift this window belongs to (the one running, else the coming one).
-  const shift = (w: [number, number]) => raw.find((r) => r[1] > now && r[0] < w[1] && r[1] > w[0]) || raw.find((r) => r[0] < w[1] && r[1] > w[0]);
-  const label = (w: [number, number] | undefined) => {
-    if (row.mode === "fixed" && row.start_time && row.end_time) return `${daysText(row.days)}, ${ampm(row.start_time)} – ${ampm(row.end_time)}`;
-    const r = w && shift(w);
-    return r ? shiftLabel(r[0], r[1]) : null;
-  };
-  if (cur) return { mode: row.mode, on: true, until: isoOfLocal(cur[1]), next_start: null, label: label(cur) };
+  if (cur) return { mode: row.mode, on: true, until: isoOfLocal(cur[1]), next_start: null };
   const next = ws.find((w) => w[0] > now);
-  return { mode: row.mode, on: false, until: null, next_start: next ? isoOfLocal(next[0]) : null, label: label(next) };
+  return { mode: row.mode, on: false, until: null, next_start: next ? isoOfLocal(next[0]) : null };
 }
 
 // Shifts of these employees (all_employees.id) for [today-1 … today+7].
