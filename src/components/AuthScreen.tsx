@@ -1,5 +1,5 @@
 import { signInDeviceFields } from '../lib/deviceKind';
-import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
@@ -216,6 +216,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     };
   }, [isNativeApp]);
 
+  // iPhone, typing: while compact the card is already at the top, above the
+  // keyboard. iOS (seen on iOS 15) still scrolls the page up by the
+  // keyboard's height on top of the page's own scroll, so the Workspace /
+  // Login ID card went off the top of the screen. Keep it pinned to the top.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!compact || !isIOSDevice()) return;
+    const pin = () => {
+      if (window.scrollY) window.scrollTo(0, 0);
+      if (rootRef.current && rootRef.current.scrollTop) rootRef.current.scrollTop = 0;
+    };
+    const timers = [0, 120, 350, 700].map((ms) => window.setTimeout(pin, ms));
+    // Only as the keyboard opens or changes height — afterwards the person
+    // can still scroll down to the button themselves.
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', pin);
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      vv?.removeEventListener('resize', pin);
+    };
+  }, [compact]);
+
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
   // proceeding without a location. Only the LATEST login's coordinates are
@@ -421,16 +443,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div
+      ref={rootRef}
       // Scrolls (never overflow-hidden), so a focused field can always be
       // brought above the on-screen keyboard.
       className="min-h-dvh flex flex-col relative overflow-y-auto"
+      data-keyboard-pinned={iosHere ? '' : undefined}
       onFocusCapture={(e) => {
         if ((e.target as HTMLElement).matches('input, textarea')) setFieldFocused(true);
       }}
       onBlurCapture={() => window.setTimeout(() => setFieldFocused(!!document.activeElement?.matches?.('input, textarea')), 0)}
       style={{
         background: 'var(--g-bg-gradient)',
-        ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+        // Android only: an iPhone already shrinks the page by the keyboard
+        // (Keyboard resize 'body'), and the extra room let it scroll the
+        // card away.
+        ...(keyboardHeight > 0 && !iosHere ? { paddingBottom: keyboardHeight } : null)
       }}
     >
       <div
