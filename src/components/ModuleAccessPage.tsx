@@ -176,7 +176,7 @@ const INLINE_FLAGS: FlagKey[] = ['can_view_group_dashboard', 'can_manage_leave']
 
 const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
-  admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
+  admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', designations: 'hr', task_management: 'hr', target_reports: 'hr',
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', bill_claim: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
@@ -200,6 +200,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   leave_applications: 'Who applied for leave, by month.',
   duty_roster: 'Shifts and who works when.',
   break_time: 'Who is on a break, daily totals, over-limit.',
+  designations: 'One list of designations for all companies, each with a permanent code.',
   user_feedback: 'Ratings, problems and ideas people send about the app.',
   bill_claim: 'Review bill claims and conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',

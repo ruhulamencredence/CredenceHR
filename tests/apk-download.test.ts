@@ -213,7 +213,14 @@ test("GET /api/app/android-latest: the version of the APK the button would send"
   try {
     assert.deepEqual(await (await fetch(`${base}/api/app/android-latest`)).json(), { available: false });
     fs.writeFileSync(path.join(dir, "CredenceHR-android-debug.zip"), makeZip([{ name: "app-debug.apk", data: makeZip([{ name: "AndroidManifest.xml", data: makeManifest(431999, "1.0.x") }]) }]));
-    assert.deepEqual(await (await fetch(`${base}/api/app/android-latest`)).json(), { available: true, version_code: 431999, version_name: "1.0.x", url: "/downloads/CredenceHR.apk" });
+    assert.deepEqual(await (await fetch(`${base}/api/app/android-latest`)).json(), {
+      available: true,
+      version_code: 431999,
+      version_name: "1.0.x",
+      url: "/downloads/CredenceHR.apk",
+      // Apps older than this must update (never above the APK on offer — AndroidApkRoute.ts).
+      min_version_code: 431999
+    });
   } finally {
     server.close();
     if (prev === undefined) delete process.env.APK_DIR;

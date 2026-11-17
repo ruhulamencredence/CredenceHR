@@ -57,3 +57,24 @@ page's colours glow softly through while the text stays crisp, plus a glass shee
 - `scripts/lightglass-phone-menu.cjs` (Pixel 7, Light Glass, orange): screenshot before / after — menu text dark on
   white, the page behind no longer showing through, logo on the accent band.
 
+## Designations: one list for all companies, a permanent code for each
+
+Designation was free text on each employee (spellings drifted: "Senior Executive", "Sr. Executive", "senior executive ").
+Now Admin Panel → Employee Management → **Designations** (module `designations`): each has a code DSG-001… that never
+changes and is never reused; look-alikes merged; rename everywhere; level; inactive; the employee form picks from it.
+
+- `scripts/designations-api.mjs`: **30/30** — the list made from the employees (codes all different); "senior  executive "
+  counted as Senior Executive and its text tidied; counts across both companies (a sister concern added for the test);
+  Senior / Sr. Executive shown as look-alikes; "Used in OT rates"; add → next code; the same name (case / spaces / dots)
+  → 409 "already exists (DSG-007)"; a look-alike ("Sr. Project Coordinator" vs "Senior Project Coordinator") → asked,
+  "Add anyway" works; rename Executive → Officer keeps DSG-001, employees in both companies and the OT rate follow;
+  rename onto an existing name → 409; merge Sr. Executive into Senior Executive → 5 people, OT rate and leave workflow
+  follow, DSG-006 retired pointing to DSG-005; the next new code is new (never a retired one); a later "Sr. Executive" or
+  "DSG-006" in an import lands on Senior Executive (no new designation); delete refused while people have it, allowed when
+  nobody does; Inactive left out of the form picker; no module → 403, read layer only → can see, can't add (403); the
+  form picker's names readable by any Admin Panel account.
+- `scripts/designations-ui.cjs`: **13/13** — the page ("one list for all companies"), codes in the rows, the look-alike
+  box, Merge popup (the one most people have picked) → all three on one name, Rename popup ("Code … stays the same", how
+  many employees) → code kept and employees follow, adding a look-alike asks with "Add anyway", employee form: typing finds
+  the designation, a new name is noted "added to Designations when you save", no page errors.
+

@@ -25,6 +25,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   holidays: [...HRM, 'Holidays'],
   leave_applications: [...HRM, 'Monthly Leave Application'],
   departments: [...HRM, 'Departments'],
+  designations: [...HRM, 'Designations'],
 
   attendance: [...HRM, 'Attendance', 'Remote Attendance'],
   attendance_reports: [...HRM, 'Attendance', 'Monthly Attendance Report'],

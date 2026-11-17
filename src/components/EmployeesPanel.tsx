@@ -16,7 +16,7 @@ import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 import { useMyCompanies } from '../lib/company';
 
 import { DateInput } from './DateInput';
-import { SearchSelect } from './Combobox';
+import { SearchSelect, Combobox } from './Combobox';
 import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
 import { EmployeeHeadcountSheet, employeeLayer, exportEmployees } from './EmployeeHeadcountSheet';
 import { EmployeeFilterBar } from './EmployeeFilterBar';
@@ -407,6 +407,19 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
   const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
   const nameSuggestions = useNameSuggestions(token);
+  // Designations (one list for all companies, DesignationRoutes.ts): type to find one; a new name is
+  // added to the list by itself when the employee is saved.
+  const [designationNames, setDesignationNames] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(apiUrl('/api/designations/options'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: { name: string }[]) => setDesignationNames(Array.isArray(list) ? list.map((d) => d.name) : []))
+      .catch(() => undefined);
+  }, [token]);
+  const isNewDesignation = (v: string) => {
+    const k = v.toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+    return !!k && designationNames.length > 0 && !designationNames.some((n) => n.toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim() === k);
+  };
   // All companies mode (switcher): the list mixes companies, so each row
   // shows whose employee it is.
   const myCompanies = useMyCompanies(token);
@@ -1689,13 +1702,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Designation</label>
-                  <input
-                    type="text"
+                  <Combobox
+                    free
+                    ariaLabel="Designation"
                     value={form.designation}
-                    onChange={(e) => setForm((f) => ({ ...f, designation: e.target.value }))}
-                    placeholder="e.g. Executive"
+                    onChange={(v) => setForm((f) => ({ ...f, designation: v }))}
+                    options={designationNames}
+                    placeholder="Type to find — e.g. Executive"
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                  {isNewDesignation(form.designation) && (
+                    <p className="mt-1 text-[11px] text-amber-700">New designation — it is added to Designations (with its own code) when you save.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
@@ -2449,12 +2467,19 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     ))}
                   </SearchSelect>
                 </div>
-                <TextField
-                  label="New Designation"
-                  value={transferForm.to_designation}
-                  onChange={(v) => setTransferForm((f) => ({ ...f, to_designation: v }))}
-                  placeholder={transferringFor.designation || 'e.g. Senior Engineer'}
-                />
+                <div>
+                  <label className={fieldLabelClass}>New Designation</label>
+                  <Combobox
+                    free
+                    ariaLabel="New Designation"
+                    value={transferForm.to_designation}
+                    onChange={(v) => setTransferForm((f) => ({ ...f, to_designation: v }))}
+                    options={designationNames}
+                    placeholder={transferringFor.designation || 'Type to find — e.g. Senior Engineer'}
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                  {isNewDesignation(transferForm.to_designation) && <p className="mt-1 text-[11px] text-amber-700">New designation — added to Designations when saved.</p>}
+                </div>
               </div>
 
               <div>

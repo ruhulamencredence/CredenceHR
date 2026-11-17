@@ -931,6 +931,18 @@ Payroll module-এর নতুন layer **"See salary amounts"** (`salary_amoun
 
 পরীক্ষা: `docs/test-logs/2026-11-12/scripts/app-access-*.mjs` — API ১৮/১৮, browser ৯/৯।
 
+## Designations: সব company মিলে একটা তালিকা, প্রতিটার স্থায়ী Code (১৭ নভেম্বর)
+
+Admin Panel → Employee Management → **Designations** (module `designations`, `DesignationRoutes.ts`, `DesignationsPanel.tsx`):
+- **Code:** প্রতিটা পদের নিজে থেকে দেওয়া code `DSG-001`, `DSG-002`… — নাম বদলালেও বদলায় না, merge / delete হলেও সেই code আর কাউকে দেওয়া হয় না (`designations.code_no` শুধু বাড়ে, পুরোনো সারি `is_deleted` / `merged_into` হয়ে থাকে)।
+- **একটা তালিকা সব company-র** (`designations`-এ company নেই); কর্মীর সংখ্যা সব company মিলিয়ে।
+- **শুরুতে ও সবসময় কর্মীদের থেকে:** কর্মীর designation এখনও লেখা (`all_employees.designation` — সব পাতা ও report যা পড়ে), সাথে `all_employees.designation_id`। একটা linking pass (Designations খুললে, form-এর তালিকা চাইলে, প্রতি ১০ মিনিটে, Rename / Merge-এর আগে) প্রতিটা কর্মীর লেখা তালিকায় মেলায়: বড়-ছোট হাতের অক্ষর, বাড়তি ফাঁকা, বিন্দু আলাদা পদ বানায় না (লেখাও ঠিক নামে বদলায়); নতুন নাম এলে নতুন পদ (সবচেয়ে বেশি মানুষের বানানটা নাম); merge করে সরানো নাম বা পুরোনো code (Excel-এ "DSG-006") এলে রাখা পদে যায়। তাই Employees form, Excel import, Onboarding, HR action — কোনোটা আলাদা করে বদলাতে হয়নি।
+- **একই পদের ভিন্ন বানান:** "Senior Executive / Sr. Executive / Sr Executive" (Sr→Senior, Jr→Junior, Asst→Assistant, Dy→Deputy, Mgr→Manager…) হলুদ ঘরে দল হয়ে আসে, **Merge** — কোনটা রাখবে বাছা (যার মানুষ বেশি সেটা আগে থেকে বাছা)। নিজে থেকে কিছু মেশায় না। নতুন যোগ / rename-এ: হুবহু একই নাম → আটকায় ("already exists (DSG-007)"); কাছাকাছি → জিজ্ঞেস করে, "Add anyway"।
+- **Rename / Merge সবখানে:** কর্মী (সব company), আর যেসব নিয়ম নাম ধরে চলে — OT rates, Leave workflows, company assignment, Job postings, Onboarding। ইতিহাস (Transfer, আগের অভিজ্ঞতা) আগের নামেই; Service Book-এ পদোন্নতি হিসেবে যায় না। Popup আগে দেখায় কতজন / কোথায় বদলাবে, সবুজ ঘরে "Code … stays the same"।
+- **Level ↑↓** (১ = সবার উপরে), **Active / Inactive** (Inactive পদ form-এর তালিকায় আসে না), **Delete** শুধু যার কেউ নেই।
+- **Employee form** (Edit / New employee, Transfer-এর "New Designation"): Designation ঘরে লিখলে তালিকা থেকে খোঁজে (`<Combobox free>`, `GET /api/designations/options`); তালিকায় নেই এমন নাম লিখলে লেখা থাকে "New designation — it is added to Designations when you save"।
+- **অনুমতি:** module Designations — read (দেখা), edit_add (যোগ / rename / merge / level / active), delete_trash (মোছা); Superadmin সবসময়। নামগুলো (form-এর তালিকা) Admin Panel-এর যেকোনো account পড়তে পারে।
+
 ## Department: Head of Department আর টিম ধরে Supervisor
 
 Admin Panel → Departments → Edit (`DepartmentTeams.ts`, `DepartmentTeamsEditor.tsx`):

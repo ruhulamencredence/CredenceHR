@@ -89,6 +89,7 @@ const TaskManagement = lazyPanel(() => import('./TaskManagement').then((m) => ({
 const TargetReports = lazyPanel(() => import('./TargetReports').then((m) => ({ default: m.TargetReports })));
 const MailAdministration = lazyPanel(() => import('./mail/MailAdministration').then((m) => ({ default: m.MailAdministration })));
 const DutyRoster = lazyPanel(() => import('./DutyRoster').then((m) => ({ default: m.DutyRoster })));
+const DesignationsPanel = lazyPanel(() => import('./DesignationsPanel').then((m) => ({ default: m.DesignationsPanel })));
 const BreakTimeAdmin = lazyPanel(() => import('./BreakTimeAdmin').then((m) => ({ default: m.BreakTimeAdmin })));
 const MobileBillAdmin = lazyPanel(() => import('./MobileBillAdmin').then((m) => ({ default: m.MobileBillAdmin })));
 const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) => ({ default: m.ModuleAccessPage })));
@@ -541,7 +542,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'designations' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -1795,7 +1796,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'management_dashboard', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies'
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies', 'designations'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
   // The full accounts list (every access switch — the biggest list after PEPM entries) is
@@ -3080,6 +3081,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Monthly Attendance Report: tap a day to give / fix In / Out (AttendanceEditPopup).
   const canEditAttendance = attendanceReportsLayer('attendance_edit');
   const [editAttendance, setEditAttendance] = useState<{ userId: number; userName: string; date: string } | null>(null);
+  // Admin Panel -> Designations: the same rule as usersLayer (saved layers, else every non-explicit one).
+  const designationsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.designations;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -5082,6 +5089,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
       {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
       {activeTab === 'break_time' && canSee('break_time') && <BreakTimeAdmin token={token} />}
+      {activeTab === 'designations' && canSee('designations') && (
+        <DesignationsPanel token={token} canEdit={designationsLayer('edit_add')} canDelete={designationsLayer('delete_trash')} />
+      )}
       {activeTab === 'user_feedback' && canSee('user_feedback') && <FeedbackAdmin token={token} isSuperAdmin={user.role === 'superadmin'} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET

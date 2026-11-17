@@ -4,9 +4,9 @@ erDiagram
     int user_id FK
     int department_id FK
     int branch_id FK
+    int designation_id FK
     varchar employee_id
     varchar zk_device_pin
-    varchar name
   }
   branches {
     int id PK
@@ -66,6 +66,15 @@ erDiagram
     tinyint is_active
     int company_id
     int head_user_id
+  }
+  designations {
+    int id PK
+    varchar code
+    int code_no
+    varchar name
+    varchar name_key
+    int level
+    tinyint is_active
   }
   employee_advances {
     int id PK
@@ -219,6 +228,7 @@ erDiagram
   branches ||--o{ all_employees : "branch_id"
   departments ||--o{ all_employees : "department_id"
   users ||--o{ all_employees : "user_id"
+  designations ||..o{ all_employees : "designation_id"
   projects ||--o{ branches : "project_id"
   company_groups ||--o{ companies : "group_id"
   department_teams ||--o{ department_team_auto : "team_id"

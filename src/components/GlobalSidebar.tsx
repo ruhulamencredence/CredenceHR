@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import {
   PackageCheck,
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
-  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
+  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity, BadgeCheck,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, Megaphone, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
@@ -557,6 +557,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   const departmentsItem: NavItem[] = [
     { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments'), href: adminHref('departments') },
+    { key: 'designations', label: 'Designations', icon: BadgeCheck, onClick: () => onGoToAdminModule('designations'), href: adminHref('designations') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Employee" — Employees, Employee Tracking, Asset Management. No longer
@@ -781,7 +782,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       // A person's whole journey in one place: joining (Recruitment ->
       // Onboarding) and leaving (Exit / Offboarding) sit together.
       entries: pick(
-        'employees', 'departments', 'tracking',
+        'employees', 'departments', 'designations', 'tracking',
         { heading: 'Joining & Exit' }, 'recruitment', 'hr_operations_onboarding', 'exit_offboarding',
         { heading: 'People & Records' }, 'performance_management', 'grievance_disciplinary', 'document_vault'
       )

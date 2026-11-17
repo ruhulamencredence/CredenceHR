@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৭টি টেবিল, ২৮৮৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৮টি টেবিল, ২৮৯৯টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2857,6 +2857,7 @@ Unique: `uniq_mobile_sim_number`(company_id,phone_number)
 | `branch_id` | int(11) | হ্যাঁ |  | FK → `branches.id` |
 | `joining_date` | date | হ্যাঁ |  | |
 | `gets_ot` | tinyint(1) | না | default 0 | |
+| `designation_id` | int(11) | হ্যাঁ |  | logical → `designations` |
 
 Unique: `zk_device_pin`(zk_device_pin)
 
@@ -2971,6 +2972,25 @@ Unique: `uniq_team_member`(employee_id)
 | `head_user_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `unique_company_name`(company_id,name)
+
+### `designations`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `code` | varchar(20) | না | UNI  | |
+| `code_no` | int(11) | না |  | |
+| `name` | varchar(150) | না |  | |
+| `name_key` | varchar(150) | না |  | |
+| `level` | int(11) | হ্যাঁ |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `is_deleted` | tinyint(1) | না | default 0 | |
+| `merged_into` | int(11) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `uq_designation_code`(code)
 
 ### `employee_advances`
 
