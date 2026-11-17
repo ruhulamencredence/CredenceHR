@@ -21,7 +21,8 @@ import { usePhoneHeaderTitle } from '../../lib/headerPageTitle';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { connectChatSocket } from '../../lib/chatSocket';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
-import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { SHEET_TOP_PAD, useSheetKeyboardPad } from './MailPopup';
 import type { User } from '../../types';
 import {
   MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailFolder, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
@@ -277,8 +278,8 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
     }
   };
   return (
-    <div ref={boxRef} className="relative w-full">
-      <div className="relative">
+    <div ref={boxRef} className={inline ? 'relative w-full flex flex-col min-h-0 flex-1' : 'relative w-full'}>
+      <div className="relative shrink-0">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           value={q}
@@ -308,8 +309,8 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
         )}
       </div>
       {open && (
-        <div className={inline ? 'mt-3' : 'absolute left-0 right-0 top-full mt-2 z-[60]'}>
-          <div className={inline ? '' : 'liquid-glass liquid-glass-in rounded-[24px] p-3 shadow-xl'}>
+        <div className={inline ? 'mt-3 flex flex-col min-h-0 flex-1' : 'absolute left-0 right-0 top-full mt-2 z-[60]'}>
+          <div className={inline ? 'flex flex-col min-h-0 flex-1' : 'liquid-glass liquid-glass-in rounded-[24px] p-3 shadow-xl'}>
             <div className="flex items-center justify-between gap-2 mb-2 px-1">
               <span className="text-[11px] text-slate-500">
                 {people === null
@@ -327,18 +328,20 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
             {people === null ? (
               <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
             ) : (
-              <div className="liquid-glass-inset rounded-[18px] divide-y divide-slate-200/60 max-h-[60vh] overflow-y-auto">
+              <div className={`liquid-glass-inset rounded-[18px] divide-y divide-slate-200/60 overflow-y-auto overscroll-contain ${inline ? 'flex-1 min-h-0' : 'max-h-[60vh]'}`}>
                 {found.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">No one matches.</div>}
                 {found.slice(0, DIRECTORY_SHOW).map((p) => (
                   <div key={p.email} className="flex items-center gap-3 px-3 py-2.5">
                     <MailAvatar name={p.name} email={p.email} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
-                        {p.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {p.employeeId}</span>}
-                      </div>
-                      {(p.designation || p.department) && (
-                        <div className="text-[11px] text-slate-500 truncate">{[p.designation, p.department].filter(Boolean).join(' · ')}</div>
+                      {/* The ID sits on the second line, so a name isn't cut short on a phone. */}
+                      <div className="text-sm font-medium text-slate-800 truncate">{p.name}</div>
+                      {(p.employeeId || p.designation || p.department) && (
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {p.employeeId && <span className="font-semibold text-slate-600">ID {p.employeeId}</span>}
+                          {p.employeeId && (p.designation || p.department) ? ' · ' : ''}
+                          {[p.designation, p.department].filter(Boolean).join(' · ')}
+                        </div>
                       )}
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-[11px] text-sky-700 truncate">{p.email}</span>
@@ -380,13 +383,14 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
 
 // Phone: the Email Directory search in a sheet of its own.
 const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void; onClose: () => void }> = ({ token, onWrite, onClose }) => {
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad();
   useBackButtonClose(true, onClose);
   return (
-    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className="w-full max-w-xl max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
-          <div className="flex items-center justify-between gap-2 mb-4">
+    <div data-kb-self="" className={`fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4 ${SHEET_TOP_PAD}`} style={keyboardPad} onClick={onClose}>
+      {/* Full height on a phone, so the box stays put while typing and only the list scrolls. */}
+      <div className="w-full max-w-xl h-full sm:h-auto max-h-full sm:max-h-[85vh] flex" onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 flex flex-col min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 mb-4 shrink-0">
             <h3 className="text-base font-bold text-slate-900">Email Directory</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
           </div>
@@ -401,7 +405,7 @@ const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void
 const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: MailAccount[]; onChanged: () => void; onClose: () => void }> = ({ token, userName, accounts, onChanged, onClose }) => {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad();
   useBackButtonClose(true, onClose);
   const remove = async (a: MailAccount) => {
     if (!(await confirmDialog(`Remove ${a.emailAddress} from Credence Mail? Its mail stays on the mail server; only the copy here is deleted.`, { confirmLabel: 'Remove' }))) return;
@@ -421,9 +425,9 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
     }
   };
   return (
-    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className="w-full max-w-md max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
+    <div data-kb-self="" className={`fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4 ${SHEET_TOP_PAD}`} style={keyboardPad} onClick={onClose}>
+      <div className="w-full max-w-md max-h-full sm:max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto" onFocusCapture={scrollFocusedFieldIntoView}>
           <div className="flex items-center justify-between gap-2 mb-4">
             <h3 className="text-base font-bold text-slate-900">{adding ? 'Connect another mailbox' : 'Mailboxes'}</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
@@ -1678,16 +1682,16 @@ export const CredenceMail: React.FC<{
                   {accounts.map((a) => <option key={a.id} value={a.id}>{a.emailAddress}</option>)}
                 </SearchSelect>
               )}
-              <div className="liquid-glass-inset rounded-[24px] p-2">{folderNav}</div>
-              {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>}
+              {!ro && status?.canDirectory && (
+                <button type="button" onClick={() => { setDrawer(false); setDirectorySheet(true); }} className="shrink-0 text-sm px-3 py-2.5 rounded-2xl bg-white/70 border border-slate-200/80 text-slate-700 inline-flex items-center gap-2">
+                  <Search className="w-4 h-4 text-slate-400" /> Search Email Directory
+                </button>
+              )}
+              <div className="liquid-glass-inset rounded-[24px] p-2 shrink-0">{folderNav}</div>
+              {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3 shrink-0">{toolsNav}</div>}
               {!ro && (
                 <button type="button" onClick={() => { setDrawer(false); setMailboxes(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
                   <Server className="w-4 h-4" /> Mailboxes
-                </button>
-              )}
-              {!ro && status?.canDirectory && (
-                <button type="button" onClick={() => { setDrawer(false); setDirectorySheet(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
-                  <Users className="w-4 h-4" /> Email Directory
                 </button>
               )}
               {onBack && (

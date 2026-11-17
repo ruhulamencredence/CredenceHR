@@ -14,7 +14,7 @@ import {
 import { confirmDialog } from '../../lib/confirmDialog';
 import { MAIL_CATEGORIES, MailContact, MailEvent, MailFilter, MailFolder, MailTask, MailTemplate, mailFetch } from '../../lib/mailApi';
 import { flatTree, folderPath } from './MailFolders';
-import { MailPopup, Tabs, Toggle, EmptyNote, RowsSkeleton, inputCls, labelCls, primaryBtn, ghostBtn } from './MailPopup';
+import { MailPopup, Tabs, Toggle, EmptyNote, RowsSkeleton, inputCls, labelCls, primaryBtn, ghostBtn, stickySearchCls } from './MailPopup';
 import { MailAvatar } from './MailReader';
 
 function useList<T>(token: string, path: string) {
@@ -375,7 +375,7 @@ export const MailContactsPopup: React.FC<{ token: string; onClose: () => void; o
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${stickySearchCls}`}>
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts" className={`${inputCls} pl-9`} />
