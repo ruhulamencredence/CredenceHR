@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৯টি টেবিল, ২৮৯৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৯টি টেবিল, ২৮৯২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -179,11 +179,6 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `user_id` | int(11) | না | PK  | FK → `users.id` |
 | `room_id` | int(11) | না | PK  | FK → `chat_rooms.id` |
 | `muted_until` | datetime | হ্যাঁ |  | |
-| `archived` | tinyint(1) | না | default 0 | |
-| `pinned_at` | datetime | হ্যাঁ |  | |
-| `marked_unread` | tinyint(1) | না | default 0 | |
-| `favorite` | tinyint(1) | না | default 0 | |
-| `hidden_after_id` | int(11) | হ্যাঁ |  | |
 
 ### `chat_rooms`
 
@@ -2112,7 +2107,6 @@ Unique: `uniq_session_key`(session_key)
 | `can_update_check_out` | tinyint(1) | না | default 0 | |
 | `attendance_projects_by_branch` | tinyint(1) | না | default 0 | |
 | `can_request_items` | tinyint(1) | না | default 0 | |
-| `can_use_mail_folders` | tinyint(1) | না | default 0 | |
 
 Unique: `email`(email), `username`(username)
 
@@ -3761,7 +3755,6 @@ Unique: `uniq_signature_document`(document_id)
 | `ip` | varchar(64) | হ্যাঁ |  | |
 | `user_agent` | varchar(255) | হ্যাঁ |  | |
 | `decline_reason` | varchar(500) | হ্যাঁ |  | |
-| `on_line` | tinyint(1) | না | default 0 | |
 
 Unique: `uniq_doc_step`(document_id,step_order)
 
