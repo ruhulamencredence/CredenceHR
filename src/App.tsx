@@ -929,6 +929,10 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
   // Navbar's own dropdown menus/switcher instead, untouched, so this state
   // never opens anything on md-and-up screens.
   const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
+  // The phone's Back closes the open menu first (it used to step the page
+  // back, or on the Dashboard count towards leaving the app, with the menu
+  // still open).
+  useBackButtonClose(globalSidebarOpen, () => setGlobalSidebarOpen(false));
   // True only while an account with an Admin Panel (hasAdminPanel) has
   // actively switched viewMode to 'admin' — no more hardcoded "Superadmin
   // always sees Admin Panel" case, since Superadmin now starts on the User
@@ -1334,7 +1338,8 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
             style={{
-              bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
+              // Above the bottom bar (it sat on top of it and was easy to miss).
+              bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 104px)',
               background: 'rgba(15, 23, 42, 0.92)'
             }}
           >
@@ -2113,7 +2118,8 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
         <div
           className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
           style={{
-            bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
+            // Above the bottom bar (it sat on top of it and was easy to miss).
+            bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 104px)',
             background: 'rgba(15, 23, 42, 0.92)'
           }}
         >
