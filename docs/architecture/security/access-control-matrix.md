@@ -6,7 +6,7 @@
 | মডিউল (Admin Panel) | কী | layer / অনুমতির ধাপ (🔒 = ডিফল্টে বন্ধ, Superadmin টিক দিলে তবেই) |
 |---|---|---|
 | Admin Dashboard | `admin_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Reports | `reports` | `read` Read Only<br>`edit_add` Edit<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`submission_status` Budget Submission Status<br>🔒`dispatch_material` Dispatch Material (own)<br>🔒`dispatch_all` Dispatch Material: see all<br>🔒`po_import` P.O Import |
+| Reports | `reports` | `read` Read Only<br>`edit_add` Edit<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`submission_status` Budget Submission Status<br>🔒`dispatch_material` Dispatch Material (own)<br>🔒`dispatch_all` Dispatch Material: see all<br>🔒`po_import` P.O Import<br>🔒`close_short` Undelivered MPR & Close short |
 | Projects | `projects` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Branches | `branches` | শুধু মডিউলের অনুমতি (layer নেই) |
 | MPR Numbers | `mprs` | শুধু মডিউলের অনুমতি (layer নেই) |
@@ -31,7 +31,7 @@
 | Vehicle Management | `vehicle_management` | `read` Vehicle Management<br>🔒`manage_drivers` Manage drivers<br>🔒`manage_vehicles` Edit / delete vehicles |
 | Vehicle Maintainer (Ride Bypass) | `vehicle_maintainer` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Job Recycle | `recycle` | শুধু মডিউলের অনুমতি (layer নেই) |
-| MPR Edit Log | `editlog` | শুধু মডিউলের অনুমতি (layer নেই) |
+| MPR Edit Log | `editlog` | `read` Edit history & Job Edit approvals<br>🔒`mpr_followup` Needs update & People |
 | Exit / Offboarding | `exit_offboarding` | `read` Exit / Offboarding<br>🔒`exit_dues` Exit — Dues from other modules<br>🔒`exit_pdf` Exit — Clearance & Settlement PDF<br>🔒`exit_clearance_setup` Exit — Clearance Departments setup |
 | Performance Management | `performance_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Recruitment (ATS) | `recruitment` | `read` Recruitment (postings, candidates, interviews)<br>🔒`email_candidates` Email candidates<br>🔒`edit_candidates` Edit candidate details |

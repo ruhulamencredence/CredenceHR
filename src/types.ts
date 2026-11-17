@@ -98,7 +98,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'merge_accounts' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'merge_accounts' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit' | 'close_short' | 'mpr_followup';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -112,7 +112,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['notices', 'departments', 'designations', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'bill_claim', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'document_vault', 'employees', 'recruitment', 'data_import', 'vehicle_management', 'management_dashboard'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['editlog', 'notices', 'departments', 'designations', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'bill_claim', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'document_vault', 'employees', 'recruitment', 'data_import', 'vehicle_management', 'management_dashboard'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -127,7 +127,17 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'submission_status', label: 'Budget Submission Status' },
     { key: 'dispatch_material', label: 'Dispatch Material (own)' },
     { key: 'dispatch_all', label: 'Dispatch Material: see all' },
-    { key: 'po_import', label: 'P.O Import' }
+    { key: 'po_import', label: 'P.O Import' },
+    // Undelivered MPR: rows whose material won't (all) arrive inside the
+    // Budget — set the rest aside (Close short). Explicit-only.
+    { key: 'close_short', label: 'Undelivered MPR & Close short' }
+  ],
+  // MPR Edit Log: the edit history and Job Edit approvals (read, as before),
+  // and the follow-up views — Needs update (due date passed, material not
+  // in) and People (per person) — only for accounts it is ticked for.
+  editlog: [
+    { key: 'read', label: 'Edit history & Job Edit approvals' },
+    { key: 'mpr_followup', label: 'Needs update & People' }
   ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
@@ -333,7 +343,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'merge_accounts', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'merge_accounts', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit', 'close_short', 'mpr_followup'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox

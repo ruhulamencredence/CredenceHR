@@ -741,6 +741,19 @@ Office Attendance → **Machines** popup-এ প্রতিটা মেশি�
 
 App (APK / iPhone / ব্রাউজার) খুললে শুধু Dashboard-এর কার্ডের ডাটা আসে। Check In/Out (তালিকাসহ), Bill Claim, Leave Application, Timesheet, Employee Directory, Notice Board-এর code আর ডাটা আসে সেই পাতা প্রথমবার খুললে; এরপর পাতাটা রেখে দেওয়া হয়, ফিরে এলে সঙ্গে সঙ্গে দেখায় (`UserPanel.tsx` seen)। PEPM-এর Budget / MPR No / entries আসে Budget, Jobs, Entries বা Job Edit খুললে। ফোনে শুধু ফোনের Dashboard আর ডেস্কটপে শুধু ডেস্কটপেরটা বসে (`src/lib/useMdUp.ts`) — আগে দুটোই বসে দুবার ডাটা আনত। Pending Approvals-এ গাড়ি ও driver-এর তালিকা আসে শুধু গাড়ি বসানোর মতো আবেদন থাকলে।
 
+## MPR Edit Log — নতুন পাতা (১৭ নভেম্বর)
+
+Admin Panel → PEPM Management → MPR Edit Log (`src/components/MprEditLog.tsx`, server `MprEditLogRoutes.ts`)। চারটা ভাগ:
+
+- **Pending approvals** — Job Edit-এর Add MPR / Delete MPR / New Job অনুরোধ, আগের মতো Approve / Reject (`/api/job-edits`)।
+- **Edit history** (`GET /api/mpr-edit-log`) — এক save = এক কার্ড: একই মানুষ একই MPR সারিতে একই মিনিটে যা বদলেছেন। আগের মান কাটা, নতুন মোটা; Delivery Date কত দিন পিছাল / এগোল, Qty কত বাড়ল। উপরে সংখ্যা (save, আজ, Delivery Date পিছিয়েছে, Tried — not saved, কতজন)। ফিল্টার: Today / 7 days (default) / This month / All time, Project, কী বদলেছে, কে বদলেছেন, Job / MPR / item — computer-এ header-এর নিচে আটকে থাকে। ৫০টা করে ("Show more")। Export Excel = ফিল্টারে যা আছে, প্রতি বদল এক সারি।
+- **Tried — not saved** — `PUT /api/entries/:id` বদল ফিরিয়ে দিলে (৪০০ / ৪০৩ / ৪০৯: Budget জমা হয়ে lock, নিয়ম ভাঙা…) কে, কখন, কী বদলাতে চেয়েছিলেন আর server-এর কারণ `entry_edit_attempts`-এ থাকে (`recordEditAttempt`), history-তে লাল কার্ড। তাই "করেছিলাম, হয়নি" আর "করিনি" আলাদা করা যায়।
+- **Full history** (`GET /api/mpr-edit-log/entry/:id`) — এক MPR সারির শুরু থেকে সব save আর ফেরানো চেষ্টা, liquid-glass side sheet-এ।
+- **Needs update** (`GET /api/mpr-edit-log/needs-update`) — Delivery Date পার, মাল পুরো আসেনি (Material Dispatch-এর `md_received_qty` + Close short করা অংশ < চাওয়া Qty); কত দিন পার, কতটা এসেছে, শেষ edit কবে বা "Never edited" / "tried, not saved"। পুরনো আগে।
+- **People** (`GET /api/mpr-edit-log/people?days=7|30|month`) — MPR-এর মালিক ধরে: এখন overdue, সময়ের মধ্যে কয়টার তারিখ পার হয়েছে, তার কয়টা "সময়মতো" (মাল তারিখের মধ্যে এসেছে, বা Delivery Date পুরনো তারিখের দিন বা আগে বদলানো), কয়টা save, কয়টা ফেরানো চেষ্টা, শেষ edit।
+
+অনুমতি: `editlog` module-এ এখন layer — `read` (Edit history ও Pending approvals; layer না দেওয়া পুরনো account-এ আগের মতো থাকে) আর `mpr_followup` (Needs update ও People, explicit-only — টিক দিয়ে দিতে হয়)। API একই layer যাচাই করে।
+
 ## Credence Mail: সহকর্মীর কাছে ভেতরে, নাকি mail server দিয়ে (১৭ নভেম্বর)
 
 আমাদের domain-এর (Mail Administration → Our domains) এক ঠিকানা থেকে আরেক ঠিকানায় mail এখন **শুধু তখন CredenceHR-এর ভেতরে** যায়, যখন প্রাপক Credence Mail ব্যবহার করেন: নিজের আসল mailbox Credence Mail-এ যুক্ত (inside-only নয়), Mail চালু (`can_use_mail` বা Superadmin), login block নয়। বাকি সবার কাছে — কখনো Credence Mail খোলেননি, mailbox সরিয়ে (log out) দিয়েছেন, বা Mail বন্ধ — mail **mail server (SMTP) দিয়ে** তাঁর আসল mailbox-এ যায়: Outlook / ফোনে দেখা যায়, পরে Credence Mail-এ mailbox যুক্ত করলে সেখান থেকেই আসে। আগে এমন কারো জন্য ঠিকানা login বা Employee record-এ পেলেই একটা inside-only mailbox বানিয়ে mail ভেতরে রাখা হতো, তাই তিনি Credence Mail না খোলা পর্যন্ত কোথাও দেখতেন না।

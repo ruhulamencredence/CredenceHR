@@ -1,3 +1,4 @@
+import { MprEditLog } from './MprEditLog';
 import { useElementHeight } from '../lib/useElementHeight';
 import { AttendanceEditPopup } from './AttendanceEditPopup';
 import { activePeople } from '../lib/activePeople';
@@ -954,7 +955,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   useEffect(() => {
-    if (activeTab === 'editlog') fetchMprEditLog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -3105,6 +3105,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const designationsLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.designations;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // MPR Edit Log: read (history, approvals) and the explicit-only mpr_followup.
+  const editlogLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.editlog;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
   const usersLayer = (key: PermissionLayerKey) => {
@@ -5315,13 +5321,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           happened, so an Admin can see at a glance which day which Job/MPR rows were
           touched (and by whom) without opening each entry's own history one at a time. */}
       {activeTab === 'editlog' && (
-        <>
+        // MprEditLog.tsx: Pending approvals (the Job Edit section below), Edit
+        // history, and — with the mpr_followup layer — Needs update and People.
+        <MprEditLog
+          token={token}
+          projects={projects}
+          pendingCount={pendingJobEditRequests.length}
+          canFollowup={editlogLayer('mpr_followup')}
+          pendingSection={<>
         {/* Job Edit Approvals — pending first, so an Admin with "editlog" access sees
             what needs action before scrolling into the (much longer) permanent log
             below. Only an Admin/User account with the "editlog" module actually gets
             data back from GET /api/job-edits — this section simply doesn't render
             anything for anyone else since this whole tab is already gated the same way. */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+        <div>
           <div className="p-6 border-b border-slate-200">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Clock3 className="w-4 h-4 text-amber-600" /> Job Edit Approvals
@@ -5485,107 +5498,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             onAct={(action) => void actOnJobEditRequest(jobEditDetails.id, action)}
           />
         )}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <History className="w-4 h-4 text-blue-600" /> MPR Edit Log
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Every change made to a submitted MPR row (mostly Delivery Date updates, since other fields lock after
-                submission), grouped by the day it was edited.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={editLogSearch}
-                  onChange={(e) => setEditLogSearch(e.target.value)}
-                  placeholder="Search Job No, MPR No, User..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleExportEditLogExcel}
-                disabled={mprEditLogByDay().length === 0}
-                title="Download this log as an Excel file"
-                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              >
-                <FileDown className="w-3.5 h-3.5" /> Export Excel
-              </button>
-            </div>
-          </div>
-
-          {loadingMprEditLog ? (
-            <p className="text-xs text-slate-400 text-center py-12">Loading edit log...</p>
-          ) : mprEditLogByDay().length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-12">No MPR edits recorded yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-200">
-              {mprEditLogByDay().map(([day, records]) => (
-                <div key={day}>
-                  <div className="px-6 py-2.5 bg-slate-50 flex items-center gap-2 sticky top-0">
-                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-xs font-bold text-slate-700">{day}</span>
-                    <span className="text-[10px] text-slate-400">
-                      ({records.length} edit{records.length === 1 ? '' : 's'})
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-white text-slate-500 text-[11px] uppercase tracking-wider">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Time</th>
-                          <th className="px-4 py-2 text-left">Job No</th>
-                          <th className="px-4 py-2 text-left">MPR No</th>
-                          <th className="px-4 py-2 text-left">Item Name</th>
-                          <th className="px-4 py-2 text-left">Job Owner</th>
-                          <th className="px-4 py-2 text-left">Field Changed</th>
-                          <th className="px-4 py-2 text-left">From</th>
-                          <th className="px-4 py-2 text-left">To</th>
-                          <th className="px-4 py-2 text-left">Edited By</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-sm">
-                        {records.map((h) => (
-                          <tr key={h.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">
-                              {new Date(h.edited_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-blue-600 text-xs">{h.job_no || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
-                                {h.mpr_no || '—'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs">{h.item_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-600 text-xs">{h.entry_owner_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                {FIELD_LABELS[h.field_name] || h.field_name}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-500 text-xs max-w-[160px] truncate" title={h.old_value || ''}>
-                              {h.old_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs max-w-[160px] truncate font-medium" title={h.new_value || ''}>
-                              {h.new_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">{h.editor_name || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </>
+</>}
+        />
       )}
 
       {/* TAB 2: PROJECTS */}

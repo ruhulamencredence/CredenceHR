@@ -154,6 +154,7 @@
   "delivery_material_condition_items",
   "delivery_material_conditions",
   "entries",
+  "entry_edit_attempts",
   "entry_edit_history",
   "entry_permanent_delete_log",
   "job_edit_requests",

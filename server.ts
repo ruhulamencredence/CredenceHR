@@ -34,6 +34,7 @@ import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollI
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
+import { registerMprEditLogRoutes, ensureMprEditLogSchema } from "./MprEditLogRoutes";
 import { registerDebugRoutes } from "./DebugRoutes";
 import { registerProjectRoutes } from "./ProjectRoutes";
 import { registerAuthRoutes } from "./AuthRoutes";
@@ -303,6 +304,7 @@ async function initDB() {
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
+    await ensureMprEditLogSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
     await ensureTrackingScheduleSchema(dbPool);
@@ -423,7 +425,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests", "merge_accounts"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "designations", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
+const PERMISSION_LAYER_MODULES = ["editlog", "notices", "departments", "designations", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -569,7 +571,10 @@ const DOCUMENT_VAULT_LAYER_KEYS = ["read", "sign_request", "esign_settings"] as 
 // sees only the rows it sent there or dispatched; "dispatch_all" (also
 // explicit-only) shows everyone's.
 // "po_import" (explicit-only): Reports -> P.O Import (PoImportRoutes.ts).
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import"] as const;
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import", "close_short"] as const;
+// MPR Edit Log: read = edit history + Job Edit approvals (as before);
+// mpr_followup = Needs update & People (explicit-only, left out of the default).
+const EDITLOG_LAYER_KEYS = ["read", "mpr_followup"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -602,6 +607,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   approvals: PERMISSION_LAYER_KEYS,
   users: USERS_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
+  editlog: EDITLOG_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
@@ -3215,7 +3221,7 @@ async function startServer() {
             ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
           : moduleKey === "employees"
             ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3255,7 +3261,7 @@ async function startServer() {
         ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
       : moduleKey === "employees"
         ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3863,6 +3869,8 @@ async function startServer() {
     parseQtyNumber,
     toDateOnlyString
   });
+  // Admin Panel -> MPR Edit Log: history, refused tries, Needs update, People.
+  registerMprEditLogRoutes(app, { authenticateToken, requireModule, requireModuleLayer, queryDB, todayInDhaka });
 
 
   // Self Service -> Leave Balances & Leave Applications — kept in its own
