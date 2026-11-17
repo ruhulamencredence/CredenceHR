@@ -26,6 +26,7 @@
 
 import type { Express } from "express";
 import { companyStore } from "./companyContext";
+import { teamSupervisorByEmployee } from "./DepartmentTeams";
 
 interface EmployeeDirectoryRouteDeps {
   authenticateToken: any;
@@ -85,7 +86,31 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
          LEFT JOIN all_employees sup ON sup.id = cur.supervisor_id
          ORDER BY e.name ASC`
       );
-      const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, load) : await load();
+      // "Reports to" the way a request actually goes: the Direct Supervisor
+      // (Employees -> Supervisor) if set, else the Supervisor of the person's
+      // team (Departments -> Teams), else the Head of their Department. It
+      // used to show only the first, so someone given a Supervisor through a
+      // team read "Not set".
+      const loadAll = async () => {
+        const [list, teamSup, heads, logins] = await Promise.all([
+          load(),
+          teamSupervisorByEmployee(queryDB),
+          queryDB("SELECT id, head_user_id FROM departments WHERE is_active = 1").catch(() => []),
+          queryDB("SELECT u.id, COALESCE(e.name, u.name) AS name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id").catch(() => [])
+        ]);
+        const headOf = new Map<number, number>(((heads || []) as any[]).filter((h) => h.head_user_id).map((h) => [Number(h.id), Number(h.head_user_id)]));
+        const nameOfUser = new Map<number, string>(((logins || []) as any[]).map((u) => [Number(u.id), String(u.name || "")]));
+        for (const r of list as any[]) {
+          if (r.supervisor_name) continue;
+          const self = Number(r.user_id) || 0;
+          const team = teamSup.get(Number(r.id));
+          const head = r.department_id ? headOf.get(Number(r.department_id)) : undefined;
+          const pick = team && team !== self ? team : head && head !== self ? head : null;
+          if (pick) r.supervisor_name = nameOfUser.get(pick) || null;
+        }
+        return list;
+      };
+      const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, loadAll) : await loadAll();
       const companies: any[] = (await queryDB("SELECT id, name, short_code FROM companies").catch(() => [])) || [];
       const companyOf = new Map(companies.map((c: any) => [Number(c.id), c]));
       const body = JSON.stringify(
