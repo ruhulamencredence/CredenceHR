@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭০টি টেবিল, ২৯০৫টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭০টি টেবিল, ২৯০৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -468,6 +468,7 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `internal_domains` | varchar(1000) | না | default 'credencehousinglimited.com' | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `unconnected_route` | varchar(10) | না | default 'server' | |
 
 ### `mail_tasks`
 
