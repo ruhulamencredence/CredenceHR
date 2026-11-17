@@ -361,11 +361,15 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
       name VARCHAR(255) NOT NULL,
       parent_id INT NULL,
       selectable TINYINT(1) NOT NULL DEFAULT 1,
+      system_role VARCHAR(20) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_mail_folder_path (account_id, path(191)),
       KEY idx_mail_folders_user (user_id)
     ) DEFAULT CHARSET=utf8mb4`
   );
+  // Sent / Trash / Spam / Drafts that hold folders of their own (Roundcube,
+  // Outlook: "Sent > Monthly Reports > Zone-1"): kept as a heading in the tree.
+  await run("mail_folders.system_role", "ALTER TABLE mail_folders ADD COLUMN system_role VARCHAR(20) NULL AFTER selectable", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -781,19 +785,29 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     foldersListedAt.set(Number(a.id), Date.now());
     await withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
-        const special = new Set(Object.values(await foldersOf(a, c)).map((x) => String(x).toLowerCase()));
+        // Inbox / Sent / Trash / Spam / Drafts are shown already (and synced as themselves).
+        const roleByPath = new Map<string, string>(Object.entries(await foldersOf(a, c)).map(([role, path]) => [String(path).toLowerCase(), role]));
         const list: any[] = await c.list();
-        const mine = list.filter(
-          (m) => String(m.path).toUpperCase() !== "INBOX" && !m.specialUse && !special.has(String(m.path).toLowerCase())
-        );
+        // Gmail-style views of mail that is in other folders anyway — never folders of their own.
+        const virtual = (m: any) => ["\\All", "\\Flagged", "\\Important"].includes(String(m.specialUse || ""));
+        const hasKids = (p: string) => list.some((x) => String(x.path).startsWith(p + (x.delimiter || "/")) && String(x.path) !== p);
+        const mine = list.filter((m) => {
+          if (virtual(m)) return false;
+          const role = String(m.path).toUpperCase() === "INBOX" ? "inbox" : roleByPath.get(String(m.path).toLowerCase());
+          // A special folder only as the heading of the folders inside it (not Inbox: its folders sit at the top).
+          return role ? role !== "inbox" && hasKids(String(m.path)) : true;
+        });
         const have = await folderRows(Number(a.id));
         const byPath = new Map<string, any>(have.map((r) => [String(r.path), r]));
         for (const m of mine) {
-          const selectable = m.flags?.has?.("\\Noselect") || m.flags?.has?.("\\NonExistent") ? 0 : 1;
+          const role = roleByPath.get(String(m.path).toLowerCase()) || null;
+          // A heading (Sent / Trash…) opens as itself, never as "one of my folders".
+          const selectable = role || m.flags?.has?.("\\Noselect") || m.flags?.has?.("\\NonExistent") ? 0 : 1;
           const name = String(m.name || m.path).slice(0, 255);
           const old = byPath.get(String(m.path));
-          if (!old) await queryDB("INSERT IGNORE INTO mail_folders (account_id, user_id, path, name, selectable) VALUES (?, ?, ?, ?, ?)", [Number(a.id), Number(a.user_id), String(m.path).slice(0, 500), name, selectable]);
-          else if (old.name !== name || Number(old.selectable) !== selectable) await queryDB("UPDATE mail_folders SET name = ?, selectable = ? WHERE id = ?", [name, selectable, old.id]);
+          if (!old) await queryDB("INSERT IGNORE INTO mail_folders (account_id, user_id, path, name, selectable, system_role) VALUES (?, ?, ?, ?, ?, ?)", [Number(a.id), Number(a.user_id), String(m.path).slice(0, 500), name, selectable, role]);
+          else if (old.name !== name || Number(old.selectable) !== selectable || (old.system_role || null) !== role)
+            await queryDB("UPDATE mail_folders SET name = ?, selectable = ?, system_role = ? WHERE id = ?", [name, selectable, role, old.id]);
         }
         // Gone from the server: its local copies go too (the mail itself is wherever the server put it).
         const onServer = new Set(mine.map((m) => String(m.path)));
@@ -2200,7 +2214,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   };
   const folderOut = (r: any, counts: Map<string, any>) => {
     const c = counts.get(`Folder:${r.id}`) || {};
-    return { id: Number(r.id), accountId: Number(r.account_id), name: r.name, path: r.path, parentId: r.parent_id == null ? null : Number(r.parent_id), selectable: !!Number(r.selectable), total: Number(c.n || 0), unread: Number(c.unread || 0) };
+    return { id: Number(r.id), accountId: Number(r.account_id), name: r.name, path: r.path, parentId: r.parent_id == null ? null : Number(r.parent_id), selectable: !!Number(r.selectable), systemRole: r.system_role || null, total: Number(c.n || 0), unread: Number(c.unread || 0) };
   };
   async function folderCounts(userId: number) {
     const rows: any[] =
@@ -2286,6 +2300,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     handler(async (req, res) => {
       await requireFolders(req, true);
       const { f, a } = await myFolder(req, req.params.id);
+      if (f.system_role) throw bad(`This is your ${ROLE_LABEL[f.system_role] || "mail"} folder — it can't be renamed here.`);
       const all = await folderRows(Number(a.id));
       let newPath = "";
       let name = "";
@@ -2332,6 +2347,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     handler(async (req, res) => {
       await requireFolders(req, true);
       const { f, a } = await myFolder(req, req.params.id);
+      if (f.system_role) throw bad(`This is your ${ROLE_LABEL[f.system_role] || "mail"} folder — it can't be deleted here.`);
       const all = await folderRows(Number(a.id));
       const under = (id: number): any[] => all.filter((r) => Number(r.parent_id) === id).flatMap((r) => [...under(Number(r.id)), r]);
       const doomed = [...under(Number(f.id)), f]; // deepest first

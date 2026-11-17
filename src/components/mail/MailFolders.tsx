@@ -14,7 +14,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, Pencil, Trash2, Inbox } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, Pencil, Trash2, Inbox, Send, FileText, ShieldAlert } from 'lucide-react';
 import { MailAccount, MailFolder } from '../../lib/mailApi';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './MailPopup';
 
@@ -28,7 +28,8 @@ export const isFolderLabel = (l: string) => /^Folder:\d+$/.test(l);
 export const folderPath = (folders: MailFolder[], id: number): string => {
   const f = folders.find((x) => x.id === id);
   if (!f) return '';
-  return f.parentId ? `${folderPath(folders, f.parentId)} / ${f.name}` : f.name;
+  const own = f.systemRole ? SYSTEM[f.systemRole]?.title || f.name : f.name;
+  return f.parentId ? `${folderPath(folders, f.parentId)} / ${own}` : own;
 };
 const kidsOf = (folders: MailFolder[], parentId: number | null, accountId: number) =>
   folders.filter((f) => f.parentId === parentId && f.accountId === accountId).sort((a, b) => a.name.localeCompare(b.name));
@@ -40,6 +41,24 @@ export const flatTree = (folders: MailFolder[], accountId: number, skip?: number
 };
 
 export const MAIL_DRAG_TYPE = 'application/x-credence-mail-ids';
+
+// Sent / Trash / Spam / Drafts as headings of folders inside them: their own title, icon and list.
+const SYSTEM: Record<string, { label: string; title: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  sent: { label: 'Sent', title: 'Sent', Icon: Send },
+  trash: { label: 'Trash', title: 'Trash', Icon: Trash2 },
+  junk: { label: 'Spam', title: 'Spam', Icon: ShieldAlert },
+  drafts: { label: 'Drafts', title: 'Drafts', Icon: FileText }
+};
+export const folderTitle = (f: MailFolder) => (f.systemRole && SYSTEM[f.systemRole]?.title) || f.name;
+// A folder inside Sent holds sent mail: the list shows who it went to.
+export const isUnderSent = (folders: MailFolder[], id: number | null): boolean => {
+  let f = folders.find((x) => x.id === id);
+  while (f) {
+    if (f.systemRole === 'sent') return true;
+    f = f.parentId ? folders.find((x) => x.id === f!.parentId) : undefined;
+  }
+  return false;
+};
 
 export const FolderTree: React.FC<{
   folders: MailFolder[];
@@ -74,7 +93,8 @@ export const FolderTree: React.FC<{
   const row = (f: MailFolder, depth: number): React.ReactNode => {
     const kids = kidsOf(folders, f.id, f.accountId);
     const isOpen = openIds.has(f.id);
-    const active = currentId === f.id;
+    const sys = f.systemRole ? SYSTEM[f.systemRole] : null;
+    const active = currentId === f.id || (!!sys && current === sys.label);
     return (
       <div key={f.id}>
         <div
@@ -110,12 +130,14 @@ export const FolderTree: React.FC<{
           </button>
           <button
             type="button"
-            onClick={() => (f.selectable ? onOpen(folderLabel(f.id)) : setOpen((s) => { const n = new Set(s); isOpen ? n.delete(f.id) : n.add(f.id); return n; }))}
+            onClick={() =>
+              sys ? onOpen(sys.label) : f.selectable ? onOpen(folderLabel(f.id)) : setOpen((s) => { const n = new Set(s); isOpen ? n.delete(f.id) : n.add(f.id); return n; })
+            }
             className="flex-1 min-w-0 flex items-center gap-2 py-1.5 text-left"
             title={folderPath(folders, f.id)}
           >
-            {active ? <FolderOpen className="w-4 h-4 shrink-0" /> : <Folder className="w-4 h-4 shrink-0" />}
-            <span className="flex-1 truncate">{f.name}</span>
+            {sys ? <sys.Icon className="w-4 h-4 shrink-0" /> : active ? <FolderOpen className="w-4 h-4 shrink-0" /> : <Folder className="w-4 h-4 shrink-0" />}
+            <span className="flex-1 truncate">{folderTitle(f)}</span>
             {f.unread > 0 && <span className={`text-[11px] font-semibold ${active ? 'text-sky-800' : 'text-slate-500'}`}>{f.unread}</span>}
           </button>
           {!readOnly && (
@@ -141,12 +163,17 @@ export const FolderTree: React.FC<{
                 <button type="button" className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-black/5" onClick={() => { setMenu(null); onNew(f.accountId, f.id); }}>
                   <FolderPlus className="w-4 h-4" /> New sub-folder
                 </button>
-                <button type="button" className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-black/5" onClick={() => { setMenu(null); onRename(f); }}>
-                  <Pencil className="w-4 h-4" /> Rename
-                </button>
-                <button type="button" className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-rose-50 text-rose-600" onClick={() => { setMenu(null); onDelete(f); }}>
-                  <Trash2 className="w-4 h-4" /> Delete
-                </button>
+                {/* Sent / Trash / Spam / Drafts themselves: only folders inside them. */}
+                {!sys && (
+                  <>
+                    <button type="button" className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-black/5" onClick={() => { setMenu(null); onRename(f); }}>
+                      <Pencil className="w-4 h-4" /> Rename
+                    </button>
+                    <button type="button" className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-rose-50 text-rose-600" onClick={() => { setMenu(null); onDelete(f); }}>
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </button>
+                  </>
+                )}
               </div>
               </div>
             </>,
@@ -252,7 +279,7 @@ export const FolderFormPopup: React.FC<{
             <select id="mf-parent" className={inputCls} value={parentId ?? ''} onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">— Top level —</option>
               {flatTree(folders, accountId).map(({ f, depth }) => (
-                <option key={f.id} value={f.id}>{`${'  '.repeat(depth)}${depth ? '└ ' : ''}${f.name}`}</option>
+                <option key={f.id} value={f.id}>{`${'  '.repeat(depth)}${depth ? '└ ' : ''}${folderTitle(f)}`}</option>
               ))}
             </select>
           </div>
@@ -297,7 +324,7 @@ export const MoveToFolderPopup: React.FC<{
               className="w-full flex items-center gap-2 py-2 pr-3 rounded-xl text-sm text-slate-700 hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent"
               style={{ paddingLeft: 12 + depth * 16 }}
             >
-              <Folder className="w-4 h-4 shrink-0" /> <span className="truncate">{f.name}</span>
+              <Folder className="w-4 h-4 shrink-0" /> <span className="truncate">{folderTitle(f)}</span>
               {current === folderLabel(f.id) && <span className="ml-auto text-[10px] text-slate-400">here now</span>}
             </button>
           ))}

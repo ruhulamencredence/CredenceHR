@@ -1,0 +1,46 @@
+// Folders inside Sent, as Roundcube (cPanel webmail) / Outlook make them on a cPanel-style
+// server (INBOX. prefix, "."): Sent > Daily & Market Labor Actual Report > CDW, RPRT, Zone-1…;
+// Sent > Monthly Reports > …; plus Archive. Run with Dovecot set to prefix=INBOX. separator=.
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { ImapFlow } = require('/home/user/CredenceHR/node_modules/imapflow');
+const { execSync } = require('child_process');
+const B = 'http://localhost:3200';
+const sql = (s) => execSync(`mysql -h127.0.0.1 -ucred -pcredpass admin_ui -N -e "${s}"`).toString().trim();
+let pass = 0, fail = 0; const ok = (c, m) => { c ? pass++ : fail++; console.log((c ? 'PASS ' : 'FAIL ') + m); };
+const imap = async (fn) => { const c = new ImapFlow({ host: '127.0.0.1', port: 143, secure: false, auth: { user: 'qa.mail@credence.test', pass: 'MailPass123' }, logger: false }); await c.connect(); try { return await fn(c); } finally { await c.logout(); } };
+const tok = (await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@credence.test', password: 'ProbePass123' }) })).json()).token;
+const call = async (m, p, b) => { const r = await fetch(B + '/api/mail' + p, { method: m, headers: { Authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+const acc = Number(sql("SELECT id FROM mail_accounts WHERE email='qa.mail@credence.test'"));
+sql(`DELETE FROM mail_folders WHERE account_id=${acc}; DELETE FROM mail_folder_state WHERE account_id=${acc}; DELETE FROM mail_messages WHERE account_id=${acc}; UPDATE mail_accounts SET folders_json=NULL WHERE id=${acc}`);
+const D = 'Daily & Market Labor Actual Report', MR = 'Monthly Reports';
+await imap(async (c) => {
+  for (const p of ['INBOX.Sent', 'INBOX.Drafts', 'INBOX.Junk', 'INBOX.Trash', 'INBOX.Archive', `INBOX.Sent.${D}`, `INBOX.Sent.${MR}`]) await c.mailboxCreate(p).catch(() => {});
+  for (const z of ['CDW', 'RPRT', 'Zone-1', 'Zone-3', 'Zone-4', 'Zone-5']) await c.mailboxCreate(`INBOX.Sent.${D}.${z}`).catch(() => {});
+  for (const z of ['CDW', 'RPRT', 'Security Department', 'Zone-1', 'Zone-3', 'Zone-4', 'Zone-5']) await c.mailboxCreate(`INBOX.Sent.${MR}.${z}`).catch(() => {});
+  await c.append(`INBOX.Sent.${MR}.Zone-1`, Buffer.from(`From: Sazid <qa.mail@credence.test>\r\nTo: zone1@site.test\r\nSubject: Zone-1 monthly report October\r\nMessage-ID: <z1oct@qa>\r\n\r\nreport\r\n`), ['\\Seen']);
+  await c.append('INBOX.Archive', Buffer.from(`From: hr@credence.test\r\nTo: qa.mail@credence.test\r\nSubject: Archived notice\r\nMessage-ID: <arch1@qa>\r\n\r\nold\r\n`));
+});
+const f = (await call('GET', `/folders?accountId=${acc}&refresh=1`)).body.folders || [];
+const by = (p) => f.find((x) => x.path === p);
+const sent = by('INBOX.Sent');
+ok(sent && sent.systemRole === 'sent' && !sent.selectable, 'Sent is the heading (opens as Sent, not a folder of its own)');
+ok(by(`INBOX.Sent.${D}`)?.parentId === sent?.id && by(`INBOX.Sent.${MR}`)?.parentId === sent?.id, 'both report folders sit inside Sent');
+ok(by(`INBOX.Sent.${D}`)?.name === D, `name with "&" kept: "${by(`INBOX.Sent.${D}`)?.name}"`);
+ok(['CDW', 'RPRT', 'Zone-1', 'Zone-3', 'Zone-4', 'Zone-5'].every((z) => by(`INBOX.Sent.${D}.${z}`)?.parentId === by(`INBOX.Sent.${D}`)?.id), 'Daily & Market…: CDW, RPRT, Zone-1/3/4/5 inside it');
+ok(['CDW', 'RPRT', 'Security Department', 'Zone-1', 'Zone-3', 'Zone-4', 'Zone-5'].every((z) => by(`INBOX.Sent.${MR}.${z}`)?.parentId === by(`INBOX.Sent.${MR}`)?.id), 'Monthly Reports: 7 folders inside it');
+ok(!by('INBOX.Junk') && !by('INBOX.Trash') && !by('INBOX.Drafts'), 'Junk / Trash / Drafts with nothing inside: not repeated');
+ok(!!by('INBOX.Archive') && by('INBOX.Archive').selectable, 'Archive (Roundcube) shows as a folder');
+const z1 = by(`INBOX.Sent.${MR}.Zone-1`);
+await call('POST', '/sync', { accountId: acc, folderId: z1.id });
+const items = (await call('GET', `/messages?accountId=${acc}&label=Folder:${z1.id}`)).body.items || [];
+ok(items.length === 1 && items[0].subject === 'Zone-1 monthly report October', 'Sent > Monthly Reports > Zone-1: its mail comes in');
+const ar = by('INBOX.Archive');
+await call('POST', '/sync', { accountId: acc, folderId: ar.id });
+ok(((await call('GET', `/messages?accountId=${acc}&label=Folder:${ar.id}`)).body.items || []).length === 1, 'Archive: its mail comes in');
+ok((await call('PATCH', `/folders/${sent.id}`, { name: 'X' })).status === 400 && (await call('DELETE', `/folders/${sent.id}`)).status === 400, 'Sent itself: rename / delete refused');
+const z6 = await call('POST', '/folders', { accountId: acc, name: 'Zone-6', parentId: by(`INBOX.Sent.${MR}`).id });
+const onServer = await imap(async (c) => (await c.list()).map((m) => m.path));
+ok(z6.status === 200 && onServer.includes(`INBOX.Sent.${MR}.Zone-6`), `new sub-folder from here: ${z6.body.folder?.path}`);
+await imap(async (c) => c.mailboxDelete(`INBOX.Sent.${MR}.Zone-6`));
+console.log(`\n${pass} passed, ${fail} failed`);

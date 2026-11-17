@@ -15,7 +15,7 @@ import {
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
   Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy, FolderInput
 } from 'lucide-react';
-import { FolderTree, FolderFormPopup, MoveToFolderPopup, folderIdOfLabel, folderPath, isFolderLabel, MAIL_DRAG_TYPE } from './MailFolders';
+import { FolderTree, FolderFormPopup, MoveToFolderPopup, folderIdOfLabel, folderPath, isFolderLabel, isUnderSent, MAIL_DRAG_TYPE } from './MailFolders';
 import { ModulePath } from '../ModulePath';
 import { usePhoneHeaderTitle } from '../../lib/headerPageTitle';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -513,8 +513,10 @@ const Row: React.FC<{
   onStar: () => void;
   // My folders: a mail can be dragged onto a folder (computer).
   onDragStart?: (e: React.DragEvent) => void;
-}> = ({ m, folder, selected, checked, checking, compact, readOnly, onOpen, onCheck, onStar, onDragStart }) => {
-  const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled';
+  // A folder inside Sent: who it went to, like Sent.
+  sentFolder?: boolean;
+}> = ({ m, folder, selected, checked, checking, compact, readOnly, onOpen, onCheck, onStar, onDragStart, sentFolder }) => {
+  const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled' || !!sentFolder;
   const who = outgoing ? `To: ${m.to.concat(m.cc).join(', ') || '(no one yet)'}` : m.from.name || m.from.email;
   const ownLabels = m.labels.filter((l) => !SYSTEM_LABELS.has(l) && !isFolderLabel(l)).slice(0, 2);
   const trailing = (
@@ -1414,6 +1416,7 @@ export const CredenceMail: React.FC<{
   );
 
   const allChecked = items.length > 0 && items.every((m) => checked.has(m.id));
+  const inSentFolder = isFolderLabel(folder) && isUnderSent(folders, folderIdOfLabel(folder));
   const folderTitle = MAIL_FOLDERS.find((f) => f.label === folder)?.title || (isFolderLabel(folder) ? folderPath(folders, folderIdOfLabel(folder) || 0) || 'Folder' : folder);
   const listPane = (
     <div className="flex flex-col min-h-0 h-full">
@@ -1534,6 +1537,7 @@ export const CredenceMail: React.FC<{
                   onOpen={() => (checked.size ? setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; }) : openRow(m))}
                   onCheck={() => setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })}
                   onStar={() => void act('star', m)}
+                  sentFolder={inSentFolder}
                   onDragStart={
                     canFolders && !ro
                       ? (e) => {

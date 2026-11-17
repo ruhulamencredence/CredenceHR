@@ -133,6 +133,8 @@ export interface MailFolder {
   path: string;
   parentId: number | null;
   selectable: boolean;
+  // Sent / Trash / Spam / Drafts holding folders of their own: a heading in the tree, opens as itself.
+  systemRole?: 'sent' | 'trash' | 'junk' | 'drafts' | null;
   total: number;
   unread: number;
 }

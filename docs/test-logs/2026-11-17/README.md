@@ -29,6 +29,13 @@ Every step is checked on the IMAP server itself (`imapflow`), the way Outlook / 
 - `scripts/mail-folders-outside.mjs`: **5/5** — sub-folders made outside CredenceHR (straight on the IMAP server, as
   Outlook / cPanel webmail do), two levels deep: all appear, nested the same way (Clients > ABC Ltd > Invoices); their
   mail comes in when the folder is synced; renamed and deleted there → followed here.
+- `scripts/mail-folders-sent-tree.mjs`: **11/11** — the owner's real Roundcube layout on a cPanel-style server: Sent ▸
+  "Daily & Market Labor Actual Report" ▸ CDW, RPRT, Zone-1/3/4/5 and Sent ▸ Monthly Reports ▸ 7 folders. Sent is a heading
+  (opens Sent, can't be renamed / deleted — 400), both report folders inside it, the name with "&" kept, every sub-folder
+  in its place; Junk / Trash / Drafts with nothing inside not repeated; Roundcube's Archive shows as a folder and its mail
+  comes in; Monthly Reports ▸ Zone-1's mail comes in (the list shows "To: …" like Sent); a new Zone-6 made from here lands
+  at `INBOX.Sent.Monthly Reports.Zone-6`. Before this fix those folders would have come in loose (not under Sent) and
+  Archive not at all.
 
 Fixed while testing: the folder's "⋯" menu was trapped inside the glass sidebar (couldn't be clicked) → drawn in a
 portal like the other popups.
