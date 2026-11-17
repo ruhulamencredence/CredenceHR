@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৯টি টেবিল, ২৮৯৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭০টি টেবিল, ২৯০৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -179,11 +179,6 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `user_id` | int(11) | না | PK  | FK → `users.id` |
 | `room_id` | int(11) | না | PK  | FK → `chat_rooms.id` |
 | `muted_until` | datetime | হ্যাঁ |  | |
-| `archived` | tinyint(1) | না | default 0 | |
-| `pinned_at` | datetime | হ্যাঁ |  | |
-| `marked_unread` | tinyint(1) | না | default 0 | |
-| `favorite` | tinyint(1) | না | default 0 | |
-| `hidden_after_id` | int(11) | হ্যাঁ |  | |
 
 ### `chat_rooms`
 
@@ -473,6 +468,7 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `internal_domains` | varchar(1000) | না | default 'credencehousinglimited.com' | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `unconnected_route` | varchar(10) | না | default 'server' | |
 
 ### `mail_tasks`
 
@@ -2112,7 +2108,6 @@ Unique: `uniq_session_key`(session_key)
 | `can_update_check_out` | tinyint(1) | না | default 0 | |
 | `attendance_projects_by_branch` | tinyint(1) | না | default 0 | |
 | `can_request_items` | tinyint(1) | না | default 0 | |
-| `can_use_mail_folders` | tinyint(1) | না | default 0 | |
 
 Unique: `email`(email), `username`(username)
 
@@ -2879,6 +2874,7 @@ Unique: `uniq_mobile_sim_number`(company_id,phone_number)
 | `branch_id` | int(11) | হ্যাঁ |  | FK → `branches.id` |
 | `joining_date` | date | হ্যাঁ |  | |
 | `gets_ot` | tinyint(1) | না | default 0 | |
+| `designation_id` | int(11) | হ্যাঁ |  | logical → `designations` |
 
 Unique: `zk_device_pin`(zk_device_pin)
 
@@ -2993,6 +2989,25 @@ Unique: `uniq_team_member`(employee_id)
 | `head_user_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `unique_company_name`(company_id,name)
+
+### `designations`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `code` | varchar(20) | না | UNI  | |
+| `code_no` | int(11) | না |  | |
+| `name` | varchar(150) | না |  | |
+| `name_key` | varchar(150) | না |  | |
+| `level` | int(11) | হ্যাঁ |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `is_deleted` | tinyint(1) | না | default 0 | |
+| `merged_into` | int(11) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `uq_designation_code`(code)
 
 ### `employee_advances`
 
@@ -3761,7 +3776,6 @@ Unique: `uniq_signature_document`(document_id)
 | `ip` | varchar(64) | হ্যাঁ |  | |
 | `user_agent` | varchar(255) | হ্যাঁ |  | |
 | `decline_reason` | varchar(500) | হ্যাঁ |  | |
-| `on_line` | tinyint(1) | না | default 0 | |
 
 Unique: `uniq_doc_step`(document_id,step_order)
 

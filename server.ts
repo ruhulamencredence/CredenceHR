@@ -58,6 +58,7 @@ import { startTrackingWakeJob } from "./TrackingWake";
 import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
 import { registerAccountMergeRoutes } from "./AccountMergeRoutes";
+import { registerDesignationRoutes } from "./DesignationRoutes";
 import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { registerHrReminderRoutes } from "./HrRemindersRoutes";
@@ -408,7 +409,7 @@ const BILL_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "designations", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -422,7 +423,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests", "merge_accounts"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
+const PERMISSION_LAYER_MODULES = ["notices", "departments", "designations", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -595,6 +596,8 @@ const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== 
 // is rolled onto this system.
 const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   departments: PERMISSION_LAYER_KEYS,
+  // Admin Panel -> Designations (DesignationRoutes.ts): one list for all companies.
+  designations: PERMISSION_LAYER_KEYS,
   projects: PERMISSION_LAYER_KEYS,
   approvals: PERMISSION_LAYER_KEYS,
   users: USERS_LAYER_KEYS,
@@ -3296,6 +3299,8 @@ async function startServer() {
 
   // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
   registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  // Admin Panel -> Designations (module "designations"): one list for all companies, permanent codes.
+  registerDesignationRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   // Admin Panel -> Users -> Merge accounts (layer "merge_accounts").
   registerAccountMergeRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
 
