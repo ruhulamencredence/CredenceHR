@@ -39,6 +39,10 @@ export function installKeyboardScrollFix(): () => void {
     // 350ms comfortably covers the keyboard's slide-up animation on virtually
     // every Android device/version — scrolling any earlier fights the
     // still-resizing viewport and can under/over-shoot.
+    // A page that places its own fields above the keyboard (the sign-in
+    // page on an iPhone, AuthScreen.tsx) opts out: a second scroll there
+    // pushed the whole card off the top of the screen.
+    if (target.closest('[data-keyboard-pinned]')) return;
     window.setTimeout(() => {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 350);
