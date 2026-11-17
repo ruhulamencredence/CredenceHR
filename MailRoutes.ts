@@ -305,6 +305,15 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   // Senders whose pictures always show (no "Show pictures" each time).
   await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // A colleague who hasn't connected their mailbox in Credence Mail (or
+  // can't open it): 'server' = the mail goes through the mail server to
+  // their real mailbox (default); 'inside' = held in an inside-only mailbox
+  // in CredenceHR as before.
+  await run(
+    "mail_system_settings.unconnected_route",
+    "ALTER TABLE mail_system_settings ADD COLUMN unconnected_route VARCHAR(10) NOT NULL DEFAULT 'server'",
+    ["ER_DUP_FIELDNAME"]
+  );
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
   // When read / star was last changed here (UTC). The mail server is told in
@@ -1201,7 +1210,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // cPanel mailbox doesn't see it.
   const DOMAIN_RE = /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
   const DEFAULT_DOMAINS = ["credencehousinglimited.com"];
-  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[] } } | null = null;
+  type Unconnected = "server" | "inside";
+  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[]; unconnected: Unconnected } } | null = null;
   async function systemSettings() {
     if (systemCache && Date.now() - systemCache.at < 30_000) return systemCache.v;
     const row: any = ((await queryDB("SELECT * FROM mail_system_settings WHERE id = 1").catch(() => [])) || [])[0];
@@ -1211,7 +1221,11 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           .map((d) => d.trim().toLowerCase())
           .filter((d) => DOMAIN_RE.test(d))
       : DEFAULT_DOMAINS;
-    const v = { internalDelivery: row ? !!Number(row.internal_delivery) : true, domains };
+    const v = {
+      internalDelivery: row ? !!Number(row.internal_delivery) : true,
+      domains,
+      unconnected: (row?.unconnected_route === "inside" ? "inside" : "server") as Unconnected
+    };
     systemCache = { at: Date.now(), v };
     return v;
   }
@@ -1238,13 +1252,23 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     //    made here for mail that came before).
     const boxes: any[] =
       (await queryDB(
-        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, m.provider, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
          FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id
          WHERE m.email IN (${marks})`,
         wanted
       ).catch(() => [])) || [];
+    // Only a colleague using Credence Mail gets it inside: their own mailbox
+    // connected (not an inside-only one), Mail on for them, not blocked.
+    // Anyone else gets it through the mail server in their real mailbox
+    // (seen in Outlook / the phone, and in Credence Mail once they connect)
+    // — unless Mail Administration keeps such mail inside (sys.unconnected).
+    // A sender with only an inside-only mailbox can't use the mail server
+    // at all: their mail to colleagues stays inside as before.
+    const keepInside = sys.unconnected === "inside" || isInternalBox(a);
     for (const r of boxes) {
       if (Number(r.user_id) && Number(r.is_blocked)) continue;
+      const usable = !isInternalBox(r) && Number(r.user_id) > 0 && hasAccess(r);
+      if (!usable && !keepInside) continue;
       add(String(r.email).toLowerCase(), { id: Number(r.id), user_id: Number(r.user_id), employee_id: r.employee_id, email: r.email, notify: Number(r.user_id) > 0 && hasAccess(r) });
     }
     // 2. Everyone else whose address it is: a CredenceHR login email, or an
@@ -1254,7 +1278,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     //    (for the Employee's login, or — no login yet — held for the
     //    Employee and handed over when they get one; see claimHeld).
     const missing = wanted.filter((x) => !out.has(x));
-    if (!missing.length) return out;
+    if (!missing.length || !keepInside) return out;
     const mm = missing.map(() => "?").join(",");
     const people: any[] = [
       ...((await queryDB(
@@ -1753,6 +1777,25 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (blocked[0]) return `${blocked[0].name}'s CredenceHR account is blocked`;
     const inactive: any[] = (await queryDB(`/*unscoped*/ SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? AND is_active = 0 LIMIT 1`, [email]).catch(() => [])) || [];
     if (inactive[0]) return `${inactive[0].name} is no longer an active Employee`;
+    if (sys.unconnected === "server") {
+      // Someone of ours, just not on Credence Mail.
+      const box: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT m.provider, u.role, u.can_use_mail, u.is_onboarding, u.name FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id WHERE m.email = ? LIMIT 1`,
+          [email]
+        ).catch(() => [])) || [];
+      const who: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding FROM users u WHERE LOWER(TRIM(u.email)) = ?
+           UNION ALL SELECT e.name, NULL, NULL, NULL FROM all_employees e WHERE COALESCE(e.is_active, 1) = 1 AND LOWER(TRIM(e.email)) = ? LIMIT 1`,
+          [email, email]
+        ).catch(() => [])) || [];
+      const b = box[0];
+      const name = b?.name || who[0]?.name;
+      if (b && !isInternalBox(b) && !(b.role === "superadmin" || (Number(b.can_use_mail) && !Number(b.is_onboarding))))
+        return `${name || "This colleague"} has Credence Mail turned off — it goes to their mailbox through the mail server`;
+      if (b || who[0]) return `${name || "This colleague"} hasn't connected their mailbox in Credence Mail — it goes to their mailbox through the mail server`;
+    }
     return "no Employee in the Employee Directory (and no CredenceHR login) has this email";
   }
 
@@ -1821,6 +1864,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const b = req.body || {};
       const cur = await systemSettings();
       const on = b.internalDelivery === undefined ? cur.internalDelivery : !!b.internalDelivery;
+      const unconnected: Unconnected = b.unconnected === undefined ? cur.unconnected : b.unconnected === "inside" ? "inside" : "server";
       let domains = cur.domains;
       if (b.domains !== undefined) {
         const list = (Array.isArray(b.domains) ? b.domains : String(b.domains).split(/[\s,;]+/)).map((d: any) => String(d || "").trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
@@ -1830,9 +1874,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (!domains.length) throw bad("Keep at least one domain (e.g. credencehousinglimited.com).");
       }
       await queryDB(
-        `INSERT INTO mail_system_settings (id, internal_delivery, internal_domains, updated_by) VALUES (1, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE internal_delivery = VALUES(internal_delivery), internal_domains = VALUES(internal_domains), updated_by = VALUES(updated_by)`,
-        [on ? 1 : 0, domains.join(","), Number(req.user.id)]
+        `INSERT INTO mail_system_settings (id, internal_delivery, internal_domains, unconnected_route, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE internal_delivery = VALUES(internal_delivery), internal_domains = VALUES(internal_domains), unconnected_route = VALUES(unconnected_route), updated_by = VALUES(updated_by)`,
+        [on ? 1 : 0, domains.join(","), unconnected, Number(req.user.id)]
       );
       systemCache = null;
       res.json(await publicSystem(req));

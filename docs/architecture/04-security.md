@@ -176,6 +176,8 @@
 
 ---
 
+- **Credence Mail — সহকর্মীর mail ভেতরে নাকি mail server দিয়ে (১৭ নভেম্বর):** ভেতরে শুধু যিনি Credence Mail-এ নিজের mailbox যুক্ত রেখেছেন, Mail চালু ও login block নয়; বাকিদের কাছে নিজেদের SMTP দিয়ে তাঁর অফিসের mailbox-এ (Mail Administration-এর "A colleague not using Credence Mail", default *Through the mail server*; বদলাতে `mail_settings` layer)। Block করা বা Mail বন্ধ কাউকে mail CredenceHR-এর ভেতরে আর জমা হয় না।
+
 ## ৮. নিরীক্ষা (Audit Trail)
 
 | কী | কোথায় | কত দিন |
