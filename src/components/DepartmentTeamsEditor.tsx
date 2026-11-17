@@ -289,10 +289,12 @@ export const DepartmentTeamsEditor = forwardRef<
 });
 
 // Team -> "Add people": pick Work stations (projects) first — one Supervisor
-// often has people at several — then narrow by Department (all of them to
-// start with, since a team may hold people from other Departments), tick who
-// to add (a whole project at once, or everyone shown) and add them in one go;
-// optionally new joiners there join this team by themselves.
+// often has people at several — then the Department: this Department to
+// start with, and its people there are ticked by themselves (except anyone
+// already in another team, who would be moved). Another Department's people
+// can be shown and ticked by hand, since a team may hold people from other
+// Departments. Optionally new joiners there — of this Department only —
+// join this team by themselves. "Add one person" still picks anyone.
 const NO_DEPT = '0';
 const deptKey = (p: Person) => (p.department_id ? String(p.department_id) : NO_DEPT);
 
@@ -316,8 +318,11 @@ function AddPeople({
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<Set<string>>(new Set());
   const [bq, setBq] = useState('');
-  // null = every Department; otherwise the Departments picked.
-  const [depts, setDepts] = useState<Set<string> | null>(null);
+  // null = every Department; otherwise the Departments picked. This
+  // Department to start with (a Department not saved yet has no id: all).
+  const ownKey = departmentId ? String(departmentId) : null;
+  const startDepts = () => (ownKey ? new Set([ownKey]) : null);
+  const [depts, setDepts] = useState<Set<string> | null>(startDepts);
   const [q, setQ] = useState('');
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [auto, setAuto] = useState(true);
@@ -356,6 +361,15 @@ function AddPeople({
     for (const p of list) m.set(branchOf(p), [...(m.get(branchOf(p)) || []), p]);
     return [...m].sort((a, b) => a[0].localeCompare(b[0]));
   }, [list]);
+  // This Department's people at the picked projects are ticked by
+  // themselves, each time the projects or Departments change — not anyone
+  // in another team now (ticking them moves them here).
+  useEffect(() => {
+    if (!ownKey) return setTicked(new Set());
+    setTicked(new Set(atStations.filter((p) => deptKey(p) === ownKey && !members.has(p.id) && !nowIn(p)).map((p) => p.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branches, depts, ownKey]);
+  const ownHere = ownKey ? atStations.filter((p) => deptKey(p) === ownKey).length : 0;
   const picked = list.filter((p) => ticked.has(p.id));
   const moving = picked.filter((p) => nowIn(p)).length;
   const others = picked.filter((p) => p.department_id !== departmentId).length;
@@ -364,7 +378,9 @@ function AddPeople({
   const count = (x: boolean) => (x ? 'text-white/80' : 'text-slate-400');
   const tick = (ids: number[], v: boolean) => setTicked((x) => { const y = new Set(x); ids.forEach((id) => (v ? y.add(id) : y.delete(id))); return y; });
   const shownStations = stations.filter(([b]) => b.toLowerCase().includes(bq.trim().toLowerCase()) || branches.has(b));
-  const deptLabel = !depts ? 'any department' : [...depts].map((k) => deptsHere.find(([d]) => d === k)?.[1].name || deptName(k)).join(', ');
+  // New joiners: of this Department only (any department only when the
+  // Department isn't saved yet and has no id).
+  const deptLabel = ownKey ? `${departmentName || 'this department'} only` : 'any department';
 
   if (!open)
     return (
@@ -388,7 +404,7 @@ function AddPeople({
           {shownStations.map(([b, n]) => {
             const x = branches.has(b);
             return (
-              <button key={b} type="button" aria-pressed={x} onClick={() => { setBranches((s) => { const y = new Set(s); x ? y.delete(b) : y.add(b); return y; }); setTicked(new Set()); }} className={`${chip} ${on(x)}`}>
+              <button key={b} type="button" aria-pressed={x} onClick={() => setBranches((s) => { const y = new Set(s); x ? y.delete(b) : y.add(b); return y; })} className={`${chip} ${on(x)}`}>
                 {b} <span className={count(x)}>{n}</span>
               </button>
             );
@@ -398,22 +414,27 @@ function AddPeople({
       {branches.size > 0 && (
         <>
           <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold text-slate-600">2 · Department <span className="font-normal text-slate-500">— of the people at these projects</span></p>
+            <p className="text-[11px] font-semibold text-slate-600">2 · Department <span className="font-normal text-slate-500">— {ownKey ? `${departmentName || 'this department'} is picked; tap another to add its people too` : 'of the people at these projects'}</span></p>
             <div className="flex flex-wrap gap-1.5">
-              <button type="button" aria-pressed={!depts} onClick={() => { setDepts(null); setTicked(new Set()); }} className={`${chip} ${on(!depts)}`}>
-                All departments <span className={count(!depts)}>{atStations.length}</span>
-              </button>
-              {deptsHere.map(([k, d]) => {
+              {[...(ownKey && !deptsHere.some(([k]) => k === ownKey) ? [[ownKey, { name: departmentName || 'This department', n: 0 }] as [string, { name: string; n: number }]] : []), ...deptsHere].map(([k, d]) => {
                 const x = !!depts && depts.has(k);
                 return (
                   <button key={k} type="button" aria-pressed={x}
-                    onClick={() => { setDepts((s) => { const y = new Set(s || []); x ? y.delete(k) : y.add(k); return y.size ? y : null; }); setTicked(new Set()); }}
+                    onClick={() => setDepts((s) => { const y = new Set(s || []); x ? y.delete(k) : y.add(k); return y.size ? y : startDepts(); })}
                     className={`${chip} ${on(x)}`}>
-                    {d.name}{Number(k) === departmentId ? ' (this one)' : ''} <span className={count(x)}>{d.n}</span>
+                    {d.name} <span className={count(x)}>{d.n}</span>
                   </button>
                 );
               })}
+              <button type="button" aria-pressed={!depts} onClick={() => setDepts((s) => (s ? null : startDepts()))} className={`${chip} ${on(!depts)}`}>
+                All departments <span className={count(!depts)}>{atStations.length}</span>
+              </button>
             </div>
+            {ownKey && ownHere === 0 && (
+              <p className="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-50 border border-dashed border-slate-300 text-slate-600">
+                Nobody from {departmentName || 'this department'} at {[...branches].join(', ')}. To take someone from another department, tap it above, or use "Add one person" below.
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <p className="text-[11px] font-semibold text-slate-600">3 · Who to add</p>
@@ -472,7 +493,7 @@ function AddPeople({
               disabled={!picked.length && !auto}
               onClick={() => {
                 const bs = [...branches].filter((b) => b !== NO_BRANCH);
-                const ds: (number | null)[] = !depts ? [null] : [...depts].filter((k) => k !== NO_DEPT).map(Number);
+                const ds: (number | null)[] = ownKey ? [Number(ownKey)] : [null];
                 const rules = auto ? bs.flatMap((b) => ds.map((d) => ({ branch: b, department_id: d }))) : [];
                 onAdd(picked.map((p) => p.id), rules);
                 setDone(`${picked.length} added${rules.length ? ' · new joiners too' : ''} — Save Changes to keep it`);
