@@ -116,15 +116,15 @@ export const FolderTree: React.FC<{
               // not ours
             }
           }}
-          className={`group relative flex items-center gap-1.5 pr-1 rounded-xl text-sm ${active ? 'bg-sky-100/80 text-sky-800 font-semibold' : 'text-slate-700 hover:bg-black/5'} ${over === f.id ? 'ring-2 ring-sky-500 bg-sky-50' : ''}`}
-          style={{ paddingLeft: 8 + depth * 14 }}
+          className={`group relative flex items-start gap-1.5 pr-1 rounded-xl text-sm ${active ? 'bg-sky-100/80 text-sky-800 font-semibold' : 'text-slate-700 hover:bg-black/5'} ${over === f.id ? 'ring-2 ring-sky-500 bg-sky-50' : ''}`}
+          style={{ paddingLeft: 8 + depth * 12 }}
         >
           <button
             type="button"
             aria-label={kids.length ? (isOpen ? `Close ${f.name}` : `Open ${f.name}`) : undefined}
             tabIndex={kids.length ? 0 : -1}
             onClick={() => kids.length && setOpen((s) => { const n = new Set(s); isOpen ? n.delete(f.id) : n.add(f.id); return n; })}
-            className={`w-4 h-6 flex items-center justify-center shrink-0 ${kids.length ? 'text-slate-500' : 'invisible'}`}
+            className={`w-4 h-8 flex items-center justify-center shrink-0 ${kids.length ? 'text-slate-500' : 'invisible'}`}
           >
             {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
           </button>
@@ -133,11 +133,12 @@ export const FolderTree: React.FC<{
             onClick={() =>
               sys ? onOpen(sys.label) : f.selectable ? onOpen(folderLabel(f.id)) : setOpen((s) => { const n = new Set(s); isOpen ? n.delete(f.id) : n.add(f.id); return n; })
             }
-            className="flex-1 min-w-0 flex items-center gap-2 py-1.5 text-left"
+            className="flex-1 min-w-0 flex items-start gap-2 py-1.5 text-left"
             title={folderPath(folders, f.id)}
           >
-            {sys ? <sys.Icon className="w-4 h-4 shrink-0" /> : active ? <FolderOpen className="w-4 h-4 shrink-0" /> : <Folder className="w-4 h-4 shrink-0" />}
-            <span className="flex-1 truncate">{folderTitle(f)}</span>
+            {sys ? <sys.Icon className="w-4 h-4 shrink-0 mt-px" /> : active ? <FolderOpen className="w-4 h-4 shrink-0 mt-px" /> : <Folder className="w-4 h-4 shrink-0 mt-px" />}
+            {/* Long names ("Daily & Market Labor Actual Report") wrap rather than being cut. */}
+            <span className="flex-1 min-w-0 break-words leading-snug">{folderTitle(f)}</span>
             {f.unread > 0 && <span className={`text-[11px] font-semibold ${active ? 'text-sky-800' : 'text-slate-500'}`}>{f.unread}</span>}
           </button>
           {!readOnly && (
@@ -150,7 +151,7 @@ export const FolderTree: React.FC<{
                 setMenuAt({ top: r.bottom + 4, left: Math.max(8, Math.min(r.right - 192, window.innerWidth - 200)) });
                 setMenu((m) => (m === f.id ? null : f.id));
               }}
-              className={`p-1 rounded-lg hover:bg-black/10 shrink-0 ${menu === f.id ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'} [@media(hover:none)]:opacity-100`}
+              className={`mt-1 p-1 rounded-lg hover:bg-black/10 shrink-0 ${menu === f.id ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'} [@media(hover:none)]:opacity-100`}
             >
               <MoreHorizontal className="w-3.5 h-3.5" />
             </button>

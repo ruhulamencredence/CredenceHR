@@ -36,6 +36,11 @@ Every step is checked on the IMAP server itself (`imapflow`), the way Outlook / 
   comes in; Monthly Reports ▸ Zone-1's mail comes in (the list shows "To: …" like Sent); a new Zone-6 made from here lands
   at `INBOX.Sent.Monthly Reports.Zone-6`. Before this fix those folders would have come in loose (not under Sent) and
   Archive not at all.
+- `scripts/mail-folders-older-bg.cjs`: **8/8** — the three limits removed. Older mail: a folder with 250 mails brings the
+  latest 200 first, "Older mail from the server" the other 50 (0 left; again → nothing more), the very first mail is there;
+  Inbox the same (200 → 210). Background: with the mail page open, a folder nobody opened came in by itself, and a mail
+  filed straight into a folder on the server (an Outlook rule) came in by itself after 302 s — nobody opened the folder.
+  On screen: long names wrap ("Daily & Market Labor Actual Report" in full), the button sits at the end of the list.
 
 Fixed while testing: the folder's "⋯" menu was trapped inside the glass sidebar (couldn't be clicked) → drawn in a
 portal like the other popups.

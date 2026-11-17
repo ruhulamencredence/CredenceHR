@@ -569,7 +569,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     // Only reading: nothing in the mailbox may change (a manual sync and a
     // search on the mail server just fetch mail).
     const path = String(req.path || "");
-    if (req.method !== "GET" && !(req.method === "POST" && (path === "/api/mail/sync" || path === "/api/mail/search-server"))) throw bad("An opened mailbox is read only.", 403);
+    if (req.method !== "GET" && !(req.method === "POST" && (path === "/api/mail/sync" || path === "/api/mail/search-server" || path === "/api/mail/older"))) throw bad("An opened mailbox is read only.", 403);
     // One log line per person per mailbox every 30 minutes, not per click.
     const key = `${req.user.id}:${target}`;
     if (Date.now() - (lastOpenLog.get(key) || 0) > 30 * 60_000) {
@@ -913,7 +913,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return { labels: lab, isRead, isStarred, category };
   }
 
-  async function storeFetched(a: any, role: string, msg: any, fresh: boolean): Promise<any | null> {
+  async function storeFetched(a: any, role: string, msg: any, fresh: boolean, noRules = false): Promise<any | null> {
     const env = msg.envelope || {};
     let parsed: any = {};
     try {
@@ -958,8 +958,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     let isStarred = flags.has("\\Flagged") ? 1 : 0;
     let lab = labels;
 
-    // Incoming mail: blocked senders go to Spam; then the user's own rules.
-    if (role === "inbox") {
+    // Incoming mail: blocked senders go to Spam; then the user's own rules
+    // (not for older mail fetched on request — it stays where the server has it).
+    if (role === "inbox" && !noRules) {
       const ruled = await incomingRules(Number(a.user_id), { fromEmail, fromName, to, subject, text, hasFiles: files.length > 0 }, { labels: lab, isRead, isStarred, category });
       lab = ruled.labels;
       isRead = ruled.isRead;
@@ -2451,6 +2452,63 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+  // { label: Inbox | Sent | Spam | Folder:<id>, accountId? } — older mail
+  // than the mailbox brought in (it starts with the latest INITIAL_SYNC of
+  // each folder): the next OLDER_BATCH from the server, oldest kept last.
+  const OLDER_BATCH = 100;
+  app.post(
+    "/api/mail/older",
+    ...gate,
+    handler(async (req, res) => {
+      const label = String(req.body?.label || "");
+      const fid = /^Folder:(\d+)$/.exec(label)?.[1];
+      const role = fid ? `f:${fid}` : label === "Inbox" ? "inbox" : label === "Sent" ? "sent" : label === "Spam" ? "junk" : "";
+      if (!role) throw bad("Older mail comes for Inbox, Sent, Spam or one of your folders.");
+      let list: any[];
+      if (fid) {
+        await requireFolders(req, false);
+        const { f, a } = await myFolder(req, fid);
+        if (!Number(f.selectable)) throw bad("That folder only holds other folders.");
+        list = [a];
+      } else list = req.body?.accountId ? [await accountOf(uid(req), req.body.accountId)] : await accountsOf(uid(req));
+      let added = 0;
+      let left = 0;
+      for (const a of list) {
+        if (isInternalBox(a)) continue;
+        // Never synced yet: the normal first sync brings the latest ones.
+        const known: any[] = await queryDB("SELECT MIN(uid) AS u FROM mail_messages WHERE account_id = ? AND folder_role = ? AND uid IS NOT NULL", [Number(a.id), role]);
+        if (!known[0]?.u) {
+          const r = await syncAndNotify(a, [role]).catch(() => null);
+          added += r ? r.inbox + r.sent + r.junk + r.folders : 0;
+          continue;
+        }
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const path = (await allFoldersOf(a, c))[role];
+            if (!path) return;
+            const lock = await c.getMailboxLock(path);
+            try {
+              const upto = Number(known[0].u) - 1;
+              if (upto < 1) return;
+              const uids: number[] = ((await c.search({ uid: `1:${upto}` }, { uid: true })) || []) as number[];
+              const take = uids.slice(-OLDER_BATCH);
+              left += uids.length - take.length;
+              if (!take.length) return;
+              for await (const m of c.fetch(take.join(","), { uid: true, envelope: true, flags: true, source: true, internalDate: true }, { uid: true })) {
+                // Old mail: no alert, no auto-reply; rules don't move it.
+                const row = await storeFetched(a, role, m, false, true);
+                if (row) added++;
+              }
+            } finally {
+              lock.release();
+            }
+          })
+        );
+      }
+      res.json({ added, left });
+    })
+  );
+
   // Search the mail server itself. A mailbox comes in with only its latest
   // INITIAL_SYNC mails, so older mail could never be found from here.
   // Matches not stored yet are fetched like any other mail (newest first,
@@ -3537,6 +3595,44 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (now - last > 3 * 60_000) syncAndNotify(a, ["inbox"]).catch(() => undefined);
       }
     }
+    for (const a of accts) {
+      if (isInternalBox(a) || now - (folderCheckAt.get(Number(a.id)) || 0) < 5 * 60_000) continue;
+      folderCheckAt.set(Number(a.id), now);
+      if (await hasFolders(Number(a.user_id))) await syncFolderChanges(a).catch(() => undefined);
+    }
+  }
+
+  // My folders in the background: every 5 minutes for people online, one
+  // login asks the server how far each folder has got (STATUS — no mail is
+  // fetched for that); only folders with new mail are then synced. A folder
+  // nobody has opened yet comes in a few at a time.
+  const folderCheckAt = new Map<number, number>();
+  async function syncFolderChanges(a: any) {
+    if (isInternalBox(a)) return;
+    await refreshFolders(a).catch(() => undefined);
+    const rows = (await folderRows(Number(a.id))).filter((r) => Number(r.selectable));
+    if (!rows.length) return;
+    const states = new Map<string, any>(
+      (((await queryDB("SELECT role, uidvalidity, last_uid FROM mail_folder_state WHERE account_id = ?", [Number(a.id)])) || []) as any[]).map((x) => [String(x.role), x])
+    );
+    const changed: string[] = [];
+    let firstTimes = 0;
+    await withAccountLock(Number(a.id), () =>
+      withImap(a, async (c) => {
+        for (const r of rows) {
+          const role = `f:${r.id}`;
+          const st = states.get(role);
+          if (!st) {
+            if (firstTimes++ < 3) changed.push(role);
+            continue;
+          }
+          const s: any = await c.status(String(r.path), { uidNext: true, uidValidity: true }).catch(() => null);
+          if (!s) continue;
+          if (Number(s.uidValidity) !== Number(st.uidvalidity) || Number(s.uidNext) - 1 > Number(st.last_uid)) changed.push(role);
+        }
+      })
+    );
+    if (changed.length) await syncAndNotify(a, changed);
   }
 
   // Scheduled mail whose time has come.

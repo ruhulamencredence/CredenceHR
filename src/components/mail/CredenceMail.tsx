@@ -648,6 +648,9 @@ export const CredenceMail: React.FC<{
   const [foldersLoading, setFoldersLoading] = useState(false);
   const [folderForm, setFolderForm] = useState<React.ComponentProps<typeof FolderFormPopup>['mode'] | null>(null);
   const [moving, setMoving] = useState<{ ids: string[]; accountId: number; then?: () => void } | null>(null);
+  // "Older mail from the server" at the end of a list: how many are still there (per folder / mailbox), and busy.
+  const [olderLeft, setOlderLeft] = useState<Record<string, number>>({});
+  const [olderBusy, setOlderBusy] = useState(false);
   const listReq = useRef(0);
   // Read / unread changes on their way to the server: a list or count that
   // arrives meanwhile is not allowed to put them back (see setRead).
@@ -1197,6 +1200,23 @@ export const CredenceMail: React.FC<{
     refreshRef.current();
   };
 
+  const olderKey = `${folder}|${accountFilter}`;
+  const canOlder = ['Inbox', 'Sent', 'Spam'].includes(folder) || (isFolderLabel(folder) && !!folders.find((f) => f.id === folderIdOfLabel(folder))?.selectable);
+  const loadOlder = async () => {
+    setOlderBusy(true);
+    try {
+      const r = await mailFetch<{ added: number; left: number }>(token, '/older', { method: 'POST', body: { label: folder, ...(accountFilter ? { accountId: accountFilter } : {}) } });
+      setOlderLeft((o) => ({ ...o, [olderKey]: r.left }));
+      say(r.added ? `${r.added} older mail${r.added === 1 ? '' : 's'} brought in.${r.left ? ` ${r.left} more on the server.` : ''}` : 'That’s all the mail on the server.');
+      await loadList(true);
+      void loadFolders();
+    } catch (e: any) {
+      say(e.message, 'error');
+    } finally {
+      setOlderBusy(false);
+    }
+  };
+
   const loadMore = async () => {
     if (!list) return;
     setLoadingMore(true);
@@ -1556,6 +1576,15 @@ export const CredenceMail: React.FC<{
                 <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="text-xs font-medium px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center gap-1.5">
                   {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Show more
                 </button>
+              </div>
+            )}
+            {/* The end of what came in: the mailbox starts with the latest mails of each folder; older ones on request. */}
+            {items.length >= list.total && canOlder && !q && olderLeft[olderKey] !== 0 && (
+              <div className="p-4 flex flex-col items-center gap-1">
+                <button type="button" onClick={() => void loadOlder()} disabled={olderBusy} className="text-xs font-medium px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center gap-1.5">
+                  {olderBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />} Older mail from the server
+                </button>
+                {olderLeft[olderKey] > 0 && <span className="text-[11px] text-slate-400">{olderLeft[olderKey]} more there</span>}
               </div>
             )}
             <div className="h-24 md:h-4" />
