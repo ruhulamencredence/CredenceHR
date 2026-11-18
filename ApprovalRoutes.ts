@@ -1114,7 +1114,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
                     destination: vr.destination,
                     ride_date: toDateOnlyString(vr.ride_date),
                     start_time: String(vr.start_time || "").slice(0, 5),
-                    estimated_duration_hours: Number(vr.estimated_duration_hours)
+                    estimated_duration_hours: Number(vr.estimated_duration_hours),
+                    // Drop & pick up: the approver sees (and can change) the trip.
+                    trip_type: vr.trip_type || "round",
+                    pickup_mode: vr.pickup_mode || null,
+                    pickup_at: vr.pickup_at || null
                   }
                 : null;
             })()

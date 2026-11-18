@@ -552,7 +552,9 @@ const RECRUITMENT_LAYER_KEYS = ["read", "email_candidates", "edit_candidates"] a
 // drivers list); "manage_drivers" = add / change / remove drivers;
 // "manage_vehicles" = edit / delete a vehicle (VehicleManagementRoutes.ts).
 // Explicit-only — the no-saved-layers default is "read" alone.
-const VEHICLE_LAYER_KEYS = ["read", "manage_drivers", "manage_vehicles"] as const;
+// "pickups" = Vehicle Management -> Pick-ups (see and give cars to drop & pick up rides);
+// "trip_report" = the Drop & pick up report. Both explicit-only.
+const VEHICLE_LAYER_KEYS = ["read", "manage_drivers", "manage_vehicles", "pickups", "trip_report"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.

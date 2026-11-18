@@ -17,6 +17,7 @@ import { DurationPicker } from './DurationPicker';
 import { RideBookingMap } from './RideBookingMap';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
 import { RIDE_CARD, RIDE_WELL, RIDE_LABEL, RIDE_INPUT, BTN_PRIMARY, BTN_SOFT_SM, RideRoute, RideBanner } from './rideTheme';
+import { TripPicker, TripValue, emptyTrip } from './RideTrip';
 
 const todayLocal = () => {
   const d = new Date();
@@ -50,6 +51,8 @@ interface RideBookingFlowProps {
 
 export function RideBookingFlow({ wide, showSteps, onSubmitted, inPopup = false }: RideBookingFlowProps) {
   const [form, setForm] = useState(emptyForm());
+  // Round trip / Drop & pick up later / One way (RideTrip.tsx).
+  const [trip, setTrip] = useState<TripValue>(emptyTrip());
   // null = still on step 1 (where from / to).
   const [places, setPlaces] = useState<RidePlaces | null>(null);
   // Kept when "Change" goes back to step 1, so the picks aren't lost.
@@ -70,12 +73,13 @@ export function RideBookingFlow({ wide, showSteps, onSubmitted, inPopup = false 
       const res = await fetch(apiUrl('/api/vehicles/requisitions'), {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ ...form, ...places })
+        body: JSON.stringify({ ...form, ...places, ...trip, pickup_date: trip.pickup_date || form.ride_date })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not submit request.');
       setSubmitMessage(null);
       setForm(emptyForm());
+      setTrip(emptyTrip());
       setPlaces(null);
       setLastPlaces(null);
       onSubmitted();
@@ -186,11 +190,15 @@ export function RideBookingFlow({ wide, showSteps, onSubmitted, inPopup = false 
                 <label className={RIDE_LABEL}>Start Time</label>
                 <input required type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className={RIDE_INPUT} />
               </div>
-              <div className={wide ? 'col-span-2' : 'col-span-2 sm:col-span-3'}>
-                <label className={RIDE_LABEL}>Est. Duration</label>
-                <DurationPicker value={form.estimated_duration_hours} onChange={(h) => setForm({ ...form, estimated_duration_hours: h })} className={RIDE_INPUT} />
-              </div>
+              {/* Only a round trip holds the car for the work's length. */}
+              {trip.trip_type === 'round' && (
+                <div className={wide ? 'col-span-2' : 'col-span-2 sm:col-span-3'}>
+                  <label className={RIDE_LABEL}>Est. Duration</label>
+                  <DurationPicker value={form.estimated_duration_hours} onChange={(h) => setForm({ ...form, estimated_duration_hours: h })} className={RIDE_INPUT} />
+                </div>
+              )}
             </div>
+            <TripPicker value={trip} onChange={setTrip} rideDate={form.ride_date} />
             {submitMessage && <RideBanner tone="error">{submitMessage}</RideBanner>}
             <button type="submit" disabled={submitting} className={`${BTN_PRIMARY} w-full py-3`}>
               {submitting ? 'Submitting…' : 'Submit Request'} {!submitting && <ArrowRight className="w-4 h-4" />}

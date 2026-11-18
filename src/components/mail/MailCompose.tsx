@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
-import { useKeyboardInset } from '../../lib/useKeyboardInset';
+import { useKeyboardGap } from '../../lib/useKeyboardInset';
 import { SearchSelect } from '../Combobox';
 import {
   AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
@@ -487,7 +487,7 @@ export const MailCompose: React.FC<{
   const linkRange = useRef<Range | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
-  const keyboardInset = useKeyboardInset();
+  const { gap: keyboardInset } = useKeyboardGap();
 
   // The editor's starting content (set once, then the user owns it).
   const startHtml = useMemo(() => {

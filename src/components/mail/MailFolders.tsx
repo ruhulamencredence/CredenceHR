@@ -16,7 +16,7 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FolderPlus, Loader2, MoreHorizontal, Pencil, Trash2, Inbox, Send, FileText, ShieldAlert } from 'lucide-react';
 import { MailAccount, MailFolder } from '../../lib/mailApi';
-import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './MailPopup';
+import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn, stickySearchCls } from './MailPopup';
 
 export const folderLabel = (id: number) => `Folder:${id}`;
 export const folderIdOfLabel = (label: string): number | null => {
@@ -309,8 +309,10 @@ export const MoveToFolderPopup: React.FC<{
   return (
     <Popup title={`Move ${count} mail${count === 1 ? '' : 's'} to…`} icon={<Folder className="w-4 h-4 text-sky-600" />} onClose={onClose} size="md">
       <div className="space-y-2">
-        <input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a folder" autoFocus aria-label="Find a folder" />
-        <div className="liquid-glass-inset rounded-2xl p-1.5 max-h-[50vh] overflow-y-auto">
+        <div className={stickySearchCls}>
+          <input className={inputCls} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a folder" autoFocus aria-label="Find a folder" />
+        </div>
+        <div className="liquid-glass-inset rounded-2xl p-1.5">
           {current !== 'Inbox' && !q && (
             <button type="button" onClick={() => onPick('Inbox')} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-700 hover:bg-black/5">
               <Inbox className="w-4 h-4" /> Inbox

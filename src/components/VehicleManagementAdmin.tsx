@@ -39,6 +39,8 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { DurationPicker } from './DurationPicker';
 import { formatDuration } from '../lib/rideDuration';
 import { personLabel } from '../lib/personLabel';
+import { TripRide, TripBadge, TripLegs, ChangeTripPopup } from './RideTrip';
+import { VehiclePickups, VehicleTripReport } from './VehiclePickups';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -57,7 +59,7 @@ interface Vehicle {
   status: 'available' | 'on_ride' | 'maintenance' | 'retired';
 }
 
-interface Requisition {
+interface Requisition extends TripRide {
   id: number;
   employee_name: string;
   purpose: string;
@@ -67,7 +69,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired' | 'dropped';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending', or for a
   // legacy requisition with no approval_requests row at all.
@@ -135,7 +137,9 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
     void loadDriverOptions();
   }, []);
 
-  const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
+  const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory' | 'pickups' | 'trip_report'>('requests');
+  // Change a ride's trip (Round trip / Drop & pick up / One way) — RideTrip.tsx.
+  const [tripFor, setTripFor] = useState<Requisition | null>(null);
   // Inventory: Vehicles | Drivers (VehicleDriversPanel.tsx).
   const [inventoryView, setInventoryView] = useState<'vehicles' | 'drivers'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -192,12 +196,17 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // Edit / delete a vehicle: only with the "Edit / delete vehicles" layer
   // (the server checks it too — GET /api/vehicles/my-access).
   const [canManageVehicles, setCanManageVehicles] = useState(false);
+  // Pick-ups / Drop & pick up report: their own explicit ticks (layers "pickups", "trip_report").
+  const [layerAccess, setLayerAccess] = useState({ pickups: false, trip_report: false });
   const [editVehicle, setEditVehicle] = useState<{ id: number; vehicle_no: string; model: string; vehicle_type: string; status: Vehicle['status'] } | null>(null);
   const [savingVehicle, setSavingVehicle] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/my-access'), { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setCanManageVehicles(!!d?.manage_vehicles))
+      .then((d) => {
+        setCanManageVehicles(!!d?.manage_vehicles);
+        setLayerAccess({ pickups: !!d?.pickups, trip_report: !!d?.trip_report });
+      })
       .catch(() => undefined);
   }, []);
   async function saveVehicle() {
@@ -477,7 +486,7 @@ useLiveRefresh(() => loadRequisitions());
 
   return (
     <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
+      <div className="flex gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
         {([
           [
             'requests',
@@ -486,7 +495,9 @@ useLiveRefresh(() => loadRequisitions());
             }${noticeCount > 0 ? ` • ${noticeCount} flagged` : ''}`
           ],
           ['emergency', 'Emergency Requisition'],
-          ['inventory', 'Vehicle Inventory']
+          ['inventory', 'Vehicle Inventory'],
+          ...(layerAccess.pickups ? ([['pickups', `Pick-ups${requisitions.filter((r) => r.status === 'dropped').length ? ` (${requisitions.filter((r) => r.status === 'dropped').length})` : ''}`]] as const) : []),
+          ...(layerAccess.trip_report ? ([['trip_report', 'Drop & pick up report']] as const) : [])
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -556,12 +567,23 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="font-semibold text-gray-800">
                   {r.employee_name} — {r.pickup_location} → {r.destination}
                 </div>
-                <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status === 'assigned' ? 'assigned — not started' : r.status}</span>
+                <span className="flex items-center gap-1.5">
+                  <TripBadge r={r} />
+                  <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">
+                    {r.status === 'assigned' ? (r.leg === 'pickup' ? 'pick-up car given — not set off' : 'assigned — not started') : r.status === 'dropped' ? 'dropped — pick-up later' : r.status}
+                  </span>
+                </span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
+              <TripLegs r={r} />
+              {(r.status === 'pending' || r.status === 'approved' || (r.status === 'assigned' && r.leg !== 'pickup')) && (
+                <button type="button" onClick={() => setTripFor(r)} className="mt-2 text-xs font-medium px-2.5 py-1 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50">
+                  Trip: {r.trip_type === 'drop_pickup' ? 'Drop & pick up' : r.trip_type === 'one_way' ? 'One way' : 'Round trip'} — change
+                </button>
+              )}
 
               {r.status === 'pending' && (
                 <div className="text-xs text-amber-700 mt-1">
@@ -965,6 +987,9 @@ useLiveRefresh(() => loadRequisitions());
           ))}
         </div>
       )}
+      {tab === 'pickups' && layerAccess.pickups && <VehiclePickups />}
+      {tab === 'trip_report' && layerAccess.trip_report && <VehicleTripReport />}
+      {tripFor && <ChangeTripPopup r={tripFor} onClose={() => setTripFor(null)} onDone={() => { setTripFor(null); void loadRequisitions(); }} />}
       {tab === 'inventory' && inventoryView === 'drivers' && <VehicleDriversPanel vehicles={vehicles} onChanged={() => void loadDriverOptions()} />}
       {tab === 'inventory' && inventoryView === 'vehicles' && (
         <div className="space-y-6">

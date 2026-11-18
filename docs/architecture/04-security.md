@@ -176,6 +176,7 @@
 
 ---
 
+- **Book a Ride — Drop & pick up (১৮ নভেম্বর):** Trip বদলাতে পারেন শুধু যাত্রী, সেই ride-এর approver, Vehicle Management / Maintainer — শুধু ride শুরুর আগে, যাত্রী alert পান। Drop / Release / Pick me up / Not needed — যাত্রী, ride-এর driver বা যিনি গাড়ি দিয়েছেন, Vehicle Management; Release-এ কারণ বাধ্যতামূলক। Pick-up-এ গাড়ি দেওয়া — Vehicle Management, drop driver, যিনি গাড়ি দিয়েছিলেন বা final approver। Pick-ups tab (`pickups`) আর Drop & pick up report (`trip_report`) Vehicle Management-এর explicit-only layer — UI-তে লুকায়, API-তেও `requireModuleLayer`।
 - **MPR Edit Log ও Close short (১৭ নভেম্বর):** MPR Edit Log-এ layer `read` (history ও Job Edit approvals) আর `mpr_followup` (Needs update ও People, explicit-only); ফেরানো edit চেষ্টা (`entry_edit_attempts`) শুধু নিজের মানুষটা, সারি, field ও server-এর কারণ রাখে। Close short (PEPM Reports layer `close_short`, explicit-only) — কারণ বাধ্যতামূলক, কে / কবে রাখা হয়, পথে থাকা Qty set aside হয় না, কিছু মোছে না, Undo শুধু Budget-এর শেষ তারিখ পর্যন্ত; প্রতিটা কাজ dispatch log ও edit history-তে।
 - **Credence Mail — সহকর্মীর mail ভেতরে নাকি mail server দিয়ে (১৭ নভেম্বর):** ভেতরে শুধু যিনি Credence Mail-এ নিজের mailbox যুক্ত রেখেছেন, Mail চালু ও login block নয়; বাকিদের কাছে নিজেদের SMTP দিয়ে তাঁর অফিসের mailbox-এ (Mail Administration-এর "A colleague not using Credence Mail", default *Through the mail server*; বদলাতে `mail_settings` layer)। Block করা বা Mail বন্ধ কাউকে mail CredenceHR-এর ভেতরে আর জমা হয় না।
 

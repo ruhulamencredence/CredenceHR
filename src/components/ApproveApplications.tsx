@@ -28,6 +28,7 @@ import { ApproverSignatureCard } from './ApproverSignatureCard';
 
 import { SearchSelect } from './Combobox';
 import { formatDuration } from '../lib/rideDuration';
+import { ChangeTripPopup, tripTitle, clock } from './RideTrip';
 import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 interface ApproveApplicationsProps {
   token: string;
@@ -84,6 +85,10 @@ interface MyApprovalItem extends ClaimReviewFields {
     ride_date: string;
     start_time: string;
     estimated_duration_hours: number;
+    // Round trip / Drop & pick up / One way — the approver may change it.
+    trip_type?: 'round' | 'drop_pickup' | 'one_way';
+    pickup_mode?: 'time' | 'call' | null;
+    pickup_at?: string | null;
   } | null;
   asset_requisition_details?: {
     asset_category: string;
@@ -432,6 +437,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
 
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => load(true));
+  // Change a ride's trip from its approval card (RideTrip.tsx).
+  const [tripFor, setTripFor] = useState<import('./RideTrip').TripRide | null>(null);
   const load = async (silent?: unknown) => {
     if (silent !== true) setLoading(true);
     try {
@@ -794,6 +801,7 @@ useLiveRefresh(() => load(true));
     // Phone: no page colour of its own (the header's glow shows through)
     // and the title sits in the header (usePhoneHeaderTitle).
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
+      {tripFor && <ChangeTripPopup r={tripFor} onClose={() => setTripFor(null)} onDone={() => { setTripFor(null); void load(true); }} />}
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <div className="hidden md:block">
@@ -1119,6 +1127,23 @@ useLiveRefresh(() => load(true));
                                 {item.vehicle_requisition_details.purpose}
                               </div>
                             )}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-slate-400 font-semibold">Trip: </span>
+                              {tripTitle(item.vehicle_requisition_details.trip_type)}
+                              {item.vehicle_requisition_details.trip_type === 'drop_pickup' &&
+                                ` · pick-up ${item.vehicle_requisition_details.pickup_mode === 'call' ? 'when called' : clock(item.vehicle_requisition_details.pickup_at)}`}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const d = item.vehicle_requisition_details!;
+                                  setTripFor({ id: item.source_id, status: 'pending', ride_date: d.ride_date, trip_type: d.trip_type || 'round', pickup_mode: d.pickup_mode || null, pickup_at: d.pickup_at || null });
+                                }}
+                                className="font-semibold text-[color:var(--g-accent-700)] underline underline-offset-2"
+                              >
+                                Change
+                              </button>
+                            </div>
                           </div>
                         )}
                         <p className="text-[11px] text-slate-400 mt-1">
