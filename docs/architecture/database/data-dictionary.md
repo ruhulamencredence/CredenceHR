@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭১টি টেবিল, ২৯৪২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭১টি টেবিল, ২৯৪৪টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2541,11 +2541,13 @@ Movement claim, Conveyance Bill Claim (bill ও লাইন), অনুমো�
 | `is_active` | tinyint(1) | না | default 1 | |
 | `sort_order` | int(11) | না | default 0 | |
 | `max_per_bill` | decimal(12,2) | হ্যাঁ |  | |
+| `daily_limit` | decimal(12,2) | হ্যাঁ |  | |
 | `monthly_limit` | decimal(12,2) | হ্যাঁ |  | |
 | `receipt_required` | tinyint(1) | না | default 0 | |
 | `deleted_at` | timestamp | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `designation_limits` | text | হ্যাঁ |  | |
 
 ### `bill_claim_department_access`
 
