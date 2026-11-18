@@ -1162,12 +1162,23 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       // With bills, check-in/out references belong to a Transport bill and
       // ARE its amount — the claim total counts them once, not on top of it.
       let extraTotal = refsTotal;
+      const cats = await loadCategories(queryDB);
+      const isTransport = (l: any) => {
+        const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
+        return !!c && /transport/i.test(c.name);
+      };
+      // Bill Claim Policy "Transport bills come only from Check In/Out": the
+      // Transport amount is never typed in — it is its ticked check-in/outs.
+      if ((await loadPolicy(queryDB)).transport_from_check_in_out) {
+        const transportLines = lines.filter(isTransport).length;
+        if (transportLines > 1) {
+          return res.status(400).json({ error: "Only one Transport bill per claim — tick all your check-in/outs on it." });
+        }
+        if (transportLines === 1 && refs.length === 0) {
+          return res.status(400).json({ error: "A Transport bill needs its Check In/Out — tick the check-in/out(s) this travel was for. Its amount can't be typed in." });
+        }
+      }
       if (usesItems && refs.length > 0) {
-        const cats = await loadCategories(queryDB);
-        const isTransport = (l: any) => {
-          const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
-          return !!c && /transport/i.test(c.name);
-        };
         const at = lines.findIndex(isTransport);
         if (at < 0) {
           return res.status(400).json({ error: "Check-in/out references go with a Transport bill — choose Transport as a bill's category." });

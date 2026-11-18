@@ -124,6 +124,15 @@ export const POLICY_DEFS: PolicyDef[] = [
     default: true
   },
   {
+    key: "transport_from_check_in_out",
+    group: "claim",
+    label: "Transport bills come only from Check In/Out",
+    help:
+      "A Transport bill's amount is the total of the check-in/outs ticked for it — it can't be typed in. At least one check-in/out must be ticked, and a claim has one Transport bill (every check-in/out goes on it). Off: a Transport bill with no check-in/out can have its amount typed in.",
+    type: "boolean",
+    default: true
+  },
+  {
     key: "window_from_first_submit",
     group: "dates",
     label: "Count the date window from the day the claim was first filed",
