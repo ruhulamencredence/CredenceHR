@@ -22,6 +22,7 @@ import { apiUrl } from '../../lib/api';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { shortMailDate, fullMailDate } from '../../lib/mailApi';
 import { CentralGroupsAdmin } from './MailGroups';
+import { useElementHeight } from '../../lib/useElementHeight';
 
 const CredenceMail = lazy(() => import('./CredenceMail').then((m) => ({ default: m.CredenceMail })));
 
@@ -306,6 +307,9 @@ const CheckAddress: React.FC<{ token: string; domain: string }> = ({ token, doma
 
 export const MailAdministration: React.FC<{ token: string; user: User }> = ({ token, user }) => {
   const [tab, setTab] = useState<'boxes' | 'delivery' | 'groups' | 'log'>('boxes');
+  // The sticky title / search bar's height, so the column titles stick under it.
+  const [barRef, barH] = useElementHeight(56);
+  const stickTop = 64 + barH;
   const [data, setData] = useState<AdminList | null>(null);
   const [log, setLog] = useState<LogRow[] | null>(null);
   const [error, setError] = useState('');
@@ -334,10 +338,22 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
     if (tab === 'log') void loadLog();
   }, [tab, loadLog]);
 
+  // How many mailboxes each person has connected, and "only people with more than one".
+  const boxesOf = useMemo(() => {
+    const m = new Map<number, number>();
+    (data?.items || []).forEach((b) => m.set(b.userId, (m.get(b.userId) || 0) + 1));
+    return m;
+  }, [data]);
+  const [multiOnly, setMultiOnly] = useState(false);
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (data?.items || []).filter((b) => !t || `${b.userName} ${b.userLogin} ${b.emailAddress}`.toLowerCase().includes(t));
-  }, [data, q]);
+    return (data?.items || [])
+      .filter((b) => !t || `${b.userName} ${b.userLogin} ${b.emailAddress}`.toLowerCase().includes(t))
+      .filter((b) => !multiOnly || (boxesOf.get(b.userId) || 0) > 1)
+      // One person's mailboxes stay together.
+      .sort((x, y) => String(x.userName).localeCompare(String(y.userName)) || x.userId - y.userId);
+  }, [data, q, multiOnly, boxesOf]);
+  const multiPeople = useMemo(() => [...boxesOf.values()].filter((n) => n > 1).length, [boxesOf]);
   const people = useMemo(() => new Set((data?.items || []).map((b) => b.userId)).size, [data]);
 
   if (opened) {
@@ -359,6 +375,9 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
 
   return (
     <div className="space-y-4">
+      {/* Desktop: the title, tabs and search stay under the header while the
+          list scrolls; the table's column titles stick right under them. */}
+      <div ref={barRef} className="md:sticky md:top-16 md:z-20 md:bg-white md:rounded-2xl md:border md:border-slate-200 md:px-3 md:py-2.5 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
           <Mail className="w-5 h-5 text-sky-600" /> Mail Administration
@@ -383,6 +402,20 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           </button>
         </div>
       </div>
+        {tab === 'boxes' && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[14rem] max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or mailbox" className="w-full text-sm pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-200" />
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                <input type="checkbox" checked={multiOnly} onChange={(e) => setMultiOnly(e.target.checked)} className="rounded" />
+                Only people with more than one mailbox{multiPeople ? ` (${multiPeople})` : ''}
+              </label>
+              {data && <span className="text-xs text-slate-500">{data.items.length} mailbox{data.items.length === 1 ? '' : 'es'} · {people} {people === 1 ? 'person' : 'people'}</span>}
+            </div>
+        )}
+      </div>
 
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
 
@@ -400,13 +433,6 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           {data && !data.serverReady && (
             <div className="text-xs px-3 py-2 rounded-xl bg-amber-50 text-amber-800">MAIL_ENCRYPTION_KEY isn't set on the server, so mailboxes can't be read or connected.</div>
           )}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[14rem] max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or mailbox" className="w-full text-sm pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-200" />
-            </div>
-            {data && <span className="text-xs text-slate-500">{data.items.length} mailbox{data.items.length === 1 ? '' : 'es'} · {people} {people === 1 ? 'person' : 'people'}</span>}
-          </div>
 
           {!data && !error ? (
             <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100" style={{ animation: 'skeleton-in .2s ease both' }}>
@@ -422,10 +448,10 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
             <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{q ? 'No mailbox matches.' : 'Nobody has connected a mailbox yet.'}</div>
           ) : (
             data && (
-              <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
-                <div className="overflow-x-auto">
+              <div className="rounded-2xl bg-white border border-slate-200 overflow-clip">
+                <div className="overflow-x-auto xl:overflow-visible">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                    <thead className="sticky z-10 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: stickTop }}>
                       <tr>
                         <th className="px-4 py-2.5 font-semibold">Employee</th>
                         <th className="px-4 py-2.5 font-semibold">Mailbox</th>
@@ -439,6 +465,9 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
                           <td className="px-4 py-3">
                             <div className="font-medium text-slate-900">{b.userName}</div>
                             {b.userLogin && <div className="text-[11px] text-slate-500">{b.userLogin}</div>}
+                            {(boxesOf.get(b.userId) || 0) > 1 && (
+                              <span className="inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">{boxesOf.get(b.userId)} mailboxes</span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <div className="text-slate-800">{b.emailAddress}</div>
@@ -477,15 +506,15 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           )}
         </>
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-clip">
           {!log ? (
             <div className="py-12 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
           ) : !log.length ? (
             <div className="p-8 text-center text-sm text-slate-500 flex flex-col items-center gap-2"><History className="w-6 h-6 text-slate-300" /> No mailbox has been opened and no password shown yet.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto xl:overflow-visible">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                <thead className="sticky z-10 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: stickTop }}>
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">When</th>
                     <th className="px-4 py-2.5 font-semibold">Who</th>
