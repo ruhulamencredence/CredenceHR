@@ -259,6 +259,14 @@ function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
+// A notice's content as one line of plain text for the card.
+const noticeText = (html?: string) => {
+  if (!html) return '';
+  // DOMParser doesn't load the pictures in it.
+  const doc = new DOMParser().parseFromString(html.replace(/<(br|\/p|\/div|\/li)[^>]*>/gi, ' $&'), 'text/html');
+  return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onNavigate }) => {
   // "Coming up — next 60 days" is up (HR Operations reminders layer): it
   // covers everything the shorter HR Alerts box would list.
@@ -356,7 +364,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         when(has('asset_management'), () => safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders)),
         when(has('bill_claim'), () => safeGet<any[]>(`/api/bill-claims?since=${claimsSince}&slim=1`, authHeaders)),
         when(has('bill_claim', 'disbursement'), () => safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders)),
-        safeGet<any[]>('/api/notices/active', authHeaders),
+        // The board (every notice live for this account), not /active — that is
+        // the login popup's queue, which drops normal-priority notices, ones
+        // already closed, and ones this account posted itself.
+        safeGet<any[]>('/api/notices/board', authHeaders),
         when(showAttendanceReport, () => safeGet<any[]>('/api/employee-directory', groupHeaders)),
         when(showAttendanceReport, () =>
           safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
@@ -1245,7 +1256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   {notices.slice(0, 5).map((n) => (
                     <div key={n.id} className="border-b border-slate-50 last:border-0 pb-3 last:pb-0">
                       <p className="text-xs font-semibold text-slate-900">{n.title}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.message || n.body}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{noticeText(n.content_html)}</p>
                     </div>
                   ))}
                 </div>
