@@ -4598,14 +4598,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         {/* Entries Table / List — grouped by Job, one line per Job (not per MPR) */}
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
-            <div className="hidden md:block">
+            <div className="hidden md:block !mb-0">
               <ModulePath path={['Self Service', 'PEPM Operation', 'Jobs']} />
             </div>
           )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
-            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -4738,7 +4738,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           </div>
 
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
-            <div className="hidden md:block">
+            <div className="hidden md:block !mb-0">
               <ModulePath path={['Self Service', 'PEPM Operation', 'Entry Details']} />
             </div>
           )}
@@ -5328,31 +5328,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           grid above (it operates on already Final-Submitted Jobs, which that grid's
           "Job Entry Details" list intentionally locks down). Hides on desktop while a
           Claims page is the active section, same as the grid.
-          On desktop, once it's the active section it's the ONLY thing showing in this
-          column (every other section above is `md:hidden`), so instead of sitting as
-          just another card inside this container's padding (px-2 sm:px-6 lg:px-8) and
-          top/bottom spacing (pt-8/md:pb-8, plus the space-y-8 gap from the section
-          before it), it breaks out of all of that with matching negative margins —
-          !mt-0 cancels the space-y-8 gap, md:-mt-8/md:-mb-8 cancel this container's own
-          top/bottom padding, and -mx-2 sm:-mx-6 lg:-mx-8 cancel its side padding — so
-          JobEditPanel (which fills md:h-[calc(100vh-4rem)] itself) actually reaches
-          every edge: flush under the header, full width, all the way to the bottom.
-          Mobile is untouched (max-md:!mt-0 only ever canceled the mobile gap; the
-          extra rules above only take effect at md+). */}
+          On desktop it sits like the other PEPM pages: the breadcrumb, then the panel
+          as a card right under it (!mt-0 cancels the space-y-8 gap from the hidden
+          section before it). */}
       {user.can_job_edit && !isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobEdit' && (
-        // !mt-0 cancels the space-y-8 gap this still picks up from the (hidden)
-        // section before it — same reasoning as JobEditPanel's own negative
-        // margins below, just for the smaller top-only gap: without it this sat
-        // under both that mt-8 AND the container's own pt-8, a ~4rem gap above
-        // just a breadcrumb before an otherwise near-empty page.
-        <div className="hidden md:block !mt-0">
+        // space-y-8 puts its gap UNDER the (empty) grid before this, so -mt-8
+        // takes it back; !mb-0 drops the gap under the breadcrumb itself.
+        <div className="hidden md:block -mt-8 !mb-0">
           <ModulePath path={['Self Service', 'PEPM Operation', 'Job Edits']} />
         </div>
       )}
       {user.can_job_edit && (
         <div className={`${mobileActiveSection === 'jobEdit' ? 'block mobile-page-in' : 'hidden'} ${
           !showingClaimsPage && desktopActiveSection === 'jobEdit' ? 'md:block' : 'md:hidden'
-        } !mt-0 -mx-2 sm:-mx-6 lg:-mx-8 md:-mt-8 md:-mb-8`}>
+        } !mt-0`}>
           <JobEditPanel token={token} />
         </div>
       )}
