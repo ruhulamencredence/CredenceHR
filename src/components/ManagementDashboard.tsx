@@ -50,10 +50,11 @@ import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { LoadingBlock } from './LoadingBlock';
 import { MultiSelectFilter } from './MultiSelectFilter';
+import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 
-type MdSection = 'people' | 'attendance' | 'money' | 'approvals' | 'projects' | 'recruitment' | 'fleet';
-const ALL_SECTIONS: MdSection[] = ['people', 'attendance', 'money', 'approvals', 'projects', 'recruitment', 'fleet'];
+type MdSection = 'people' | 'attendance' | 'money' | 'approvals' | 'projects' | 'recruitment' | 'fleet' | 'calendar';
+const ALL_SECTIONS: MdSection[] = ['people', 'attendance', 'money', 'approvals', 'projects', 'recruitment', 'fleet', 'calendar'];
 // Which part each card / details drawer belongs to.
 const DRAWER_SECTION: Record<string, MdSection> = { headcount: 'people', attendance: 'attendance', leave: 'attendance', salary: 'money', money: 'money', approvals: 'approvals', targets: 'projects', projects: 'projects' };
 // A part left out by the server comes back empty here, so nothing reads a missing field.
@@ -618,6 +619,10 @@ export const ManagementDashboard: React.FC<{ token: string; pageLink?: (page: Da
               </section>
               )}
             </div>
+            {/* The User Dashboard's calendar: holidays / weekends, and whose
+                attendance & leave the viewer sees follows their own role
+                (GET /api/calendar-attendance). Its own tick: md_calendar. */}
+            {sec.has('calendar') && <HolidayCalendarWidget token={token} size="large" />}
           </div>
 
           <div className="flex flex-col gap-5 min-w-0" style={{ flex: '1 1 340px', maxWidth: 460 }}>
