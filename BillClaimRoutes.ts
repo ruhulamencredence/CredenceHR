@@ -29,7 +29,7 @@
 import { requestApprovalReconcile } from "./approvalReconcile";
 import type { Express } from "express";
 import { isAppSession } from "./SessionSecurity";
-import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
+import { checkClaimBills, loadCategories, categoriesFor, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./BillClaimHistory";
 
 interface BillClaimRouteDeps {
@@ -1464,7 +1464,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           min_date: win.min,
           max_date: win.max,
           values: policy,
-          categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
+          categories: (await categoriesFor(queryDB, claimant.id)).filter((c) => c.is_active),
           locked_dates: await lockedDates(queryDB, claimant.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
           today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, claimant.id, today) : null
         });
