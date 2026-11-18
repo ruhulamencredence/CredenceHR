@@ -589,9 +589,16 @@ Admin Dashboard-এর "HR reports" কার্ডে এই ৫টাও (<cod
   R -- না --&gt; P{&quot;ফোনের app কতটা পুরনো?&quot;}
   P -- versionCode 1 (এই ব্যবস্থার আগের APK) --&gt; L[&quot;Update popup: link Copy / Share&lt;br/&gt;→ Chrome-এ খুলে install&quot;]
   P -- নতুন APK --&gt; U[&quot;Update popup: Update now&lt;br/&gt;→ ফোনের browser নামায় → Install&quot;]
+  P -- AppUpdater-সহ APK (১৮ নভেম্বর থেকে) --&gt; I[&quot;Update now → app-এর ভেতরেই download (%)&lt;br/&gt;→ প্রথমবার: Allow from this source&lt;br/&gt;→ Android-এর Install পর্দা → Update&quot;]
+  I -- download ব্যর্থ --&gt; F[&quot;Try again / Download in browser&quot;]
 </pre>
 <ul>
-<li>প্রতিটা build-এর versionCode আগেরটার চেয়ে বড় (২০২৬-এর ১ জানুয়ারি থেকে কত মিনিট, <code>android/app/build.gradle</code>)। GitHub আর Android Studio দুই জায়গাতেই এক নিয়ম।</li>
+<li>
+<p><strong>App-এর ভেতর থেকেই update (১৮ নভেম্বর, নতুন APK):</strong> <code>AppUpdaterPlugin.java</code> (<code>src/lib/appUpdater.ts</code>) নতুন APK app-এর cache-এ নামায়, popup-এ কত % আর কত MB দেখায় (Cancel চাপা যায়, তখন Later থাকে না)। নামানো শেষে Android "Install unknown apps" অনুমতি না দেওয়া থাকলে popup "Allow and install" দেখায়: Settings-এর সেই পাতা খোলে, "Allow from this source" চালু করে ফিরলে সাথে সাথে Android-এর নিজের "Do you want to update this app?" পর্দা খোলে; একবার চালু করলে পরের update-এ আর চায় না। Android নিজে সবসময় একবার Update চাপতে বলে — Play Store ছাড়া কোনো app নিঃশব্দে update হয় না। নতুন version-এ app চালু হলে উপরে একবার "CredenceHR updated to …" দেখায়। নামানো ব্যর্থ হলে কারণসহ "Try again" আর "Download in browser" (আগের পথ)। যে APK-তে এই plugin নেই সেগুলো আগের মতোই browser-এ পাঠায়, তাই সবাইকে শেষবার একবার browser দিয়ে update করতে হবে।</p>
+</li>
+<li>
+<p>প্রতিটা build-এর versionCode আগেরটার চেয়ে বড় (২০২৬-এর ১ জানুয়ারি থেকে কত মিনিট, <code>android/app/build.gradle</code>)। GitHub আর Android Studio দুই জায়গাতেই এক নিয়ম।</p>
+</li>
 <li>পর্দাগুলো server থেকে আসে, তাই এই popup-এর আগে বানানো পুরনো APK-তেও popup দেখায় (<code>src/components/AppUpdatePrompt.tsx</code>)। শুধু এক চাপে নামানোটা নতুন APK-তে হয় (<code>MainActivity.java</code>-র DownloadListener)।</li>
 <li><strong>Update required (১৭ নভেম্বর):</strong> <code>GET /api/app/android-latest</code> এখন <code>min_version_code</code> দেয় — default 456877, অর্থাৎ ১৪ নভেম্বর ২০২৬-এর আগে বানানো app (Employee Tracking-এ "Old app — update needed"); server-এর <code>ANDROID_MIN_BUILD</code> দিয়ে বদলানো যায় (0 = কাউকে বাধ্য করা হয় না), আর server-এর APK-এর versionCode-এর বেশি কখনো নয়, তাই update করার মতো কিছু থাকলেই চাওয়া হয়। ফোনের app এর চেয়ে পুরনো হলে popup-এর নাম "Update required", বন্ধ করার বোতাম আর "Later" নেই, সব পর্দার উপরে থাকে — update না করে app ব্যবহার করা যায় না (versionCode 1-এর app link Copy / Share করে)। পর্দা server থেকে আসে বলে পুরনো app-ও এটা দেখায়; তবে পুরনো app-এর নিজের (native) tracking service আগের মতো চলতে পারে যতক্ষণ না update হয়।</li>
 <li>"Later" চাপলে ওই version-এর জন্য এক দিন আর দেখায় না। Popup সব app ব্যবহারকারীর জন্য, কোনো অনুমতির দরকার নেই, কারণ APK নিজেই লগইন পাতায় সবার জন্য খোলা।</li>
