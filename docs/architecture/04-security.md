@@ -165,6 +165,7 @@
 - **Disappearing messages:** চালু করা আলাদা switch (`users.can_use_disappearing`, শুরুতে বন্ধ) ছাড়া হয় না — server নিজে যাচাই করে; কারণ সেই message চিরতরে মুছে যায়, কোম্পানি চাইলে কাউকেই না দিয়ে chat-এর রেকর্ড রাখতে পারে।
 
 - **Live all (Employee Tracking):** `watch-many` / `unwatch-many` একক Live Follow-এর মতোই `tracking` module + `live` layer চায়, প্রতিটা id-কে অ্যাকাউন্টের Tracking সীমায় যাচাই করে, একবারে সর্বোচ্চ ১০০ জন (`LiveTrackingRoutes.ts`)।
+- **Nearest project / own branch (Employee Tracking):** নতুন `GET /api/tracking/sites` (project-এর নাম, location, radius) আর `/api/tracking/live`-এর বাড়তি ঘর (Employee ID, পদবি, Department, কাছের project, নিজের branch ও দূরত্ব) — দুটোই আগের মতো `tracking` module + Read layer চায়; live-এর তালিকা আগের মতোই অ্যাকাউন্টের Tracking সীমায় ছাঁকা, তাই সীমার বাইরের কারও তথ্য আসে না (`EmployeeTrackingRoutes.ts`)।
 
 ## ৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা
 

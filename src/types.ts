@@ -414,6 +414,13 @@ export interface LocationPing {
   created_at?: string;
   // 1 = the phone said it came from a mock-location ("fake GPS") app.
   is_mock?: number | boolean | null;
+  // GET /api/tracking/live: who they are on the Employee record, the
+  // nearest company project to this location, and their own branch.
+  employee_code?: string | null;
+  designation?: string | null;
+  department?: string | null;
+  nearest_project?: { id: number; name: string; distance_m: number; radius_m: number; status: 'at_site' | 'near' | 'away' } | null;
+  own_branch?: { id: number | null; name: string; distance_m: number | null; radius_m: number | null; status: 'at_branch' | 'away' | 'no_location' } | null;
 }
 
 // One row of the company-wide Employee Directory (Admin Panel -> Employees, an
