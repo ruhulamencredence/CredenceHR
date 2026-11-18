@@ -740,10 +740,12 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                       </div>
                     )}
 
-                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
+                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null || cat.receipt_required) && (
                       <p className="text-[10px] text-slate-400">
+                        {cat.limits_for ? `For ${cat.limits_for}: ` : ''}
                         {[
                           cat.max_per_bill != null ? `Up to ${money(cat.max_per_bill)} per bill` : '',
+                          cat.daily_limit != null ? `${money(cat.daily_limit)} a day` : '',
                           cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
                           cat.receipt_required ? 'receipt needed' : ''
                         ]

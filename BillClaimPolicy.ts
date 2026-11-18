@@ -308,6 +308,17 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
         " — a MySQL admin can run SET GLOBAL log_bin_trust_function_creators = 1; once (or grant the TRIGGER/SUPER privilege) and restart the app."
     );
   }
+  // A category's limit per day, and its limits by designation (JSON list of
+  // { designation_id, designation, max_per_bill, daily_limit, monthly_limit } —
+  // a field left blank there uses the category's own).
+  for (const sql of [
+    "ALTER TABLE bill_claim_categories ADD COLUMN daily_limit DECIMAL(12, 2) NULL AFTER max_per_bill",
+    "ALTER TABLE bill_claim_categories ADD COLUMN designation_limits TEXT NULL"
+  ]) {
+    await queryDB(sql).catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") throw err;
+    });
+  }
   // Categories come from bill_claim_categories now, so the claim's own
   // category column holds any name (or "Fuel, Toll" for a multi-category claim).
   const cols: any[] = (await queryDB("SHOW COLUMNS FROM bill_claims LIKE 'category'")) || [];
@@ -373,8 +384,41 @@ export interface BillCategory {
   is_active: boolean;
   sort_order: number;
   max_per_bill: number | null;
+  daily_limit: number | null;
   monthly_limit: number | null;
   receipt_required: boolean;
+  designation_limits: DesignationLimit[];
+  // Set on the copy a claimant gets (categoriesFor): whose designation's
+  // limits are in force instead of the category's own.
+  limits_for?: string | null;
+}
+
+export interface DesignationLimit {
+  designation_id: number | null;
+  designation: string;
+  max_per_bill: number | null;
+  daily_limit: number | null;
+  monthly_limit: number | null;
+}
+
+const num = (x: any): number | null => (x === "" || x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+
+function parseDesignationLimits(raw: any): DesignationLimit[] {
+  let list: any[] = [];
+  try {
+    list = Array.isArray(raw) ? raw : raw ? JSON.parse(String(raw)) : [];
+  } catch {
+    list = [];
+  }
+  return (Array.isArray(list) ? list : [])
+    .filter((d) => d && String(d.designation || "").trim())
+    .map((d) => ({
+      designation_id: num(d.designation_id),
+      designation: String(d.designation).trim().slice(0, 150),
+      max_per_bill: num(d.max_per_bill),
+      daily_limit: num(d.daily_limit),
+      monthly_limit: num(d.monthly_limit)
+    }));
 }
 
 function toCategory(r: any): BillCategory {
@@ -385,9 +429,38 @@ function toCategory(r: any): BillCategory {
     is_active: !!Number(r.is_active),
     sort_order: Number(r.sort_order) || 0,
     max_per_bill: r.max_per_bill != null ? Number(r.max_per_bill) : null,
+    daily_limit: r.daily_limit != null ? Number(r.daily_limit) : null,
     monthly_limit: r.monthly_limit != null ? Number(r.monthly_limit) : null,
-    receipt_required: !!Number(r.receipt_required)
+    receipt_required: !!Number(r.receipt_required),
+    designation_limits: parseDesignationLimits(r.designation_limits)
   };
+}
+
+/**
+ * The categories as they apply to one employee: where a category has limits
+ * for the employee's designation (matched by designation id, else by name),
+ * those replace the category's own — a field left blank keeps the category's.
+ */
+export async function categoriesFor(queryDB: QueryDB, userId: number): Promise<BillCategory[]> {
+  const cats = await loadCategories(queryDB);
+  if (!cats.some((c) => c.designation_limits.length)) return cats;
+  const emp: any = ((await queryDB("SELECT designation_id, designation FROM all_employees WHERE user_id = ? LIMIT 1", [userId]).catch(() => [])) || [])[0];
+  if (!emp) return cats;
+  const did = num(emp.designation_id);
+  const dname = String(emp.designation || "").trim().toLowerCase();
+  return cats.map((c) => {
+    const hit =
+      c.designation_limits.find((d) => did != null && d.designation_id === did) ||
+      (dname ? c.designation_limits.find((d) => d.designation.toLowerCase() === dname) : undefined);
+    if (!hit) return c;
+    return {
+      ...c,
+      max_per_bill: hit.max_per_bill ?? c.max_per_bill,
+      daily_limit: hit.daily_limit ?? c.daily_limit,
+      monthly_limit: hit.monthly_limit ?? c.monthly_limit,
+      limits_for: hit.designation
+    };
+  });
 }
 
 // ---- history (append-only) ----
@@ -638,7 +711,7 @@ export async function checkClaimBills(
   }
 ): Promise<{ error: string } | { lines: CheckedLine[]; total: number; categorySummary: string }> {
   const policy = await loadPolicy(queryDB);
-  const categories = await loadCategories(queryDB);
+  const categories = await categoriesFor(queryDB, args.userId);
   const { userId, today, from, to } = args;
   const win = dateWindow(policy, today, args.firstFiled);
   const fmt = (n: number) => `৳${n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -670,7 +743,7 @@ export async function checkClaimBills(
     const amount = Math.round(Number(l.amount) * 100) / 100;
     if (!Number.isFinite(amount) || amount <= 0) return { error: `Bill ${n}: enter an amount greater than 0.` };
     if (policy.enforce_category_limits && cat.max_per_bill != null && amount > cat.max_per_bill) {
-      return { error: `Bill ${n}: ${cat.name} bills can be at most ${fmt(cat.max_per_bill)} each.` };
+      return { error: `Bill ${n}: ${cat.name} bills can be at most ${fmt(cat.max_per_bill)} each${cat.limits_for ? ` for ${cat.limits_for}` : ""}.` };
     }
     const desc = typeof l.description === "string" ? l.description.trim().slice(0, 500) || null : null;
     lines.push({ category_id: cat.id, category_name: cat.name, bill_date: date, amount, description: desc });
@@ -702,17 +775,31 @@ export async function checkClaimBills(
     (policy.enforce_category_limits && lines.some((l) => categories.find((c) => c.id === l.category_id)?.receipt_required));
   if (needsFile && !args.hasAttachment) return { error: "Attach the receipt — this claim needs one." };
 
-  // Monthly limit per category: this claim plus the user's other claims (not
-  // rejected) for bills in the same calendar month.
+  // Daily / monthly limit per category: this claim plus the user's other
+  // claims (not rejected) for bills on the same day / in the same month.
   if (policy.enforce_category_limits) {
-    const limited = categories.filter((c) => c.monthly_limit != null && lines.some((l) => l.category_id === c.id));
+    const limited = categories.filter((c) => (c.monthly_limit != null || c.daily_limit != null) && lines.some((l) => l.category_id === c.id));
     if (limited.length) {
       const mine: any[] = (await queryDB("SELECT id, status FROM bill_claims WHERE user_id = ?", [userId])) || [];
       const ids = mine.filter((c) => c.status !== "rejected" && Number(c.id) !== Number(args.editingClaimId)).map((c) => Number(c.id));
       const past: any[] = ids.length
         ? (await queryDB(`SELECT category_id, category_name, bill_date, amount FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || []
         : [];
-      for (const c of limited) {
+      const forWho = (c: BillCategory) => (c.limits_for ? ` for ${c.limits_for}` : "");
+      for (const c of limited.filter((x) => x.daily_limit != null)) {
+        const days = new Set(lines.filter((l) => l.category_id === c.id).map((l) => l.bill_date));
+        for (const d of days) {
+          const used =
+            past
+              .filter((p) => (Number(p.category_id) === c.id || p.category_name === c.name) && dhakaDate(p.bill_date) === d)
+              .reduce((s, p) => s + Number(p.amount), 0) +
+            lines.filter((l) => l.category_id === c.id && l.bill_date === d).reduce((s, l) => s + l.amount, 0);
+          if (used > (c.daily_limit as number)) {
+            return { error: `${c.name}: the limit${forWho(c)} is ${fmt(c.daily_limit as number)} a day — ${d} would come to ${fmt(used)}.` };
+          }
+        }
+      }
+      for (const c of limited.filter((x) => x.monthly_limit != null)) {
         const months = new Set(lines.filter((l) => l.category_id === c.id).map((l) => l.bill_date.slice(0, 7)));
         for (const m of months) {
           const used =
@@ -721,7 +808,7 @@ export async function checkClaimBills(
               .reduce((s, p) => s + Number(p.amount), 0) +
             lines.filter((l) => l.category_id === c.id && l.bill_date.slice(0, 7) === m).reduce((s, l) => s + l.amount, 0);
           if (used > (c.monthly_limit as number)) {
-            return { error: `${c.name}: the monthly limit for ${m} is ${fmt(c.monthly_limit as number)} — this claim would make it ${fmt(used)}.` };
+            return { error: `${c.name}: the monthly limit${forWho(c)} for ${m} is ${fmt(c.monthly_limit as number)} — this claim would make it ${fmt(used)}.` };
           }
         }
       }
@@ -838,8 +925,19 @@ export function registerBillClaimPolicyRoutes(
     if (!name) return { error: "Enter the category name." };
     const money = (x: any) => (x === "" || x == null ? null : Number(x));
     const maxPer = money(b.max_per_bill);
+    const daily = money(b.daily_limit);
     const monthly = money(b.monthly_limit);
-    if ((maxPer != null && !(maxPer > 0)) || (monthly != null && !(monthly > 0))) return { error: "Limits must be more than 0, or left blank." };
+    const bad = (x: number | null) => x != null && !(x > 0);
+    if (bad(maxPer) || bad(daily) || bad(monthly)) return { error: "Limits must be more than 0, or left blank." };
+    const byDesignation = parseDesignationLimits(b.designation_limits);
+    const seen = new Set<string>();
+    for (const d of byDesignation) {
+      const k = d.designation_id != null ? `#${d.designation_id}` : d.designation.toLowerCase();
+      if (seen.has(k)) return { error: `${d.designation} is listed twice — keep one row per designation.` };
+      seen.add(k);
+      if (bad(d.max_per_bill) || bad(d.daily_limit) || bad(d.monthly_limit)) return { error: `${d.designation}: limits must be more than 0, or left blank.` };
+      if (d.max_per_bill == null && d.daily_limit == null && d.monthly_limit == null) return { error: `${d.designation}: give at least one limit, or remove the row.` };
+    }
     return {
       v: [
         name,
@@ -848,7 +946,9 @@ export function registerBillClaimPolicyRoutes(
         Number(b.sort_order) || 0,
         maxPer,
         monthly,
-        b.receipt_required ? 1 : 0
+        b.receipt_required ? 1 : 0,
+        daily,
+        byDesignation.length ? JSON.stringify(byDesignation) : null
       ]
     };
   };
@@ -865,7 +965,7 @@ export function registerBillClaimPolicyRoutes(
         r.v[3] = (await loadCategories(queryDB)).reduce((m, c) => Math.max(m, c.sort_order), 0) + 1;
       }
       const result = await queryDB(
-        "INSERT INTO bill_claim_categories (name, description, is_active, sort_order, max_per_bill, monthly_limit, receipt_required) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO bill_claim_categories (name, description, is_active, sort_order, max_per_bill, monthly_limit, receipt_required, daily_limit, designation_limits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         r.v
       );
       const created = (await loadCategories(queryDB)).find((c) => c.id === Number(result.insertId));
@@ -893,7 +993,7 @@ export function registerBillClaimPolicyRoutes(
       if (req.body?.sort_order === undefined) r.v[3] = current.sort_order;
       if (await nameTaken(r.v[0], id)) return res.status(409).json({ error: "A category with this name already exists." });
       await queryDB(
-        "UPDATE bill_claim_categories SET name = ?, description = ?, is_active = ?, sort_order = ?, max_per_bill = ?, monthly_limit = ?, receipt_required = ? WHERE id = ?",
+        "UPDATE bill_claim_categories SET name = ?, description = ?, is_active = ?, sort_order = ?, max_per_bill = ?, monthly_limit = ?, receipt_required = ?, daily_limit = ?, designation_limits = ? WHERE id = ?",
         [...r.v, id]
       );
       const updated = (await loadCategories(queryDB)).find((c) => c.id === id);
@@ -1012,7 +1112,8 @@ export function registerBillClaimPolicyRoutes(
         min_date: win.min,
         max_date: win.max,
         values: policy,
-        categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
+        // With this employee's designation limits in place of the category's.
+        categories: (await categoriesFor(queryDB, req.user.id)).filter((c) => c.is_active),
         locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
         // "One new claim per day": the claim already filed today, if any.
         today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, req.user.id, today) : null

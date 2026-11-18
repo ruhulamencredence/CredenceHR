@@ -1784,8 +1784,20 @@ export interface BillClaimCategory {
   is_active: boolean;
   sort_order: number;
   max_per_bill: number | null;
+  daily_limit?: number | null;
   monthly_limit: number | null;
   receipt_required: boolean;
+  // Limits by designation (a blank field there uses the category's own).
+  designation_limits?: BillClaimDesignationLimit[];
+  // GET /api/bill-claim-policy/mine: whose designation's limits apply here.
+  limits_for?: string | null;
+}
+export interface BillClaimDesignationLimit {
+  designation_id: number | null;
+  designation: string;
+  max_per_bill: number | null;
+  daily_limit: number | null;
+  monthly_limit: number | null;
 }
 export interface BillClaimPolicyDef {
   key: string;
