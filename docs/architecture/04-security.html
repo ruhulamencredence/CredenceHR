@@ -427,6 +427,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li>
 <p><strong>Live all (Employee Tracking):</strong> <code>watch-many</code> / <code>unwatch-many</code> একক Live Follow-এর মতোই <code>tracking</code> module + <code>live</code> layer চায়, প্রতিটা id-কে অ্যাকাউন্টের Tracking সীমায় যাচাই করে, একবারে সর্বোচ্চ ১০০ জন (<code>LiveTrackingRoutes.ts</code>)।</p>
 </li>
+<li><strong>Nearest project / own branch (Employee Tracking):</strong> নতুন <code>GET /api/tracking/sites</code> (project-এর নাম, location, radius) আর <code>/api/tracking/live</code>-এর বাড়তি ঘর (Employee ID, পদবি, Department, কাছের project, নিজের branch ও দূরত্ব) — দুটোই আগের মতো <code>tracking</code> module + Read layer চায়; live-এর তালিকা আগের মতোই অ্যাকাউন্টের Tracking সীমায় ছাঁকা, তাই সীমার বাইরের কারও তথ্য আসে না (<code>EmployeeTrackingRoutes.ts</code>)।</li>
 </ul>
 <h2 id="-">৭. ই-স্বাক্ষর ও ডকুমেন্টের অখণ্ডতা</h2>
 <p>(<code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>, <code>DocumentVaultRoutes.ts</code>)
