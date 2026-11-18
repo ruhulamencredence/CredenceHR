@@ -3,7 +3,7 @@ import { RequestDetailsInline } from './RequestDetails';
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle
+  ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle, ChevronDown, Search
 } from 'lucide-react';
 import { ApprovalRequest, ApprovalChainStep, User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -64,6 +64,49 @@ const StatusPill: React.FC<{ status: ApprovalRequest['status'] }> = ({ status })
 // required for a Check In/Out Check In/Out. Any Admin/Superadmin granted the
 // "approvals" module can see the queue and act at their own step; only a
 // Superadmin can edit the chain itself.
+// ---- Queue: request type names, how long each has waited, Group by / Sort ----
+export const requestTypeLabel = (r: ApprovalRequest): string =>
+  r.source_type === 'attendance'
+    ? 'Remote Attendance'
+    : r.source_type === 'bill_claim'
+      ? 'Bill Claim'
+      : r.source_type === 'attendance_correction'
+        ? 'Attendance Correction'
+        : r.source_type === 'leave_application'
+          ? 'Leave Application'
+          : r.source_type === 'asset_requisition'
+            ? 'Asset Requisition'
+            : r.source_type === 'vehicle_requisition'
+              ? 'Vehicle Requisition'
+              : r.source_type === 'mobile_limit_request'
+                ? 'Mobile Limit Request'
+                : r.source_type === 'advance_request'
+                  ? 'Loan / Advance Request'
+                  : 'Check In/Out';
+const daysWaiting = (r: ApprovalRequest) => Math.max(0, Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000));
+type AgeBand = 'old' | 'mid' | 'today';
+const ageBand = (r: ApprovalRequest): AgeBand => (daysWaiting(r) >= 3 ? 'old' : daysWaiting(r) >= 1 ? 'mid' : 'today');
+const AGE_LABEL: Record<AgeBand, string> = { old: 'Waiting 3+ days', mid: '1–2 days', today: 'Today' };
+const AGE_ORDER = ['Waiting 3+ days', '1–2 days', 'Today', 'Decided'];
+const AGE_CLS: Record<AgeBand, string> = { old: 'text-rose-600', mid: 'text-amber-600', today: 'text-emerald-600' };
+const ageText = (r: ApprovalRequest) => (daysWaiting(r) === 0 ? 'Today' : daysWaiting(r) === 1 ? '1 day' : `${daysWaiting(r)} days`);
+type QueueGroup = 'type' | 'who' | 'dept' | 'waiting' | 'age' | 'none';
+type QueueSort = 'old' | 'new' | 'amount' | 'name';
+const SORTERS: Record<QueueSort, (a: ApprovalRequest, b: ApprovalRequest) => number> = {
+  old: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  new: (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  amount: (a, b) => (Number(b.source_amount) || 0) - (Number(a.source_amount) || 0),
+  name: (a, b) => String(a.requested_by_name || '').localeCompare(String(b.requested_by_name || ''))
+};
+const QUEUE_PREFS = 'chr_approval_queue_view';
+const readPrefs = (): { groupBy?: QueueGroup; sortBy?: QueueSort; details?: boolean } => {
+  try {
+    return JSON.parse(localStorage.getItem(QUEUE_PREFS) || '{}') || {};
+  } catch {
+    return {};
+  }
+};
+
 export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, users }) => {
   const isSuperAdmin = user.role === 'superadmin';
 
@@ -77,6 +120,20 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const [statusFilter, setStatusFilter] = useState<'' | 'pending' | 'approved' | 'rejected'>('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [actingId, setActingId] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+  const [types, setTypes] = useState<string[]>([]);
+  const [groupBy, setGroupBy] = useState<QueueGroup>(() => readPrefs().groupBy || 'type');
+  const [sortBy, setSortBy] = useState<QueueSort>(() => readPrefs().sortBy || 'old');
+  // Each request's details card; folded by default so a long list scans.
+  const [showDetails, setShowDetails] = useState<boolean>(() => !!readPrefs().details);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUEUE_PREFS, JSON.stringify({ groupBy, sortBy, details: showDetails }));
+    } catch {
+      /* private window — the choice just isn't kept */
+    }
+  }, [groupBy, sortBy, showDetails]);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   // Only relevant for a 'bill_claim' request on its LAST step — which existing
   // Conveyance Bill (for that same User) to attach it to on Approve. Left blank
@@ -259,112 +316,96 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
     }
   };
 
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-blue-600" /> Approval Workflow
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              The Global Chain below reviews Remote Attendance Check In / Check Out — each one is recorded
-              right away, this is a non-blocking review trail on top of that. Bill Claim, Leave,
-              Timesheet, Asset and Vehicle requests follow their own Templates (Templates tab); they're
-              listed here too under "All requests".
-            </p>
-          </div>
-          {isSuperAdmin && (
-            <button
-              type="button"
-              onClick={openChainModal}
-              className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors whitespace-nowrap"
-            >
-              <Settings2 className="w-3.5 h-3.5" /> Manage Chain
-            </button>
-          )}
-        </div>
+  // ---- Search, type chips, Group by and Sort (the choices stay on this computer) ----
+  const typeOf = (r: ApprovalRequest) => requestTypeLabel(r);
+  const typeCounts = new Map<string, number>();
+  requests.forEach((r) => typeCounts.set(typeOf(r), (typeCounts.get(typeOf(r)) || 0) + 1));
+  const needle = search.trim().toLowerCase();
+  const shown = requests
+    .filter((r) => !types.length || types.includes(typeOf(r)))
+    .filter(
+      (r) =>
+        !needle ||
+        [typeOf(r), r.source_label, r.source_category, r.requested_by_name, r.requested_by_code, r.requested_by_designation, r.requested_by_department, r.current_approver_name]
+          .join(' ')
+          .toLowerCase()
+          .includes(needle)
+    )
+    .sort(SORTERS[sortBy]);
+  const groupKey = (r: ApprovalRequest): string =>
+    groupBy === 'type'
+      ? typeOf(r)
+      : groupBy === 'who'
+        ? `${r.requested_by_name || `User #${r.requested_by}`}${r.requested_by_code ? ` · ${r.requested_by_code}` : ''}`
+        : groupBy === 'dept'
+          ? r.requested_by_department || 'No department'
+          : groupBy === 'waiting'
+            ? r.status === 'pending'
+              ? r.current_approver_name || 'No approver set'
+              : 'Decided'
+            : r.status !== 'pending'
+              ? 'Decided'
+              : AGE_LABEL[ageBand(r)];
+  const groupMap = new Map<string, ApprovalRequest[]>();
+  shown.forEach((r) => groupMap.set(groupKey(r), [...(groupMap.get(groupKey(r)) || []), r]));
+  const groups = [...groupMap.entries()].sort((a, b) =>
+    groupBy === 'age'
+      ? AGE_ORDER.indexOf(a[0]) - AGE_ORDER.indexOf(b[0])
+      : Math.max(...b[1].map(daysWaiting)) - Math.max(...a[1].map(daysWaiting)) || a[0].localeCompare(b[0])
+  );
+  const toggleGroup = (k: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  // "Approve all" on a group: only the ones this account may decide and that
+  // need nothing else filled in (Bill Claim's last Layer — Bill / Approved
+  // Amount / voucher —, the Vehicle and Asset steps that assign or hand out).
+  const canQuickApprove = (r: ApprovalRequest) => {
+    if (r.status !== 'pending' || Number(r.awaiting_approver) === 1) return false;
+    if (!(isSuperAdmin || (r.current_approver_ids || []).includes(user.id))) return false;
+    if (r.conveyance_disburser_step) return false;
+    const last = Number(r.current_step) >= Number(r.total_steps);
+    if (r.source_type === 'bill_claim' && last) return false;
+    if ((r.source_type === 'vehicle_requisition' || r.source_type === 'asset_requisition') && last) return false;
+    return true;
+  };
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const approveAll = async (group: string, list: ApprovalRequest[]) => {
+    if (!(await confirmDialog(`Approve all ${list.length} in "${group}"?\n\nEach one moves to its next Layer (or is finished) exactly as if you approved it on its own.`))) return;
+    setBulkBusy(true);
+    setMessage(null);
+    let done = 0;
+    const failed: string[] = [];
+    for (const r of list) {
+      try {
+        const res = await fetch(apiUrl(`/api/approvals/${r.id}/act`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'approved', claim_version: r.source_type === 'bill_claim' ? r.claim_version : undefined })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'failed');
+        done++;
+      } catch (err: any) {
+        failed.push(`${r.requested_by_name || 'Request'} (${typeOf(r)}): ${err.message}`);
+      }
+    }
+    setBulkBusy(false);
+    setMessage(
+      failed.length
+        ? { type: 'error', text: `Approved ${done}. Not approved ${failed.length} — ${failed.slice(0, 3).join('; ')}${failed.length > 3 ? '…' : ''}` }
+        : { type: 'success', text: `Approved ${done}.` }
+    );
+    fetchRequests();
+  };
 
-        {/* Chain preview */}
-        <div className="flex flex-wrap items-center gap-2">
-          {!chainLoaded ? null : chain.length === 0 ? (
-            <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              No approval chain configured yet — check-ins/outs are being recorded but not routed to anyone.
-              {isSuperAdmin ? ' Tap "Manage Chain" to set one up.' : ' Ask your Superadmin to set one up.'}
-            </div>
-          ) : (
-            chain.map((step, idx) => (
-              <React.Fragment key={step.id}>
-                <div className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                  <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
-                    {step.step_order}
-                  </span>
-                  {step.user_name || `User #${step.user_id}`}
-                </div>
-                {idx < chain.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-slate-300" />}
-              </React.Fragment>
-            ))
-          )}
-        </div>
-
-        {/* Queue filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex bg-slate-100 rounded-xl p-1">
-            <button
-              type="button"
-              onClick={() => setView('mine')}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
-                view === 'mine' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-              }`}
-            >
-              Waiting on me
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('all')}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
-                view === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-              }`}
-            >
-              All requests
-            </button>
-          </div>
-          {view === 'all' && (
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-            </select>
-          )}
-        </div>
-
-        {message && (
-          <div
-            className={`flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
-              message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-            }`}
-          >
-            {message.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
-            <span>{message.text}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="overflow-x-auto">
-        {loading ? (
-          <LoadingBlock />
-        ) : requests.length === 0 ? (
-          <div className="p-10 text-center text-sm text-slate-400">
-            {view === 'mine' ? "Nothing is waiting on you right now." : 'No approval requests yet.'}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
+  const tableOf = (list: ApprovalRequest[]) => {
+    const hasClaims = list.some((r) => r.source_type === 'bill_claim');
+    return (
+      <table className="w-full text-sm">
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Event</th>
@@ -383,7 +424,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {requests.map((r) => {
+              {list.map((r) => {
                 const canAct = r.status === 'pending' && (isSuperAdmin || (r.current_approver_ids || []).includes(user.id));
                 return (
                   <tr key={r.id} className="hover:bg-slate-50/60 align-top">
@@ -419,7 +460,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       {r.source_type === 'bill_claim' && r.source_category && (
                         <div className="text-xs text-slate-500">{r.source_category}</div>
                       )}
-                      <RequestDetailsInline token={token} type={r.source_type} id={r.source_id} className="min-w-[18rem]" />
+                      {showDetails && <RequestDetailsInline token={token} type={r.source_type} id={r.source_id} className="min-w-[18rem]" />}
                     </td>
                     {hasClaims && (() => {
                       // Only a 'bill_claim' request finishing its LAST step is
@@ -472,7 +513,12 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         </>
                       );
                     })()}
-                    <td className="px-4 py-3 text-slate-700">{r.requested_by_name || `User #${r.requested_by}`}</td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {r.requested_by_name || `User #${r.requested_by}`}
+                      {(r.requested_by_code || r.requested_by_department) && (
+                        <div className="text-[11px] text-slate-500">{[r.requested_by_code, r.requested_by_designation, r.requested_by_department].filter(Boolean).join(' · ')}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       Step {r.current_step} of {r.total_steps}
                       {r.status === 'pending' && Number(r.awaiting_approver) === 1 && (
@@ -496,7 +542,10 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                     <td className="px-4 py-3">
                       <StatusPill status={r.status} />
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{formatDate(r.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                      {formatDate(r.created_at)}
+                      {r.status === 'pending' && <div className={`font-semibold ${AGE_CLS[ageBand(r)]}`}>{ageText(r)}</div>}
+                    </td>
                     <td className="px-4 py-3">
                       {canAct ? (
                         <div className="flex flex-col items-end gap-1.5">
@@ -603,6 +652,215 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               })}
             </tbody>
           </table>
+    );
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-blue-600" /> Approval Workflow
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              The Global Chain below reviews Remote Attendance Check In / Check Out — each one is recorded
+              right away, this is a non-blocking review trail on top of that. Bill Claim, Leave,
+              Timesheet, Asset and Vehicle requests follow their own Templates (Templates tab); they're
+              listed here too under "All requests".
+            </p>
+          </div>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={openChainModal}
+              className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors whitespace-nowrap"
+            >
+              <Settings2 className="w-3.5 h-3.5" /> Manage Chain
+            </button>
+          )}
+        </div>
+
+        {/* Chain preview */}
+        <div className="flex flex-wrap items-center gap-2">
+          {!chainLoaded ? null : chain.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              No approval chain configured yet — check-ins/outs are being recorded but not routed to anyone.
+              {isSuperAdmin ? ' Tap "Manage Chain" to set one up.' : ' Ask your Superadmin to set one up.'}
+            </div>
+          ) : (
+            chain.map((step, idx) => (
+              <React.Fragment key={step.id}>
+                <div className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {step.step_order}
+                  </span>
+                  {step.user_name || `User #${step.user_id}`}
+                </div>
+                {idx < chain.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-slate-300" />}
+              </React.Fragment>
+            ))
+          )}
+        </div>
+
+        {/* Queue filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex bg-slate-100 rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setView('mine')}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                view === 'mine' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              Waiting on me
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('all')}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                view === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              All requests
+            </button>
+          </div>
+          {view === 'all' && (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            >
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          )}
+        </div>
+
+        {/* Search, request-type chips, Group by and Sort */}
+        <div className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 flex-1 min-w-[220px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+              <Search className="w-3.5 h-3.5 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, Employee ID, department or details"
+                aria-label="Search requests"
+                className="bg-transparent text-xs outline-none flex-1 min-w-0"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              Group by
+              <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as QueueGroup)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                <option value="type">Request type</option>
+                <option value="who">Requested by</option>
+                <option value="dept">Department</option>
+                <option value="waiting">Waiting on</option>
+                <option value="age">How long waiting</option>
+                <option value="none">No grouping</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              Sort
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as QueueSort)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                <option value="old">Longest waiting first</option>
+                <option value="new">Newest first</option>
+                <option value="amount">Amount — high to low</option>
+                <option value="name">Name A–Z</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowDetails((v) => !v)}
+              aria-pressed={showDetails}
+              className="text-xs font-semibold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            >
+              {showDetails ? 'Hide details' : 'Show details'}
+            </button>
+          </div>
+          {typeCounts.size > 1 && (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Request type">
+              {[['', requests.length] as [string, number], ...[...typeCounts.entries()].sort((a, b) => b[1] - a[1])].map(([t, n]) => {
+                const on = t ? types.includes(t) : types.length === 0;
+                return (
+                  <button
+                    key={t || 'all'}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setTypes((prev) => (!t ? [] : prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]))}
+                    className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
+                      on ? 'bg-[color:var(--g-accent,#ea580c)] border-[color:var(--g-accent,#ea580c)] text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {t || 'All'}
+                    <span className={`text-[10px] px-1.5 rounded-full ${on ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {message && (
+          <div
+            className={`flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
+              message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            {message.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span>{message.text}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        {loading ? (
+          <LoadingBlock />
+        ) : requests.length === 0 ? (
+          <div className="p-10 text-center text-sm text-slate-400">
+            {view === 'mine' ? "Nothing is waiting on you right now." : 'No approval requests yet.'}
+          </div>
+        ) : (
+          <div>
+            {groupBy === 'none'
+              ? tableOf(shown)
+              : groups.map(([k, list]) => {
+                  const open = !collapsed.has(k);
+                  const old = list.filter((r) => r.status === 'pending' && ageBand(r) === 'old').length;
+                  const money = list.reduce((t, r) => t + (r.source_type === 'bill_claim' || r.source_type === 'advance_request' ? Number(r.source_amount) || 0 : 0), 0);
+                  const quick = list.filter(canQuickApprove);
+                  return (
+                    <div key={k} className="border-t border-slate-200 first:border-t-0">
+                      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 bg-white hover:bg-slate-50">
+                        <button type="button" onClick={() => toggleGroup(k)} aria-expanded={open} className="flex items-center gap-2 text-left min-w-0 flex-1">
+                          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? '' : '-rotate-90'}`} />
+                          <span className="text-sm font-bold text-slate-900 truncate">{k}</span>
+                          <span className="text-xs text-slate-500">{list.length}</span>
+                        </button>
+                        {old > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">{old} waiting 3+ days</span>}
+                        {money > 0 && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">৳{money.toLocaleString('en-US')}</span>}
+                        {quick.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={bulkBusy}
+                            onClick={() => void approveAll(k, quick)}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                            title="Approve the ones here that need nothing else filled in"
+                          >
+                            ✓ Approve all {quick.length}
+                          </button>
+                        )}
+                      </div>
+                      {open && tableOf(list)}
+                    </div>
+                  );
+                })}
+            {shown.length === 0 && <div className="p-10 text-center text-sm text-slate-400">Nothing matches this search or these filters.</div>}
+          </div>
         )}
       </div>
 

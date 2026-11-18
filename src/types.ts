@@ -680,6 +680,11 @@ export interface ApprovalTemplate {
   step_count?: number;
   skip_auto_supervisor?: boolean | number;
   steps?: ApprovalTemplateStep[];
+  // GET /api/approval-templates?with=chain (the Templates list).
+  uses_supervisor?: boolean;
+  chain?: { step_order: number; label: string | null; approver_type: string; approvers: string[] }[];
+  employee_count?: number;
+  updated_at?: string;
 }
 
 export interface ApprovalRequest {
@@ -689,6 +694,10 @@ export interface ApprovalRequest {
   awaiting_approver?: number | null;
   source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
   event_type: 'check_in' | 'check_out' | 'submit';
+  // GET /api/approvals: who asked, on the Employee record.
+  requested_by_code?: string | null;
+  requested_by_designation?: string | null;
+  requested_by_department?: string | null;
   source_id: number;
   requested_by: number;
   requested_by_name?: string | null;

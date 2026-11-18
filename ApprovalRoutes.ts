@@ -478,7 +478,26 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           return true;
         });
 
-      res.json(await attachClaimReview(enriched.slice(0, 1000)));
+      // Who asked, on the Employee record — for the Queue's search and its
+      // Group by Department (ApprovalManager.tsx).
+      const shown = enriched.slice(0, 1000);
+      const askers = [...new Set<number>(shown.map((r: any) => Number(r.requested_by)).filter((n: number) => n > 0))];
+      const empOf = new Map<number, any>();
+      if (askers.length) {
+        const emps: any[] =
+          (await queryDB(
+            `SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${askers.map(() => "?").join(",")}) ORDER BY is_active ASC`,
+            askers
+          ).catch(() => [])) || [];
+        for (const e of emps) empOf.set(Number(e.user_id), e);
+      }
+      for (const r of shown) {
+        const e = empOf.get(Number(r.requested_by));
+        r.requested_by_code = e?.employee_id || null;
+        r.requested_by_designation = e?.designation || null;
+        r.requested_by_department = e?.department || null;
+      }
+      res.json(await attachClaimReview(shown));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1685,6 +1704,43 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       );
       const stepCounts = await queryDB("SELECT template_id, COUNT(*) AS cnt FROM approval_template_steps GROUP BY template_id");
       const countByTemplate = new Map<number, number>(stepCounts.map((r: any) => [Number(r.template_id), Number(r.cnt)]));
+      // ?with=chain (the Templates list): each template's Layers with who
+      // approves, and how many accounts it covers — its own assignments, plus
+      // everyone with no pick for that type when it is the default.
+      if (req.query?.with === "chain") {
+        const ids = templates.map((t: any) => Number(t.id));
+        const steps: any[] = ids.length
+          ? (await queryDB(`SELECT * FROM approval_template_steps WHERE template_id IN (${ids.map(() => "?").join(",")}) ORDER BY step_order ASC`, ids)) || []
+          : [];
+        const approvers: any[] = steps.length
+          ? (await queryDB(
+              `SELECT sa.step_id, u.name AS user_name FROM approval_template_step_approvers sa LEFT JOIN users u ON u.id = sa.user_id WHERE sa.step_id IN (${steps.map(() => "?").join(",")}) ORDER BY sa.id ASC`,
+              steps.map((x) => x.id)
+            )) || []
+          : [];
+        const namesByStep = new Map<number, string[]>();
+        for (const a of approvers) namesByStep.set(Number(a.step_id), [...(namesByStep.get(Number(a.step_id)) || []), a.user_name || "Unknown"]);
+        const assigned: any[] = (await queryDB("SELECT request_type, template_id, COUNT(*) AS cnt FROM employee_template_assignments GROUP BY request_type, template_id")) || [];
+        const accounts = Number(((await queryDB("SELECT COUNT(*) AS n FROM users")) || [])[0]?.n || 0);
+        const assignedOf = (id: number) => Number(assigned.find((r) => Number(r.template_id) === id)?.cnt || 0);
+        const pickedFor = (type: string) => assigned.filter((r) => r.request_type === type).reduce((n, r) => n + Number(r.cnt), 0);
+        return res.json(
+          templates.map((t: any) => {
+            const own = steps.filter((x) => Number(x.template_id) === Number(t.id));
+            const isDefault = !!Number(t.is_default);
+            return {
+              ...t,
+              is_default: isDefault,
+              is_active: !!Number(t.is_active),
+              step_count: own.length,
+              // Layer 1 is the employee's own Supervisor unless the template says otherwise.
+              uses_supervisor: !Number(t.skip_auto_supervisor),
+              chain: own.map((x) => ({ step_order: Number(x.step_order), label: x.label || null, approver_type: x.approver_type, approvers: namesByStep.get(Number(x.id)) || [] })),
+              employee_count: assignedOf(Number(t.id)) + (isDefault && Number(t.is_active) ? Math.max(0, accounts - pickedFor(t.request_type)) : 0)
+            };
+          })
+        );
+      }
       res.json(
         templates.map((t: any) => ({
           ...t,
