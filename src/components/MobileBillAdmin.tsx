@@ -14,6 +14,7 @@
 //   Reports   — MobileBillReports.tsx.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -173,6 +174,9 @@ interface BillRow {
 }
 
 const BillsTab: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky filter bar's height, so the column titles stick
+  // right under it (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(110);
   const [month, setMonth] = useState(thisMonth());
   const [rows, setRows] = useState<BillRow[] | null>(null);
   const [operator, setOperator] = useState('');
@@ -292,6 +296,8 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
 
   return (
     <div className="space-y-3">
+      {/* Desktop: filters and buttons stay under the header while the list scrolls. */}
+      <div ref={barRef} className="space-y-3 md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
       <div className="flex flex-wrap items-end gap-2">
         <div>
           <label className={labelCls}>Bill month</label>
@@ -338,6 +344,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
           )
         )}
       </div>
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <Card label="Numbers billed" value={rows ? `${billed.length} / ${shown.length}` : '–'} />
@@ -351,9 +358,9 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
       {!rows ? (
         <LoadingBlock />
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto xl:overflow-clip">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-slate-50 text-slate-500 sticky z-10 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
               <tr>
                 {['Employee', 'Department', 'Duty location', 'Mobile', 'Limit', 'Bill', 'Company pays', 'Excess', ''].map((h, i) => (
                   <th key={h + i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i >= 4 && i <= 7 ? 'text-right' : 'text-left'}`}>
@@ -713,6 +720,9 @@ interface Meta {
 }
 
 const SimsTab: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky filter bar's height, so the column titles stick
+  // right under it (lib/useElementHeight.ts).
+  const [sbarRef, sbarH] = useElementHeight(110);
   const [sims, setSims] = useState<MbSim[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [q, setQ] = useState('');
@@ -762,7 +772,8 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
         <Card label="Not given to anyone" value={sims ? String(active.filter((s) => !s.employee_id).length) : '–'} cls="text-amber-600" onClick={() => setStatus('unassigned')} on={status === 'unassigned'} hint="Show only the SIMs in stock (not given to anyone)" />
         <Card label="Total monthly limit" value={sims ? tk(active.reduce((a, s) => a + s.limit_amount, 0)) : '–'} cls="text-teal-700" />
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      {/* Desktop: search and filters stay under the header while the list scrolls. */}
+      <div ref={sbarRef} className="flex flex-wrap items-end gap-2 md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
         <div className="flex-1 min-w-[180px] relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input className={`${inputCls} pl-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, number, Emp. ID…" />
@@ -817,9 +828,9 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       {!sims ? (
         <LoadingBlock />
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto xl:overflow-clip">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-slate-50 text-slate-500 sticky z-10 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + sbarH }}>
               <tr>
                 {['Mobile', 'Employee', 'Department / Work station', 'Duty location', 'Limit', 'Last bill', 'Action'].map((h, i) => (
                   <th key={i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i >= 4 ? 'text-right' : 'text-left'}`}>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import jsPDF from '../lib/jspdf';
 import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import autoTable from 'jspdf-autotable';
@@ -228,6 +229,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     }
   };
   const [loading, setLoading] = useState(false);
+  // The sticky search bar's height (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(160);
   const [loadError, setLoadError] = useState('');
   // ---- Filters (all in the toolbar; the server does the filtering) ----
   const [userFilter, setUserFilter] = useState('');
@@ -647,8 +650,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
   return (
     <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+      {/* overflow-clip, not hidden: still rounds the corners but isn't a
+          scroll box, so the search bar and column titles can stick. */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+        <div className="px-6 pt-6">
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Banknote className="w-4 h-4 text-emerald-600" /> Bill Disbursement
@@ -658,7 +663,11 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
               Pending bills to disburse them together.
             </p>
           </div>
+        </div>
 
+        {/* Desktop: search & filters stay under the header while the list
+            scrolls; the table's column titles stick right under them (barH). */}
+        <div ref={barRef} className="px-6 pt-4 pb-6 border-b border-slate-200 md:sticky md:top-16 md:z-20 md:bg-white">
           <div className="flex flex-col gap-3" data-testid="disb-toolbar">
             <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
               <div className="min-w-0 flex-1">
@@ -951,9 +960,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
             </div>
 
             {/* Desktop — full table. */}
-            <div className="hidden md:block overflow-x-auto">
+            <div className="hidden md:block overflow-x-auto xl:overflow-x-visible">
               <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                <thead className="sticky z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
                   <tr>
                     <th className="px-4 py-2.5 text-left w-8">
                       <button type="button" onClick={toggleAll} className="text-slate-400 hover:text-emerald-600" title="Select all pending">

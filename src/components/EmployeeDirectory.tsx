@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useElementHeight } from '../lib/useElementHeight';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
@@ -461,6 +462,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
   // search bar has scrolled out from under the sticky header. Navbar reads
   // both through the useHeaderSearchState() subscription in headerSearch.ts.
   const searchBarRef = useRef<HTMLDivElement>(null);
+  // Desktop: the sticky search bar's height, so the list's column titles
+  // stick right under it (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight();
   useEffect(() => {
     // We stay mounted (just hidden) while some other mobile section is
     // showing, so only dock our search box into the header while we're
@@ -623,7 +627,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
           </div>
         )}
 
-        <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
+        {/* overflow-clip (not hidden): still trims to the rounded corners, but
+            isn't a scroll box, so the search bar below can stick to the page. */}
+        <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-clip">
           {/* Header */}
           <div className="p-6 border-b border-slate-200 hidden sm:flex sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-start gap-3">
@@ -664,7 +670,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
           {/* Search & Control Bar */}
           {/* Phone: a white pill search box and a row of department chips,
               in the same white-card look as the employee cards below. */}
-          <div className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
+          {/* Desktop: stays under the header while the list scrolls (phones dock
+              the search box into the header instead — headerSearch.ts). */}
+          <div ref={barRef} className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3 sm:sticky sm:top-16 sm:z-20 sm:bg-white">
             <div className="relative flex-1" ref={searchBarRef}>
               <Search className="w-4 h-4 text-slate-400 absolute left-4 sm:left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -982,10 +990,12 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                 ))}
               </div>
             ) : (
-              <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="overflow-x-auto xl:overflow-x-visible -mx-4 sm:mx-0">
+                {/* Wide screens: no side-scroll box, so the column titles stick to
+                    the page right under the sticky search bar (barH). */}
                 <table className="w-full text-left border-collapse min-w-[720px]">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <thead className="sticky z-10 bg-white shadow-[inset_0_-1px_0_#e2e8f0]" style={{ top: 64 + barH }}>
+                    <tr className="text-[11px] uppercase tracking-wider text-slate-500">
                       <th className="px-3 py-2 font-semibold">Name &amp; ID</th>
                       <th className="px-3 py-2 font-semibold">Designation</th>
                       {multiCompany && <th className="px-3 py-2 font-semibold">Company</th>}

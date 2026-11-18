@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
@@ -344,6 +345,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   if (returnView.current === undefined) returnView.current = takeReturnView();
   const rv = returnView.current;
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // The sticky filter bar's height (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(120);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState(rv?.search ?? '');
@@ -1389,6 +1392,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       </div>
 
       {view === 'directory' && (
+        // Desktop: search & filters stay under the header while the list
+        // scrolls; the column titles stick right under them (barH).
+        <div ref={barRef} className="md:sticky md:top-16 md:z-20">
         <EmployeeFilterBar
           search={search}
           onSearch={setSearch}
@@ -1408,6 +1414,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             setFilters({});
           }}
         />
+        </div>
       )}
 
       {unlinkedOpen && <UnlinkedLoginsPopup token={token} onClose={() => setUnlinkedOpen(false)} onLinked={() => void fetchEmployees()} />}
@@ -1424,20 +1431,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          {/* Desktop: scrolls inside its own box so the header row stays put (sticky th); phones show cards, no header. */}
-          <div className="overflow-x-auto md:overflow-auto md:overscroll-contain md:max-h-[max(20rem,calc(100dvh-16rem))]">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          {/* Wide screens: no side-scroll box, so the column titles stick to the
+              page right under the sticky filter bar. Phones show cards. */}
+          <div className="overflow-x-auto xl:overflow-x-visible">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50">
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
-                  <th className="sticky top-0 right-0 z-[3] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0,-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
+                  <th style={{ top: 64 + barH }} className="sticky right-0 z-[3] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0,-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
