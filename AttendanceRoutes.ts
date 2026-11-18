@@ -88,10 +88,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // Which project IDs the calling user may act on for Remote Attendance on
   // `ymd` (today unless given): the account's own check-in list when an Admin
   // set one (Module Access -> Remote Attendance, user_attendance_projects —
-  // only the Projects whose From/To dates cover the day; see
-  // AttendanceProjects.ts), otherwise every project for an Admin/Superadmin
-  // and only the ones explicitly granted for a plain User (mirrors GET
-  // /api/projects's own visibility rule). A Superadmin is never limited.
+  // only the Projects whose From/To dates cover the day, or Their Branch's
+  // Project; see AttendanceProjects.ts), otherwise ("Any project") every
+  // project of the company. A Superadmin is never limited.
   async function getAllowedProjectIds(userId: number, role: string, ymd: string = todayInDhaka()): Promise<Set<number> | null> {
     // A relief guard duty (Duty Roster -> Guard Posts) running now opens its
     // post's Project for check-in / out — from 30 min before the shift to 30
@@ -102,11 +101,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       for (const id of relief) listed.add(id);
       return listed;
     }
-    if (role === "admin" || role === "superadmin") return null; // null = no restriction
-    const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [userId]);
-    const set = new Set<number>(perms.map((p: any) => Number(p.project_id)));
-    for (const id of relief) set.add(id);
-    return set;
+    // "Any project" (no list, not by Branch): any of the company's projects,
+    // for a User too — not just the ones they have Budget / MPR access to.
+    return null; // null = no restriction
   }
 
   // Loads the Project and validates it has a location + radius set, returning a
@@ -202,9 +199,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
   // The Projects this account may check in at — the Dashboard's Remote
   // Attendance card. Same rule check-in itself enforces (getAllowedProjectIds):
-  // the "Allowed project for check-in" an Admin pinned, else the account's
-  // Project access. Separate from GET /api/projects (Budget / Jobs / MPR), so
-  // a pinned check-in Project shows even with no Project access at all.
+  // the "Allowed project for check-in" an Admin pinned (or Their Branch's),
+  // else every project ("Any project"). Separate from GET /api/projects
+  // (Budget / Jobs / MPR), so it needs no Project access at all.
   app.get("/api/attendance/my-projects", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
