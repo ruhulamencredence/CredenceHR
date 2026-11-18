@@ -656,7 +656,11 @@ flowchart TD
   R -- না --> P{"ফোনের app কতটা পুরনো?"}
   P -- versionCode 1 (এই ব্যবস্থার আগের APK) --> L["Update popup: link Copy / Share<br/>→ Chrome-এ খুলে install"]
   P -- নতুন APK --> U["Update popup: Update now<br/>→ ফোনের browser নামায় → Install"]
+  P -- AppUpdater-সহ APK (১৮ নভেম্বর থেকে) --> I["Update now → app-এর ভেতরেই download (%)<br/>→ প্রথমবার: Allow from this source<br/>→ Android-এর Install পর্দা → Update"]
+  I -- download ব্যর্থ --> F["Try again / Download in browser"]
 ```
+
+- **App-এর ভেতর থেকেই update (১৮ নভেম্বর, নতুন APK):** `AppUpdaterPlugin.java` (`src/lib/appUpdater.ts`) নতুন APK app-এর cache-এ নামায়, popup-এ কত % আর কত MB দেখায় (Cancel চাপা যায়, তখন Later থাকে না)। নামানো শেষে Android "Install unknown apps" অনুমতি না দেওয়া থাকলে popup "Allow and install" দেখায়: Settings-এর সেই পাতা খোলে, "Allow from this source" চালু করে ফিরলে সাথে সাথে Android-এর নিজের "Do you want to update this app?" পর্দা খোলে; একবার চালু করলে পরের update-এ আর চায় না। Android নিজে সবসময় একবার Update চাপতে বলে — Play Store ছাড়া কোনো app নিঃশব্দে update হয় না। নতুন version-এ app চালু হলে উপরে একবার "CredenceHR updated to …" দেখায়। নামানো ব্যর্থ হলে কারণসহ "Try again" আর "Download in browser" (আগের পথ)। যে APK-তে এই plugin নেই সেগুলো আগের মতোই browser-এ পাঠায়, তাই সবাইকে শেষবার একবার browser দিয়ে update করতে হবে।
 
 - প্রতিটা build-এর versionCode আগেরটার চেয়ে বড় (২০২৬-এর ১ জানুয়ারি থেকে কত মিনিট, `android/app/build.gradle`)। GitHub আর Android Studio দুই জায়গাতেই এক নিয়ম।
 - পর্দাগুলো server থেকে আসে, তাই এই popup-এর আগে বানানো পুরনো APK-তেও popup দেখায় (`src/components/AppUpdatePrompt.tsx`)। শুধু এক চাপে নামানোটা নতুন APK-তে হয় (`MainActivity.java`-র DownloadListener)।
