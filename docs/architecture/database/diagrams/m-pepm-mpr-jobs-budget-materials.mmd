@@ -64,6 +64,14 @@ erDiagram
     int budget_item_id FK
     date entry_date
   }
+  entry_edit_attempts {
+    int id PK
+    int entry_id FK
+    int user_id FK
+    text fields_json
+    varchar reason
+    int status_code
+  }
   entry_edit_history {
     int id PK
     int entry_id FK
@@ -187,6 +195,8 @@ erDiagram
   jobs ||--o{ entries : "job_id"
   mpr_numbers ||--o{ entries : "mpr_id"
   projects ||--o{ entries : "project_id"
+  entries ||..o{ entry_edit_attempts : "entry_id"
+  users ||..o{ entry_edit_attempts : "user_id"
   users ||--o{ entry_edit_history : "edited_by"
   entries ||--o{ entry_edit_history : "entry_id"
   entries ||..o{ entry_permanent_delete_log : "entry_id"
@@ -195,18 +205,6 @@ erDiagram
   jobs ||--o{ job_submissions : "job_id"
   users ||--o{ job_submissions : "user_id"
   budgets ||..o{ job_submissions : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"
   entries ||..o{ mpr_dispatches : "entry_id"

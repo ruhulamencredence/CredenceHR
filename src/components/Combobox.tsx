@@ -27,6 +27,13 @@ import { usableHeight } from '../lib/navRoom';
 
 const SHOW_MAX = 200;
 
+// The on-screen keyboard's height while it is up (0 otherwise) — the --kb
+// that lib/keyboardInsetVar.ts puts on <html>.
+const keyboardPx = (): number => {
+  if (!document.documentElement.classList.contains('kb-open')) return 0;
+  return parseFloat(document.documentElement.style.getPropertyValue('--kb')) || 0;
+};
+
 export interface ComboOption {
   value: string;
   label: string;
@@ -60,22 +67,41 @@ interface ListProps {
 }
 
 function ComboList({ anchor, options, active, setActive, selected, onPick, empty, label, listRef }: ListProps) {
-  const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean; max: number } | null>(null);
   useLayoutEffect(() => {
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const below = usableHeight() - r.bottom;
-      const up = below < 240 && r.top > below;
+      // The bottom of what can be seen: above the phone's navigation bar AND
+      // above the on-screen keyboard (--kb, set by lib/keyboardInsetVar.ts).
+      // In the app the keyboard doesn't shrink window.innerHeight, so without
+      // this the list opened below the field — straight under the keyboard.
+      const bottom = Math.min(usableHeight(), window.innerHeight - keyboardPx());
+      const below = bottom - r.bottom - 12;
+      const above = r.top - 12;
+      const up = below < 240 && above > below;
       const width = Math.min(Math.max(r.width, 180), window.innerWidth - 16);
-      setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), top: up ? r.top : r.bottom, width, up });
+      const max = Math.max(96, Math.min(240, up ? above : below));
+      setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), top: up ? r.top : r.bottom, width, up, max });
     };
     place();
+    // The keyboard slides up (and the popup scrolls the field into view)
+    // after the list has opened — place it again whenever that happens.
+    const vv = window.visualViewport;
+    const kbWatch = new MutationObserver(place);
+    kbWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    const later = [150, 400, 700].map((ms) => window.setTimeout(place, ms));
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
+    vv?.addEventListener('resize', place);
+    vv?.addEventListener('scroll', place);
     return () => {
+      kbWatch.disconnect();
+      later.forEach((t) => window.clearTimeout(t));
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
+      vv?.removeEventListener('resize', place);
+      vv?.removeEventListener('scroll', place);
     };
   }, [anchor]);
   useEffect(() => {
@@ -87,8 +113,8 @@ function ComboList({ anchor, options, active, setActive, selected, onPick, empty
       ref={listRef}
       role="listbox"
       aria-label={`${label} options`}
-      className="fixed z-[2000] max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl py-1 text-left"
-      style={{ left: pos.left, width: pos.width, ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
+      className="fixed z-[2000] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl py-1 text-left"
+      style={{ left: pos.left, width: pos.width, maxHeight: pos.max, ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
     >
       {options.length === 0 ? (
         <div className="px-3 py-2 text-xs text-slate-500">{empty}</div>

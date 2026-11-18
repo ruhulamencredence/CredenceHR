@@ -176,5 +176,10 @@
          "Display over other apps" lets the call screen open while the phone
          is in use, not only as the notification at the top. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- "Update available" downloads the new APK inside the app and opens
+         Android's install screen for it (AppUpdaterPlugin.java). Android
+         still asks the person to confirm, and the first time to allow
+         "Install unknown apps" for CredenceHR. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

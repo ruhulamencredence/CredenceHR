@@ -136,6 +136,7 @@ public class MainActivity extends BridgeActivity {
         // App's own plugins have to be registered before the bridge starts.
         registerPlugin(LocationAccessPlugin.class);
         registerPlugin(CallAudioPlugin.class);
+        registerPlugin(AppUpdaterPlugin.class);
         super.onCreate(savedInstanceState);
         handleCallIntent(getIntent());
 

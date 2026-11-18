@@ -87,10 +87,6 @@ erDiagram
     int user_id PK,FK
     int room_id PK,FK
     datetime muted_until
-    tinyint archived
-    datetime pinned_at
-    tinyint marked_unread
-    tinyint favorite
   }
   chat_rooms {
     int id PK
@@ -238,6 +234,7 @@ erDiagram
     int id PK
     tinyint internal_delivery
     varchar internal_domains
+    varchar unconnected_route
   }
   mail_tasks {
     int id PK
