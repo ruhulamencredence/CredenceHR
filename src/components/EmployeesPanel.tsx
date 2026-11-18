@@ -1425,18 +1425,19 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Desktop: scrolls inside its own box so the header row stays put (sticky th); phones show cards, no header. */}
+          <div className="overflow-x-auto md:overflow-auto md:overscroll-contain md:max-h-[max(20rem,calc(100dvh-16rem))]">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
-                  <th className="sticky right-0 z-[1] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
+                <tr className="bg-slate-50">
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                  <th className="sticky top-0 z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
+                  <th className="sticky top-0 right-0 z-[3] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0,-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
