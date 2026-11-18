@@ -540,7 +540,7 @@ const FEEDBACK_LAYER_KEYS = ["read", "feedback_resolve"] as const;
 // only the parts it is given (ManagementDashboardRoutes.ts leaves the rest
 // out of the reply). "md_money" (Salary cost, Money out) is explicit-only;
 // an account with the module and no saved layers gets every other part.
-const MANAGEMENT_DASHBOARD_LAYER_KEYS = ["md_people", "md_attendance", "md_money", "md_approvals", "md_projects", "md_recruitment", "md_fleet"] as const;
+const MANAGEMENT_DASHBOARD_LAYER_KEYS = ["md_people", "md_attendance", "md_money", "md_approvals", "md_projects", "md_recruitment", "md_fleet", "md_calendar"] as const;
 const MANAGEMENT_DASHBOARD_DEFAULT_LAYERS = MANAGEMENT_DASHBOARD_LAYER_KEYS.filter((k) => k !== "md_money");
 // Recruitment (ATS, RecruitmentRoutes.ts): "read" = everything the module did
 // before; "email_candidates" = email a candidate about their interview (set,

@@ -213,7 +213,7 @@
 
 **প্রশ্ন: Management Dashboard দিলে কি সে বেতনের মোট খরচও দেখে?**
 
-উত্তর: না, যদি আলাদা করে "Money" layer টিক না দেওয়া হয়। Dashboard-এর প্রতিটা অংশ (People, Attendance, Money, Approvals, Projects & Targets, Recruitment, Fleet & assets) Module Access-এ আলাদা টিক; যেটা নেই server সেই সংখ্যা পাঠায়ই না, AI Assistant-ও বলে না। Money শুধু টিক দিলে।
+উত্তর: না, যদি আলাদা করে "Money" layer টিক না দেওয়া হয়। Dashboard-এর প্রতিটা অংশ (People, Attendance, Money, Approvals, Projects & Targets, Recruitment, Fleet & assets, Calendar) Module Access-এ আলাদা টিক; যেটা নেই server সেই সংখ্যা পাঠায়ই না, AI Assistant-ও বলে না। Money শুধু টিক দিলে।
 
 **প্রশ্ন: কর্মী কি নিজের Login ID (username) বদলে ফেলতে পারেন?**
 উত্তর: শুরুতে না — Profile-এ Change Username দেখায় না, আর server-ও (`PUT /api/profile/username`) ফিরিয়ে দেয়। Superadmin চাইলে Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করতে পারেন; তখন বর্তমান password দিয়ে বদলানো যায়। বন্ধ থাকলে দরকারে HR Users থেকে বদলে দেয় (Users module-এর Edit/Add layer লাগে)।

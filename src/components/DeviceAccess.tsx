@@ -10,6 +10,7 @@
 // out. The website is never limited.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import { Check, Plus, Search, Smartphone, Trash2, X } from 'lucide-react';
 import { useHrApi, Notice, btnGhost, btnPrimary } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -127,6 +128,8 @@ const DeviceAccessSkeleton: React.FC = () => {
 const when = (v: string | null) => (v ? String(v).replace('T', ' ').slice(0, 16) : '—');
 
 export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky search bar's height (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(48);
   const api = useHrApi(token);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [requests, setRequests] = useState<PhoneRequest[]>([]);
@@ -186,6 +189,9 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
       </div>
       <Notice msg={msg} onClose={() => setMsg(null)} />
 
+      {/* Desktop: the search stays under the header while the list scrolls;
+          the table's column titles stick right under it. */}
+      <div ref={barRef} className="md:sticky md:top-16 md:z-20 md:bg-white md:py-2">
       <div className="relative max-w-xs">
         <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
         <input
@@ -197,6 +203,7 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
           placeholder="Search name, ID, department, location"
           className="w-full pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
         />
+      </div>
       </div>
 
       {(waiting.length > 0 || done.length > 0) && (
@@ -278,9 +285,9 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
       )}
 
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200">
+      <div className="overflow-x-auto xl:overflow-clip rounded-xl border border-slate-200">
         <table className="w-full text-xs">
-          <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500">
+          <thead className="sticky z-10 bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
             <tr>
               <th className="px-3 py-2 font-semibold">Account</th>
               <th className="px-3 py-2 font-semibold">Phones</th>

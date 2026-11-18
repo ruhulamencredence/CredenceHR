@@ -1891,7 +1891,7 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
         ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
           <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
-          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">{!Capacitor.isNativePlatform() && <div className="hidden md:block"><ModulePath path={['Self Service', 'PEPM Operation', 'Material Receive']} /></div>}<MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
         ) : selfServiceView === 'myRequisitions' && canOpenSelfView('myRequisitions', user) ? (
           <MyRequisitions token={token} userName={user.name} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
