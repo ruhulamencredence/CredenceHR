@@ -152,6 +152,76 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
   // Live board (Admin Panel -> Employee Tracking): the SINGLE most recent ping
   // per user, plus how long ago it was — this is the "where is everyone right
   // now" map, not a history. Only users with at least one ping ever show up.
+  // ---- Nearest project & own branch (Employee Tracking) ----
+  // Straight-line distance in metres.
+  const metresBetween = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const R = 6371000;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const dLat = rad(lat2 - lat1);
+    const dLng = rad(lng2 - lng1);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+  };
+  // Inside a site's own radius = at it; a site with no radius counts this.
+  const DEFAULT_SITE_RADIUS_M = 200;
+  const NEAR_M = 1000;
+  // The company's projects and branches that have a location set.
+  const loadSites = async () => {
+    const located = (r: any) => r.location_lat != null && r.location_lng != null && Number.isFinite(Number(r.location_lat)) && Number.isFinite(Number(r.location_lng));
+    const site = (r: any, name: string) => ({
+      id: Number(r.id),
+      name,
+      lat: Number(r.location_lat),
+      lng: Number(r.location_lng),
+      radius_m: Number(r.location_radius) > 0 ? Number(r.location_radius) : DEFAULT_SITE_RADIUS_M,
+      label: r.location_label || null
+    });
+    const projects: any[] = (await queryDB("SELECT id, project_name, location_lat, location_lng, location_label, location_radius FROM projects", []).catch(() => [])) || [];
+    const branches: any[] = (await queryDB("SELECT id, branch_name, location_lat, location_lng, location_label, location_radius FROM branches", []).catch(() => [])) || [];
+    return {
+      projects: projects.filter(located).map((r) => site(r, r.project_name)),
+      unlocatedProjects: projects.filter((r) => !located(r)).map((r) => String(r.project_name)),
+      branches: new Map(branches.map((r) => [Number(r.id), located(r) ? site(r, r.branch_name) : { id: Number(r.id), name: r.branch_name, lat: null, lng: null, radius_m: null, label: null }]))
+    };
+  };
+  // Who each login is on the Employee record: ID, designation, department, branch.
+  const employeeByUser = async () => {
+    const rows: any[] =
+      (await queryDB("SELECT user_id, employee_id, designation, department, branch, branch_id FROM all_employees WHERE user_id IS NOT NULL", []).catch(() => [])) || [];
+    return new Map<number, any>(rows.map((r) => [Number(r.user_id), r]));
+  };
+  const placeFacts = (lat: number, lng: number, emp: any, sites: Awaited<ReturnType<typeof loadSites>>) => {
+    let nearest: any = null;
+    for (const p of sites.projects) {
+      const d = metresBetween(lat, lng, p.lat, p.lng);
+      if (!nearest || d < nearest.distance_m) nearest = { id: p.id, name: p.name, distance_m: d, radius_m: p.radius_m };
+    }
+    if (nearest) nearest.status = nearest.distance_m <= nearest.radius_m ? "at_site" : nearest.distance_m <= NEAR_M ? "near" : "away";
+    let branch: any = null;
+    const b = emp?.branch_id != null ? sites.branches.get(Number(emp.branch_id)) : null;
+    if (b) {
+      branch = { id: b.id, name: b.name, distance_m: null, radius_m: b.radius_m, status: "no_location" };
+      if (b.lat != null) {
+        branch.distance_m = metresBetween(lat, lng, b.lat, b.lng);
+        branch.status = branch.distance_m <= b.radius_m ? "at_branch" : "away";
+      }
+    } else if (emp?.branch) {
+      branch = { id: null, name: emp.branch, distance_m: null, radius_m: null, status: "no_location" };
+    }
+    return { nearest_project: nearest, own_branch: branch };
+  };
+
+  // The company's project sites for the map's "Projects" layer, and which
+  // projects have no location yet (left out of the nearest-project check).
+  app.get("/api/tracking/sites", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (_req: any, res) => {
+    try {
+      const sites = await loadSites();
+      res.json({ projects: sites.projects, unlocated_projects: sites.unlocatedProjects, near_m: NEAR_M, default_radius_m: DEFAULT_SITE_RADIUS_M });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/tracking/live", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const scope = await getTrackingScope(queryDB, req.user);
@@ -165,12 +235,22 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
           latestByUser.set(r.user_id, r);
         }
       }
+      // With the nearest company project and the distance from the person's
+      // own branch (Employee record), and who they are on that record.
+      const [sites, emps] = await Promise.all([loadSites(), employeeByUser()]);
       const result = Array.from(latestByUser.values())
-        .map((r: any) => ({
-          ...r,
-          user_name: userMap.get(r.user_id)?.name || null,
-          user_email: userMap.get(r.user_id)?.email || null
-        }))
+        .map((r: any) => {
+          const emp = emps.get(Number(r.user_id));
+          return {
+            ...r,
+            user_name: userMap.get(r.user_id)?.name || null,
+            user_email: userMap.get(r.user_id)?.email || null,
+            employee_code: emp?.employee_id || null,
+            designation: emp?.designation || null,
+            department: emp?.department || null,
+            ...placeFacts(Number(r.lat), Number(r.lng), emp, sites)
+          };
+        })
         .sort((a: any, b: any) => (a.recorded_at < b.recorded_at ? 1 : -1));
       res.json(result);
     } catch (err: any) {

@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone, CalendarClock } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone, CalendarClock, Landmark } from 'lucide-react';
 import { LocationPing } from '../types';
 import { cleanPath, ROUGH_LABEL, MAX_ACCURACY_M, RoughReason } from '../lib/trackPath';
 import { apiUrl } from '../lib/api';
@@ -26,6 +26,7 @@ import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { fetchPhoto, photoKnownMissing } from './UserAvatar';
+import { TrackingPlacesReport, StateChip, PROJECT_CHIP, PROJECT_LABEL, BRANCH_CHIP, BRANCH_LABEL, metres } from './TrackingPlacesReport';
 // "18-Aug-2026, 02:19 PM" — same dd-MMM-yyyy date as formatDate, plus a local
 // 12-hour time, for report rows where the exact moment (not just the day)
 // matters. Reads local (not UTC) components, same reasoning as
@@ -192,12 +193,13 @@ const MiniCard: React.FC<{
 );
 
 // A labelled count with a bar sized against the largest row.
-const BarRow: React.FC<{ label: string; count: number; max: number; color: string; onClick?: () => void; hint?: string }> = ({ label, count, max, color, onClick, hint }) => (
+const BarRow: React.FC<{ label: string; count: number; max: number; color: string; onClick?: () => void; hint?: string; detail?: React.ReactNode }> = ({ label, count, max, color, onClick, hint, detail }) => (
   <button type="button" onClick={onClick} disabled={!onClick} title={hint} className="w-full text-left px-4 py-2 hover:bg-slate-50 disabled:hover:bg-transparent disabled:cursor-default">
     <div className="flex items-center justify-between gap-2 text-xs">
       <span className="text-slate-700 truncate">{label}</span>
       <span className="font-semibold text-slate-900 tabular-nums">{count}</span>
     </div>
+    {detail && <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] text-slate-500">{detail}</div>}
     <div className="mt-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
       <div className="h-full rounded-full" style={{ width: `${max ? Math.max(4, (count / max) * 100) : 0}%`, background: color }} />
     </div>
@@ -301,6 +303,18 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const setAllCollapsed = (v: boolean) => saveCollapsed(Object.fromEntries(CARD_IDS.map((id) => [id, v])));
   const [openPhoneRow, setOpenPhoneRow] = useState<string | null>(null);
   const [placeNames, setPlaceNames] = useState<Record<string, string | null>>({});
+  // Nearest project & own branch: the company's project sites (map layer,
+  // and which projects have no location), and the Employees by place report.
+  const [sites, setSites] = useState<{ projects: { id: number; name: string; lat: number; lng: number; radius_m: number }[]; unlocated_projects: string[] } | null>(null);
+  const [showSites, setShowSites] = useState(false);
+  const [placesReportOpen, setPlacesReportOpen] = useState(false);
+  const sitesLayerRef = useRef<L.LayerGroup | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/tracking/sites'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSites({ projects: d.projects || [], unlocated_projects: d.unlocated_projects || [] }))
+      .catch(() => {});
+  }, [token]);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -641,6 +655,28 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 100);
   }, []);
+
+  // "Projects" on the map: each project with a location as its radius circle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    sitesLayerRef.current?.remove();
+    sitesLayerRef.current = null;
+    if (!showSites || !sites) return;
+    const g = L.layerGroup();
+    sites.projects.forEach((p) => {
+      L.circle([p.lat, p.lng], { radius: p.radius_m, color: '#ea580c', weight: 2, dashArray: '6 5', fillColor: '#ea580c', fillOpacity: 0.08 })
+        .bindTooltip(`${p.name} · ${p.radius_m} m`, { direction: 'top' })
+        .addTo(g);
+      // A dot at its centre too, so a site shows when zoomed out (the radius
+      // is only a few pixels then).
+      L.circleMarker([p.lat, p.lng], { radius: 5, color: '#fff', weight: 2, fillColor: '#ea580c', fillOpacity: 1 })
+        .bindTooltip(`${p.name} · site radius ${p.radius_m} m`, { direction: 'top' })
+        .addTo(g);
+    });
+    g.addTo(map);
+    sitesLayerRef.current = g;
+  }, [showSites, sites]);
 
   // Full screen on/off: Leaflet has to re-measure its box.
   useEffect(() => {
@@ -1004,6 +1040,20 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                 Schedule
               </button>
             )}
+            {!selectedUser && sites && sites.projects.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowSites((v) => !v)}
+                aria-pressed={showSites}
+                className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-full border shadow-sm text-xs font-semibold ${
+                  showSites ? 'bg-orange-600 border-orange-600 text-white hover:bg-orange-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+                title="Show each project's site and radius on the map"
+              >
+                <Landmark className="w-3.5 h-3.5" />
+                Projects
+              </button>
+            )}
           </div>
           {liveAllUntil && (
             <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-[1000] rounded-full bg-emerald-600/95 text-white text-[11px] font-medium px-3 py-1 shadow-sm">
@@ -1137,7 +1187,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
             <MiniCard
               title="Employees by place"
-              subtitle={`Right now · last ${STALE_AFTER_MIN} min · tap to see on the map`}
+              subtitle={`Right now · last ${STALE_AFTER_MIN} min · nearest project under each place`}
               icon={<MapPin className="w-4 h-4 text-emerald-600" />}
               collapsed={!!collapsed.places}
               onToggle={() => toggleCard('places')}
@@ -1149,6 +1199,10 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                   places.map(([k, list]) => {
                     const name = placeNames[k];
                     const label = name || (k in placeNames ? `${Number(list[0].lat).toFixed(4)}, ${Number(list[0].lng).toFixed(4)}` : 'Finding place…');
+                    // Nearest company project to this place, and how many here
+                    // are away from their own branch.
+                    const near = list.reduce<LocationPing | null>((b, p) => (p.nearest_project && (!b || p.nearest_project.distance_m < (b.nearest_project?.distance_m ?? Infinity)) ? p : b), null);
+                    const awayFromBranch = list.filter((p) => p.own_branch?.status === 'away').length;
                     return (
                       <BarRow
                         key={k}
@@ -1158,11 +1212,31 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                         color="#0891b2"
                         hint={list.map((p) => p.user_name || 'User').join(', ')}
                         onClick={() => flyToPings(list)}
+                        detail={
+                          near?.nearest_project ? (
+                            <>
+                              <span className="truncate max-w-[60%]">{near.nearest_project.name} · {metres(near.nearest_project.distance_m)}</span>
+                              <StateChip cls={PROJECT_CHIP[near.nearest_project.status]} label={PROJECT_LABEL[near.nearest_project.status]} />
+                              {awayFromBranch > 0 && <span className="w-full">{awayFromBranch} away from own branch</span>}
+                            </>
+                          ) : undefined
+                        }
                       />
                     );
                   })
                 )}
               </div>
+              {live.length > 0 && (
+                <div className="px-4 py-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setPlacesReportOpen(true)}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-full bg-orange-600 text-white text-xs font-semibold px-3 py-2 hover:bg-orange-700"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Open report
+                  </button>
+                </div>
+              )}
             </MiniCard>
 
             <MiniCard
@@ -1195,7 +1269,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
           <MiniCard
             title="Reporting now"
-            subtitle="Latest location of each employee · tap a name for their path"
+            subtitle="Latest location of each employee · nearest company project and distance from their own branch · tap a name for their path"
             icon={<Clock className="w-4 h-4 text-slate-500" />}
             collapsed={!!collapsed.people}
             onToggle={() => toggleCard('people')}
@@ -1239,6 +1313,37 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                           </span>
                         </span>
                       </button>
+                      {/* Nearest company project, and the distance from their own branch. */}
+                      {!stale && (p.nearest_project || p.own_branch) && (
+                        <span className="hidden md:grid grid-cols-2 gap-3 shrink-0 w-[46%] max-w-[420px] text-[11px]">
+                          <span className="min-w-0">
+                            <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Nearest project</span>
+                            {p.nearest_project ? (
+                              <>
+                                <span className="block truncate font-medium text-slate-700">{p.nearest_project.name}</span>
+                                <span className="flex items-center gap-1 text-slate-500 tabular-nums">
+                                  {metres(p.nearest_project.distance_m)} <StateChip cls={PROJECT_CHIP[p.nearest_project.status]} label={PROJECT_LABEL[p.nearest_project.status]} />
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block text-slate-400">No project location set</span>
+                            )}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Own branch</span>
+                            {p.own_branch ? (
+                              <>
+                                <span className="block truncate font-medium text-slate-700">{p.own_branch.name}</span>
+                                <span className="flex items-center gap-1 text-slate-500 tabular-nums">
+                                  {p.own_branch.distance_m != null && metres(p.own_branch.distance_m)} <StateChip cls={BRANCH_CHIP[p.own_branch.status]} label={BRANCH_LABEL[p.own_branch.status]} />
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block text-slate-400">No branch on record</span>
+                            )}
+                          </span>
+                        </span>
+                      )}
                       <button onClick={() => flyToPings([p])} className="hidden sm:flex shrink-0 w-8 h-8 rounded-full items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-emerald-700" title={`Show ${name} on the map`} aria-label={`Show ${name} on the map`}>
                         <MapPin className="w-4 h-4" />
                       </button>
@@ -1264,6 +1369,18 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           {/* The who-list / Send Notice / Notice Report popups. */}
           <TrackingStatusCards token={token} variant="lists" external status={status} openRequest={listRequest} reportRequest={noticeReportRequest} onFullPath={(u) => setSelectedUser(u)} />
         </>
+      )}
+
+      {placesReportOpen && (
+        <TrackingPlacesReport
+          pings={live}
+          placeOf={(p) => {
+            const k = placeKey(p);
+            return placeNames[k] || `${Number(p.lat).toFixed(4)}, ${Number(p.lng).toFixed(4)}`;
+          }}
+          unlocatedProjects={sites?.unlocated_projects || []}
+          onClose={() => setPlacesReportOpen(false)}
+        />
       )}
 
       {following && canLive && (

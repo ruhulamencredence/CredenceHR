@@ -245,3 +245,7 @@
 **প্রশ্ন: Close short করে কেউ কি MPR-এর Qty চুপচাপ মুছে দিতে পারে?** না। Close short শুধু PEPM Reports-এর `close_short` layer টিক দেওয়া account পারে (Superadmin ছাড়া কেউ নিজে থেকে পায় না), কারণ লিখতেই হয়, আর কে, কবে, কতটা, কেন — সারিতে, Dispatch timeline-এ আর MPR Edit Log-এ থাকে। চাওয়া Qty বা Budget-এর হিসাব বদলায় না, শুধু বাকি অংশ "Set aside"-এ আলাদা থাকে; Budget-এর শেষ তারিখ পর্যন্ত Undo করা যায়।
 
 **প্রশ্ন: সহকর্মী Credence Mail ব্যবহার না করলে তাঁকে পাঠানো mail কোথায় যায় — CredenceHR-এর বাইরে কি চলে যায়?** Default-এ (১৭ নভেম্বর থেকে) mail server (আমাদের নিজের cPanel SMTP) দিয়ে তাঁর নিজের অফিসের mailbox-এ যায় — অন্য কোনো server বা তৃতীয় পক্ষে নয়, আর শুধু Mail Administration-এর "Our domains"-এর ঠিকানায় এই নিয়ম খাটে। যিনি Credence Mail-এ mailbox যুক্ত করে রেখেছেন, Mail চালু ও block নয়, তাঁর কাছে mail আগের মতো শুধু CredenceHR-এর ভেতরে থাকে। Mail Administration-এ ("mail_settings" layer যাঁর আছে) "Keep it inside CredenceHR" বাছলে আগের নিয়মে সবার mail ভেতরে থাকে।
+
+**প্রশ্ন: Employee Tracking-এর "Nearest project" আর "Employees by place" report কে দেখতে পারেন?**
+
+উত্তর: যিনি Employee Tracking খুলতে পারেন (`tracking` module + Read layer) তিনিই — আলাদা অনুমতি নেই। তিনি শুধু তাঁর Tracking সীমার মানুষদের (বাছা Department / কর্মী) কাছের project আর নিজের branch থেকে দূরত্ব দেখেন; project-এর location-এর তালিকাও (`/api/tracking/sites`) একই অনুমতিতে বাঁধা।
