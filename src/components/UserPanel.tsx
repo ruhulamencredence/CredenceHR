@@ -70,6 +70,8 @@ import { useCachedState } from '../lib/screenCache';
 interface UserPanelProps {
   token: string;
   user: User;
+  // Sign out — offered in the phone's bottom-bar "More" popup too (BottomNav).
+  onLogout?: () => void;
   // Navbar's web-only "Claims" header menu — scrolls this panel to the Movement
   // Claim or Bill Claim section (both already sit visible on desktop;
   // this just brings them into view without changing any mobile tile state).
@@ -963,7 +965,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset, onOpenSelfService }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, onLogout, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset, onOpenSelfService }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -5668,6 +5670,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewLeave={canSeeLeave}
         moreItems={bottomNavMoreItems}
         chat={chatAllowed(user) ? { token, user } : null}
+        onLogout={onLogout}
       />
     </div>
   );
