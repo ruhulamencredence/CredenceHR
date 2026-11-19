@@ -94,3 +94,13 @@ ID card requests, Department teams — each only for an account allowed to do it
 - `scripts/project-names-ui.cjs`: **6/6** — Data Import → "Import more rows" with a misspelt sheet opens "Project names not
   in Projects" with the name; nothing saved yet; picking the look-alike and "Import with these projects" imports the row
   under the real project; no project made for the typo; no page errors.
+
+## A login with work behind it can't be deleted
+
+- `scripts/user-delete-guard-api.mjs`: **7/7** — after a start, attendance → users (and bill_claims, claims,
+  final_settlements, tasks, chat_messages, employee_documents) are RESTRICT, none CASCADE; a login with 2 attendance days
+  → 409 "2 attendance days … Use Block login instead"; the login and its attendance are still there; a DELETE straight in
+  the database is refused (1451); a login made by mistake (only a project permission) is still deleted; Block login works
+  and keeps the records.
+- `docs/test-logs/2026-11-15/scripts/merge-api.sh`: **21/21** again — Merge accounts moves the records and then deletes
+  the old login. Its seed now clears last run's test logins with foreign-key checks off (test data only).

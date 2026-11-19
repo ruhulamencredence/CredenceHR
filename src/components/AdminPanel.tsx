@@ -3196,7 +3196,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       fetchAllData();
       setMessage({ type: 'success', text: 'User deleted.' });
     } catch (err: any) {
-      alert(err.message);
+      // A login with records (attendance, claims…) is refused: say why and what to do instead.
+      setMessage({ type: 'error', text: err.message });
     }
   };
 

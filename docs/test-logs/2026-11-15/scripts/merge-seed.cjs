@@ -5,8 +5,13 @@ const mysql = require('mysql2/promise'); const bcrypt = require('bcryptjs');
   const db = await mysql.createConnection({ host: '127.0.0.1', user: 'cred', password: 'credpass', database: 'admin_ui' });
   const q = async (s, p = []) => (await db.query(s, p))[0];
   const oldHash = await bcrypt.hash('OldPass123', 10), newHash = await bcrypt.hash('ImportPass123', 10);
+  // Last run's test logins have attendance and claims, which the database
+  // now keeps a login from being deleted with (UserRecordsGuard.ts): clear
+  // them out first, test data only.
+  await q('SET FOREIGN_KEY_CHECKS = 0');
   for (const e of ['karim.old@credence.test', 'rafiq.personal@credence.test', 'sumon.old@credence.test', 'stranger@credence.test']) await q('DELETE FROM users WHERE email = ?', [e]);
   await q("DELETE FROM users WHERE username IN ('MRG-901','MRG-902','MRG-903','MRG-904')");
+  await q('SET FOREIGN_KEY_CHECKS = 1');
   await q("DELETE FROM all_employees WHERE employee_id IN ('MRG-901','MRG-902','MRG-903','MRG-904')");
   const user = async (name, email, username, hash, role = 'user') => (await q('INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?)', [name, email, username, hash, role])).insertId;
   const emp = async (code, name, email, userId) => (await q("INSERT INTO all_employees (employee_id, name, designation, department, email, user_id, is_active, company_id) VALUES (?, ?, 'Executive', 'Sales', ?, ?, 1, (SELECT MIN(id) FROM companies))", [code, name, email, userId])).insertId;

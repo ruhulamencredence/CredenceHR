@@ -21,6 +21,7 @@ import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
 import { registerUserManagementRoutes, ensureUserExtraColumns } from "./UserManagement";
+import { ensureUserRecordsGuard } from "./UserRecordsGuard";
 import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
@@ -373,6 +374,8 @@ async function initDB() {
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
+    // …and a login's work (attendance, claims, leave…) outlives the login (UserRecordsGuard.ts).
+    await ensureUserRecordsGuard(dbPool);
     // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
     await backfillEmployeeLoginIds(queryDB);
     await autoLinkByEmployeeId(queryDB);

@@ -184,6 +184,9 @@
 **প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
 উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
 
+**প্রশ্ন: কোনো user বা employee মুছে দিলে কি তার হাজিরা, claim, বেতনের রেকর্ড মুছে যায়?**
+উত্তর: না। Employee-র বেতন ও চাকরির রেকর্ড (payroll, salary, advance, HR action, letter, transfer) থাকলে Employee মোছা যায় না (`EmployeeRecordsGuard.ts`)। Login-এর কাজের রেকর্ড (attendance, claim, leave, exit / final settlement, task, target, ডকুমেন্ট, chat ইত্যাদি) থাকলে login মোছা যায় না (`UserRecordsGuard.ts`) — দুটোতেই app বলে কী আছে আর Resigned / Block login করতে বলে, আর database নিজেও আটকায়। শুধু ভুল করে বানানো রেকর্ড-ছাড়া account মোছা যায়। টেস্ট: `docs/test-logs/2026-11-19/scripts/user-delete-guard-api.mjs` (৭টা)।
+
 **প্রশ্ন: বদলির পর কর্মী কি পুরনো প্রজেক্টের PEPM এন্ট্রি দেখতে বা সেখানে Check In করতে পারে?**
 উত্তর: Transfer-এ "Also changes"-এর টিক থাকলে effective date-এ পুরনো branch-এর প্রজেক্ট তাঁর PEPM অনুমতি থেকে সরে যায়, আর সেখানে Check In আগের দিনেই শেষ হয় — তাই পারেন না (নিজের দেওয়া এন্ট্রি আর By home project-এ For-এর নিয়ম আলাদা)। টিক তুলে দিলে বা branch কোনো প্রজেক্টের সাথে জোড়া না থাকলে HR-কে হাতে বদলাতে হয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/transfer-access-api.mjs` (১৮টা)।
 

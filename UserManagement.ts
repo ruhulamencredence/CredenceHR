@@ -26,6 +26,7 @@ import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTempl
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
 import { employeeIdConflict } from "./EmployeeLoginId";
+import { keptUserRecordsOf } from "./UserRecordsGuard";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -79,6 +80,7 @@ export async function ensureUserExtraColumns(queryDB: (sql: string, params?: any
     if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ users.non_employee_reason: " + err?.message);
   }
 }
+
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
   const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets, replaceAttendanceProjects } = deps;
@@ -2031,6 +2033,17 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       if (target[0].role === "admin" && req.user.role !== "superadmin") {
         return res.status(403).json({ error: "Only the Superadmin can remove an Admin account." });
       }
+      // A login with work behind it (attendance, claims, leave, tasks,
+      // documents…) is never deleted — those records would go with it
+      // (UserRecordsGuard.ts). Block login keeps everything.
+      const kept = await keptUserRecordsOf(queryDB, Number(id));
+      if (kept.length) {
+        const list = kept.map((k) => `${k.count} ${k.label}${k.count === 1 ? "" : "s"}`).join(", ");
+        return res.status(409).json({
+          error: `This login has records that must be kept (${list}). Use Block login instead — it stops the sign-in and keeps everything.`,
+          kept
+        });
+      }
       await queryDB("DELETE FROM user_project_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
@@ -2045,6 +2058,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM users WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
+      // The database's own guard (ON DELETE RESTRICT) caught a record the list above missed.
+      if (err?.code === "ER_ROW_IS_REFERENCED_2" || err?.errno === 1451) {
+        return res.status(409).json({ error: "This login has records that must be kept. Use Block login instead — it stops the sign-in and keeps everything." });
+      }
       res.status(500).json({ error: err.message });
     }
   });
