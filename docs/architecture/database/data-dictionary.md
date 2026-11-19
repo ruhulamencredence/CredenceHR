@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭১টি টেবিল, ২৯৪৪টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭১টি টেবিল, ২৯৪৭টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2183,8 +2183,9 @@ Unique: `uniq_web_push_endpoint`(endpoint)
 | `project_id` | int(11) | না |  | logical → `projects` |
 | `user_id` | int(11) | না |  | logical → `users` |
 | `submitted_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `share_key` | varchar(40) | না | default '' | |
 
-Unique: `unique_budget_project`(budget_id,project_id)
+Unique: `unique_budget_project_share`(budget_id,project_id,share_key)
 
 ### `budget_submissions`
 
@@ -2303,6 +2304,7 @@ Unique: `uniq_dmci_material`(group_id,material_key)
 | `md_queued_by` | int(11) | হ্যাঁ |  | |
 | `md_confirmed_at` | timestamp | হ্যাঁ |  | |
 | `md_confirmed_by` | int(11) | হ্যাঁ |  | |
+| `for_project_id` | int(11) | হ্যাঁ |  | |
 
 ### `entry_edit_attempts`
 
@@ -3341,6 +3343,7 @@ Unique: `employee_id`(employee_id)
 | `location_label` | varchar(255) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `location_radius` | int(11) | হ্যাঁ |  | |
+| `entry_scope` | varchar(10) | না | default 'team' | |
 
 Unique: `unique_company_project_name`(company_id,project_name)
 
