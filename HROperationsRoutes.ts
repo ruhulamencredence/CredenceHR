@@ -52,6 +52,7 @@ import { applyCompanyTransfer } from "./CompanyRoutes";
 import { blockEmployeeLogin } from "./AccountBlock";
 import { isMailerConfigured, sendMail } from "./mailer";
 import { requestApprovalReconcile } from "./approvalReconcile";
+import { activeCompanyId } from "./companyContext";
 
 import { attachPersonInfo } from "./personInfo";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -553,8 +554,17 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       console.warn(`⚠️ Could not ensure ${name} table exists: ` + err.message);
     }
   }
+  // A new joiner's Appointment Letter is issued at Hire, before there is an
+  // Employee (OnboardingSelfServiceRoutes.ts): onboarding_id then, and
+  // employee_id once the onboarding is approved.
+  try {
+    const cols: any[] = (await dbPool.query("SHOW COLUMNS FROM hr_letters LIKE 'employee_id'"))[0] || [];
+    if (cols[0] && String(cols[0].Null).toUpperCase() === "NO") await dbPool.query("ALTER TABLE hr_letters MODIFY employee_id INT NULL");
+  } catch (err: any) {
+    console.warn("⚠️ hr_letters.employee_id NULL: " + err.message);
+  }
   // Where a letter was emailed to someone who can no longer log in.
-  for (const col of ["emailed_to VARCHAR(255) NULL", "emailed_at TIMESTAMP NULL"]) {
+  for (const col of ["emailed_to VARCHAR(255) NULL", "emailed_at TIMESTAMP NULL", "onboarding_id INT NULL"]) {
     try {
       await dbPool.query(`ALTER TABLE hr_letters ADD COLUMN ${col}`);
     } catch (err: any) {
@@ -1218,7 +1228,12 @@ export async function getMyHrActionApprovals(queryDB: QueryDB, userId: number): 
 
 async function nextRefNo(queryDB: QueryDB, settings: Record<string, string>, letterType: string, letterDate: string): Promise<string> {
   const year = letterDate.slice(0, 4);
-  const letters: any[] = await queryDB("SELECT * FROM hr_letters");
+  // Joiners' letters (no Employee yet, so not in the company-scoped list)
+  // hold their numbers too.
+  const letters: any[] = [
+    ...((await queryDB("SELECT * FROM hr_letters")) || []),
+    ...(((await queryDB("/*unscoped*/ SELECT ref_no, letter_type, letter_date FROM hr_letters WHERE employee_id IS NULL").catch(() => [])) as any[]) || [])
+  ];
   const code = LETTER_CODE.get(letterType) || "GEN";
   const sameSeries = letters.filter((l: any) => l.letter_type === letterType && (toDate(l.letter_date) || "").slice(0, 4) === year);
   let seq = sameSeries.length + 1;
@@ -2209,12 +2224,22 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
 
   app.get("/api/hr-ops/letters", ...gate, async (_req: any, res: any) => {
     try {
-      const [letters, employees, users] = await Promise.all([
-        queryDB("SELECT * FROM hr_letters"),
+      const [letters, employees, users, joiners] = await Promise.all([
+        // A joiner's Appointment Letter issued at Hire has no Employee yet:
+        // listed by this company's onboarding applications.
+        Promise.all([
+          queryDB("SELECT * FROM hr_letters"),
+          queryDB(
+            "/*unscoped*/ SELECT l.* FROM hr_letters l JOIN onboarding_applications a ON a.id = l.onboarding_id WHERE l.employee_id IS NULL AND a.company_id = ?",
+            [activeCompanyId()]
+          ).catch(() => [])
+        ]).then(([a, b]) => [...(a || []), ...(b || [])]),
         queryDB("SELECT * FROM all_employees"),
-        queryDB("SELECT * FROM users")
+        queryDB("SELECT * FROM users"),
+        queryDB("/*unscoped*/ SELECT id, name, onb_code FROM onboarding_applications WHERE company_id = ?", [activeCompanyId()]).catch(() => [])
       ]);
       const empMap = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
+      const joinerMap = new Map<number, any>((joiners || []).map((j: any) => [Number(j.id), j]));
       res.json(
         letters
           .sort((a: any, b: any) => Number(b.id) - Number(a.id))
@@ -2223,8 +2248,8 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
             id: Number(l.id),
             letter_date: toDate(l.letter_date),
             letter_label: LETTER_LABEL.get(l.letter_type) || l.letter_type,
-            employee_name: empMap.get(Number(l.employee_id))?.name || "(removed)",
-            employee_code: empMap.get(Number(l.employee_id))?.employee_id || null,
+            employee_name: empMap.get(Number(l.employee_id))?.name || (l.onboarding_id && joinerMap.get(Number(l.onboarding_id)) ? `${joinerMap.get(Number(l.onboarding_id)).name} (joiner)` : "(removed)"),
+            employee_code: empMap.get(Number(l.employee_id))?.employee_id || (l.onboarding_id ? joinerMap.get(Number(l.onboarding_id))?.onb_code || null : null),
             designation: empMap.get(Number(l.employee_id))?.designation || null,
             employee_user_id: empMap.get(Number(l.employee_id))?.user_id ? Number(empMap.get(Number(l.employee_id)).user_id) : null,
             issued_by_name: users.find((u: any) => Number(u.id) === Number(l.issued_by))?.name || null
@@ -2990,4 +3015,99 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       fail(res, err);
     }
   });
+}
+
+
+// ---------------- a new joiner's Appointment Letter ----------------
+// Issued at Hire from HR Operations -> New Joiner Onboarding, before the
+// joiner is an Employee: the placeholders come from the onboarding
+// application and what HR types in (salary, probation). The joiner reads
+// it in My Onboarding, signs it and uploads the signed copy; on approval
+// the letter moves onto the new Employee (hr_letters.employee_id).
+export interface JoinerLetterInput {
+  letter_date?: string;
+  gross_salary?: any;
+  basic_salary?: any;
+  probation_months?: any;
+  subject?: string;
+  body?: string;
+}
+
+export async function renderJoinerAppointmentLetter(
+  queryDB: QueryDB,
+  app: any,
+  input: JoinerLetterInput
+): Promise<{ template_id: number; letter_date: string; subject: string; body: string; ref_no: string }> {
+  const settings = await loadSettings(queryDB);
+  const templates: any[] = (await queryDB("SELECT * FROM hr_letter_templates")) || [];
+  const list = templates.filter((t: any) => t.letter_type === "appointment" && Number(t.is_active) !== 0);
+  const template = list.find((t: any) => Number(t.is_default)) || list[0];
+  if (!template) throw Object.assign(new Error("No Appointment Letter template yet — add one under HR Operations → Settings → Letter Templates."), { statusCode: 400 });
+  const letterDate = toDate(input.letter_date) || new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+  const [depts, branches]: any[][] = await Promise.all([
+    queryDB("/*unscoped*/ SELECT id, name FROM departments WHERE id = ?", [Number(app.department_id) || 0]).catch(() => []),
+    queryDB("/*unscoped*/ SELECT id, branch_name FROM branches WHERE id = ?", [Number(app.branch_id) || 0]).catch(() => [])
+  ]);
+  const data = parseJson(app.data_json, {});
+  const personal = data?.personal || {};
+  const gender = String(personal.gender || "").toLowerCase();
+  const female = gender.startsWith("f");
+  const male = gender.startsWith("m");
+  const nameParts = String(app.name || "").trim().split(/\s+/);
+  const joining = toDate(app.joining_date);
+  const gross = num(input.gross_salary);
+  const basic = num(input.basic_salary);
+  const probation = num(input.probation_months) ?? Number(settings.default_probation_months || 6);
+  const map: Record<string, string> = {
+    company_name: settings.company_name,
+    company_address: settings.company_address,
+    signatory_name: settings.signatory_name,
+    signatory_designation: settings.signatory_designation,
+    today: longDate(letterDate),
+    letter_date: longDate(letterDate),
+    employee_name: app.name || "",
+    employee_last_name: nameParts[nameParts.length - 1] || app.name || "",
+    employee_code: "",
+    salutation: female ? "Ms." : male ? "Mr." : "Mr./Ms.",
+    he_she: female ? "she" : male ? "he" : "he/she",
+    him_her: female ? "her" : male ? "him" : "him/her",
+    his_her: female ? "her" : male ? "his" : "his/her",
+    his_her_cap: female ? "Her" : male ? "His" : "His/Her",
+    designation: app.designation || "",
+    department: depts[0]?.name || "concerned",
+    branch: branches[0]?.branch_name || "our Head Office",
+    grade: "",
+    project: "",
+    supervisor: "",
+    joining_date: longDate(joining),
+    present_address: [personal.present_address, personal.present_city].filter(Boolean).join(", "),
+    probation_months: String(probation),
+    probation_end_date: longDate(joining ? addMonths(joining, probation) : null),
+    confirmation_date: "",
+    contract_end_date: "",
+    basic_salary: money(basic),
+    house_rent: "",
+    medical_allowance: "",
+    conveyance_allowance: "",
+    gross_salary: money(gross),
+    gross_salary_words: gross !== null ? takaInWords(gross) : "",
+    effective_date: longDate(joining || letterDate)
+  };
+  const subject = String(input.subject ?? renderTemplate(template.subject, map)).trim().slice(0, 255);
+  const body = String(input.body ?? renderTemplate(template.body, map)).trim();
+  return { template_id: Number(template.id), letter_date: letterDate, subject, body, ref_no: await nextRefNo(queryDB, settings, "appointment", letterDate) };
+}
+
+export async function issueJoinerAppointmentLetter(queryDB: QueryDB, app: any, input: JoinerLetterInput, actorId: number): Promise<{ id: number; ref_no: string }> {
+  const existing: any[] =
+    (await queryDB("/*unscoped*/ SELECT id FROM hr_letters WHERE onboarding_id = ? AND letter_type = 'appointment' AND status = 'issued'", [Number(app.id)])) || [];
+  if (existing.length) throw Object.assign(new Error("An Appointment Letter is already issued for this joiner — cancel it first to issue a new one."), { statusCode: 409 });
+  const r = await renderJoinerAppointmentLetter(queryDB, app, input);
+  if (!r.subject || !r.body) throw Object.assign(new Error("Subject and body can't be empty."), { statusCode: 400 });
+  const ins: any = await queryDB(
+    `/*unscoped*/ INSERT INTO hr_letters (ref_no, employee_id, onboarding_id, letter_type, template_id, subject, body, letter_date, issued_by, status, requires_ack)
+     VALUES (?, NULL, ?, 'appointment', ?, ?, ?, ?, ?, 'issued', 1)`,
+    [r.ref_no, Number(app.id), r.template_id, r.subject, r.body, r.letter_date, actorId]
+  );
+  return { id: Number(ins.insertId), ref_no: r.ref_no };
 }

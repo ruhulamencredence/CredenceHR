@@ -30,7 +30,7 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { activeCompanyId } from "./companyContext";
 import { endAllSessions } from "./SessionSecurity";
-import { loadSettings, startOnboardingChecklist } from "./HROperationsRoutes";
+import { issueJoinerAppointmentLetter, loadSettings, renderJoinerAppointmentLetter, startOnboardingChecklist } from "./HROperationsRoutes";
 import { nextEmployeeCode } from "./CompanyRoutes";
 import { setAccountBlocked } from "./AccountBlock";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
@@ -419,15 +419,33 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
   // approved joiner's next step is that letter.
   const appointmentLetters = async () => {
     const [letters, templates]: any[][] = await Promise.all([
-      queryDB("SELECT id, ref_no, employee_id, letter_type, status FROM hr_letters").catch(() => []),
+      // Letters with an Employee are company-scoped by it; a joiner's (no
+      // Employee yet) by this company's onboarding applications.
+      Promise.all([
+        queryDB("SELECT id, ref_no, employee_id, onboarding_id, letter_type, status FROM hr_letters").catch(() => []),
+        queryDB(
+          "/*unscoped*/ SELECT l.id, l.ref_no, l.employee_id, l.onboarding_id, l.letter_type, l.status FROM hr_letters l JOIN onboarding_applications a ON a.id = l.onboarding_id WHERE l.employee_id IS NULL AND a.company_id = ?",
+          [activeCompanyId()]
+        ).catch(() => [])
+      ]).then(([a, b]) => [...(a || []), ...(b || [])]),
       queryDB("SELECT id, letter_type, is_active FROM hr_letter_templates").catch(() => [])
     ]);
     const byEmployee = new Map<number, { id: number; ref_no: string }>();
+    // Issued at Hire, before there is an Employee (issueJoinerAppointmentLetter).
+    const byOnboarding = new Map<number, { id: number; ref_no: string }>();
     for (const l of letters || [])
-      if (l.letter_type === "appointment" && l.status === "issued") byEmployee.set(Number(l.employee_id), { id: Number(l.id), ref_no: l.ref_no });
+      if (l.letter_type === "appointment" && l.status === "issued") {
+        if (l.employee_id) byEmployee.set(Number(l.employee_id), { id: Number(l.id), ref_no: l.ref_no });
+        if (l.onboarding_id) byOnboarding.set(Number(l.onboarding_id), { id: Number(l.id), ref_no: l.ref_no });
+      }
     const templateExists = (templates || []).some((t: any) => t.letter_type === "appointment" && Number(t.is_active) !== 0);
-    return { byEmployee, templateExists };
+    return { byEmployee, byOnboarding, templateExists };
   };
+  const letterOf = (letters: Awaited<ReturnType<typeof appointmentLetters>>, a: any) =>
+    letters.byOnboarding.get(Number(a.id)) || (a.employee_id ? letters.byEmployee.get(Number(a.employee_id)) : null) || null;
+  // The document type the joiner uploads the signed letter as: the required
+  // document that names the Appointment Letter (Settings), else this.
+  const signedDocType = (required: string[]) => required.find((d) => /appointment/i.test(d)) || "Appointment Letter (signed)";
 
   // What this account may do here — the page shows only those controls.
   app.get("/api/hr-ops/joiner-onboarding/access", authenticateToken, requireModule("hr_operations"), async (req: any, res: any) => {
@@ -456,7 +474,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       res.json(
         (apps || []).map((a: any) => ({
           ...serialize(a, { users, departments, branches, docCounts }),
-          appointment_letter: a.employee_id ? letters.byEmployee.get(Number(a.employee_id)) || null : null,
+          appointment_letter: letterOf(letters, a),
           appointment_template: letters.templateExists
         }))
       );
@@ -706,6 +724,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
         submitted_at: s.submitted_at,
         expires_in_seconds: me[0]?.expires_in_seconds != null ? Number(me[0].expires_in_seconds) : null,
         must_change_password: !!Number(me[0]?.must_change_password || 0),
+        appointment_letter: await joinerLetter(a),
         ...(await formState(a))
       });
     } catch (err) {
@@ -724,7 +743,14 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
   const formState = async (a: any) => {
     const data = parseOnboardingData(a.data_json);
     const docs = await docsOf(Number(a.id));
-    const required = await requiredDocs();
+    // The signed Appointment Letter is asked for once HR has issued the
+    // letter (at Hire) — before that there is nothing to sign.
+    const baseRequired = await requiredDocs();
+    const signedType = signedDocType(baseRequired);
+    const hasLetter: any[] =
+      (await queryDB("/*unscoped*/ SELECT id FROM hr_letters WHERE onboarding_id = ? AND letter_type = 'appointment' AND status = 'issued' LIMIT 1", [Number(a.id)]).catch(() => [])) || [];
+    const required = baseRequired.filter((d) => d !== signedType);
+    if (hasLetter.length) required.push(signedType);
     return {
       data,
       documents: docs.map((d: any) => ({ id: Number(d.id), doc_type: d.doc_type, file_name: d.file_name, file_mime: d.file_mime, size: Number(d.size || 0), uploaded_at: d.uploaded_at })),
@@ -853,6 +879,87 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
     }
   };
 
+  // ---- Appointment Letter at Hire ----
+  // HR issues it when the joiner is hired (HR Operations -> New Joiner
+  // Onboarding), the joiner reads it in My Onboarding, signs it and uploads
+  // the signed copy (the required document that names it). On approval it
+  // moves onto the new Employee. Same permission as opening the onboarding.
+  const joinerLetter = async (a: any) => {
+    const rows: any[] =
+      (await queryDB("/*unscoped*/ SELECT id, ref_no, subject, body, letter_date, status FROM hr_letters WHERE onboarding_id = ? AND letter_type = 'appointment' AND status = 'issued' ORDER BY id DESC LIMIT 1", [
+        Number(a.id)
+      ]).catch(() => [])) || [];
+    const l = rows[0];
+    if (!l) return null;
+    const settings = await loadSettings(queryDB);
+    const required = await requiredDocs();
+    return {
+      id: Number(l.id),
+      ref_no: l.ref_no,
+      subject: l.subject,
+      body: l.body,
+      letter_date: l.letter_date ? new Date(l.letter_date).toISOString().slice(0, 10) : null,
+      company: { name: settings.company_name, address: settings.company_address, signatory_name: settings.signatory_name, signatory_designation: settings.signatory_designation },
+      signed_doc_type: signedDocType(required)
+    };
+  };
+  const OPEN_FOR_LETTER = ["draft", "submitted", "rejected"];
+  const letterInput = (b: any) => ({
+    letter_date: b.letter_date,
+    gross_salary: b.gross_salary,
+    basic_salary: b.basic_salary,
+    probation_months: b.probation_months,
+    subject: b.subject,
+    body: b.body
+  });
+  app.post("/api/hr-ops/joiner-onboarding/:id/appointment-letter/preview", ...hr("onboarding_create"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      const b = req.body || {};
+      const r = await renderJoinerAppointmentLetter(queryDB, a, { ...letterInput(b), subject: undefined, body: undefined });
+      res.json(r);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.post("/api/hr-ops/joiner-onboarding/:id/appointment-letter", ...hr("onboarding_create"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      if (!OPEN_FOR_LETTER.includes(a.status)) throw bad("This onboarding is closed.", 409);
+      const r = await issueJoinerAppointmentLetter(queryDB, a, letterInput(req.body || {}), Number(req.user.id));
+      await createAlert(queryDB, {
+        userId: Number(a.user_id),
+        type: "hr_letter",
+        title: "Your Appointment Letter is ready",
+        message: `${r.ref_no} — open My Onboarding, read it, sign it and upload the signed copy.`,
+        relatedType: "onboarding_application",
+        relatedId: Number(a.id)
+      }).catch(() => {});
+      res.json({ success: true, ...r });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.get("/api/hr-ops/joiner-onboarding/:id/appointment-letter", ...hr("onboarding_create", "onboarding_review", "onboarding_approve"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      res.json({ letter: await joinerLetter(a) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.post("/api/hr-ops/joiner-onboarding/:id/appointment-letter/cancel", ...hr("onboarding_create"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      if (!OPEN_FOR_LETTER.includes(a.status)) throw bad("This onboarding is closed.", 409);
+      const reason = clean(req.body?.reason, 500) || "Cancelled before joining";
+      await queryDB("/*unscoped*/ UPDATE hr_letters SET status = 'cancelled', cancelled_reason = ? WHERE onboarding_id = ? AND employee_id IS NULL AND letter_type = 'appointment' AND status = 'issued'", [reason, Number(a.id)]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // ---- HR review ----
 
   app.get("/api/hr-ops/joiner-onboarding/:id", ...hr("onboarding_review", "onboarding_approve"), async (req: any, res: any) => {
@@ -875,7 +982,8 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       const letters = await appointmentLetters();
       res.json({
         ...serialize(a, { users, departments, branches }),
-        appointment_letter: a.employee_id ? letters.byEmployee.get(Number(a.employee_id)) || null : null,
+        appointment_letter: letterOf(letters, a),
+        signed_letter_doc_type: signedDocType(state.required_documents),
         appointment_template: letters.templateExists,
         ...state,
         duplicates: ["approved", "cancelled", "expired"].includes(a.status) ? [] : await findOnboardingDuplicates(queryDB, a, state.data),
@@ -924,7 +1032,8 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       // The company's own lists and settings, read before the transaction
       // (its connection sees every company).
       const [departments, branches] = await Promise.all([queryDB("SELECT * FROM departments"), queryDB("SELECT * FROM branches")]);
-      const required = await requiredDocs();
+      // The same documents the joiner's form asks for (formState).
+      const required = (await formState(pre)).required_documents;
       // tests/onboarding.test.ts: a server started with NODE_ENV=test fails
       // the transaction after the step named in this header, to prove it
       // rolls back. Ignored in every other environment.
@@ -993,6 +1102,17 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           "UPDATE users SET username = ?, email = ?, name = ?, is_onboarding = 0, onboarding_expires_at = NULL, must_change_password = 1 WHERE id = ? AND is_onboarding = 1",
           [code, p.personal_email || null, a.name, Number(a.user_id)]
         );
+        // 5a. The Appointment Letter issued at Hire now belongs to the
+        // Employee; with the signed copy uploaded it counts as acknowledged.
+        {
+          const signed: any[] = await q("SELECT doc_type FROM onboarding_documents WHERE application_id = ?", [id]);
+          const isSigned = (signed || []).some((d: any) => /appointment/i.test(String(d.doc_type)));
+          await q(
+            `UPDATE hr_letters SET employee_id = ?, acknowledged_at = ${isSigned ? "NOW()" : "acknowledged_at"}, ack_note = ${isSigned ? "'Signed copy uploaded in onboarding'" : "ack_note"}
+              WHERE onboarding_id = ? AND employee_id IS NULL`,
+            [employeeId, id]
+          ).catch(() => {});
+        }
         // 5b. Their SIM / ID card requests now belong to the Employee (RequisitionRoutes.ts).
         await q("UPDATE employee_requisitions SET employee_id = ? WHERE application_id = ? AND employee_id IS NULL", [employeeId, id]).catch(() => {});
         // 6. Documents -> Document Vault (same login, so the key holds).
@@ -1086,14 +1206,14 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           relatedType: "onboarding_application",
           relatedId: id
         }).catch(() => {});
-      // Next: the Appointment Letter, which HR reads and issues from Letters.
-      const letters = await appointmentLetters().catch(() => ({ templateExists: false }));
+      // Next: the Appointment Letter — already issued at Hire, or HR issues it from Letters.
+      const letters = await appointmentLetters().catch(() => ({ templateExists: false, byEmployee: new Map() }) as any);
       res.json({
         success: true,
         employee_id: r.employeeId,
         employee_code: r.code,
         access_applied: accessApplied,
-        appointment_letter: { template_exists: letters.templateExists }
+        appointment_letter: { template_exists: letters.templateExists, issued: letters.byEmployee?.get(r.employeeId) || null }
       });
     } catch (err: any) {
       if (err?.duplicates) return res.status(409).json({ error: err.message, duplicates: err.duplicates });
