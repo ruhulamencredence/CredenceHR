@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৩টি টেবিল, ২৯৬১টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৩টি টেবিল, ২৯৬২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -819,7 +819,7 @@ HR action (পদোন্নতি, বদলি, increment…), চিঠি �
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `ref_no` | varchar(100) | না |  | |
-| `employee_id` | int(11) | না |  | FK → `all_employees.id` |
+| `employee_id` | int(11) | হ্যাঁ |  | FK → `all_employees.id` |
 | `letter_type` | varchar(40) | না |  | |
 | `template_id` | int(11) | হ্যাঁ |  | |
 | `subject` | varchar(255) | না |  | |
@@ -836,6 +836,7 @@ HR action (পদোন্নতি, বদলি, increment…), চিঠি �
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `emailed_to` | varchar(255) | হ্যাঁ |  | |
 | `emailed_at` | timestamp | হ্যাঁ |  | |
+| `onboarding_id` | int(11) | হ্যাঁ |  | |
 
 ### `hr_onboarding_items`
 
