@@ -142,6 +142,7 @@
 - Profile, CredenceHR AI Assistant, Profile → Service Book / My Asset, মানচিত্রের popup, Tracking report: খুললে তবেই।
 - Excel / PDF export: বোতাম চাপলে লাইব্রেরি নামে; PDF দেখা `src/lib/pdfjs.ts` দিয়ে।
 - অ্যানিমেশন JSON: `useLottieJson` (`LazyLottie.tsx`)।
+- অ্যানিমেশনের player: `lottie-react`-এর index তিনটা player (full, svg, light) একসাথে আনত — ২০৪ KB gzip, প্রথম অ্যানিমেশন দেখালেই। এখন `vite.config.ts`-এর alias `lottie-react/full` ও `lottie-react/light` দিয়ে `LazyLottie.tsx` শুধু যেটা লাগে সেটা আনে: Leave card / spinner-এ full (~৮৪ KB gzip), notice popup-এ light (~৫৩ KB gzip); svg player আর নামে না (২০২৬-১১-১৯)।
 - খুব ছোট টুকরো (২০ KB-র কম) `vite.config.ts`-এর `experimentalMinChunkSize`-এ জুড়ে যায়, যাতে ফোনে অনেকগুলো ছোট request না যায়।
 
 মাপা ফল (production build, মোবাইল আকার, CPU ৪ গুণ ধীর, ২০২৬-১১-০৫): Superadmin-এর শুরুর download ১,৪২৪ KB → ৬৪২ KB, JS memory ৩৩ → ১৭ MB, Home দেখা যায় ~২.৭ → ~২.১ সেকেন্ডে; সাধারণ account ৮৮৬ → ৩৯৪ KB। নতুন কোনো ভারী লাইব্রেরি যোগ করলে সেটাও এভাবে দরকারের সময় import করুন।

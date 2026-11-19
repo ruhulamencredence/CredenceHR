@@ -48,6 +48,13 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        // lottie-react's own index pulls in all three of its players (full,
+        // svg, light ≈ 200 KB gzip together) even though a page only ever
+        // shows one. These two names point at its Lottie / LottieLight on
+        // their own, so a phone downloads only the player an animation uses
+        // (LazyLottie.tsx; types in src/lottie-engines.d.ts).
+        'lottie-react/full': path.resolve(__dirname, 'node_modules/lottie-react/build/animation/Lottie.js'),
+        'lottie-react/light': path.resolve(__dirname, 'node_modules/lottie-react/build/animation/LottieLight.js'),
       },
     },
     server: {
