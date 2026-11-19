@@ -41,6 +41,8 @@ import { retryImport } from '../lib/chunkReload';
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 import { SearchSelect } from './Combobox';
+import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
+import { ProjectAccessPopup } from './ProjectAccessPopup';
 import { DepartmentTeamsEditor, type DepartmentTeamsEditorHandle } from './DepartmentTeamsEditor';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
@@ -1585,6 +1587,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Form states for adding/editing
   const [newProjectName, setNewProjectName] = useState('');
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  // Entry sharing of the Project being added / edited (ProjectEntrySharing.tsx).
+  const [projectEntryScope, setProjectEntryScope] = useState<EntryScope>('team');
+  const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
   // Site location pin for the project being added/edited (free OpenStreetMap/
@@ -2122,14 +2127,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           location_lat: projectLocation.lat,
           location_lng: projectLocation.lng,
           location_label: projectLocation.label,
-          location_radius: projectLocation.radius
+          location_radius: projectLocation.radius,
+          entry_scope: projectEntryScope
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save project');
 
+      // Just switched to "By home project": stay on it, so the Admin sees any
+      // old entries whose For still has to be picked.
+      if (editingProject && projectEntryScope === 'home' && editingProject.entry_scope !== 'home') {
+        setEditingProject({ ...editingProject, project_name: newProjectName.trim(), entry_scope: 'home' });
+        setProjectSharingReload((n) => n + 1);
+        fetchAllData();
+        setMessage({ type: 'success', text: `Project saved. ${Number(data.for_filled || 0)} old entr${Number(data.for_filled) === 1 ? 'y' : 'ies'} got their "For" from the person who made them.` });
+        return;
+      }
       setNewProjectName('');
       setEditingProject(null);
+      setProjectEntryScope('team');
       setProjectLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
       setMessage({ type: 'success', text: 'Project saved successfully.' });
@@ -3238,12 +3254,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
-  // The "Project Access" modal's checklist, filtered by the search box.
-  const filteredManageProjects = React.useMemo(() => {
-    const q = managePermSearch.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter((p) => p.project_name.toLowerCase().includes(q));
-  }, [projects, managePermSearch]);
 
   const handleSavePermissions = async () => {
     if (!managingUser) return;
@@ -5511,7 +5521,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'projects' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
-            <PhoneSheet label="Add Project" title={editingProject ? 'Edit Project' : 'Add New Project'} editing={editingProject !== null} onCancelEdit={() => { setEditingProject(null); setNewProjectName(''); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={projects.length}>
+            <PhoneSheet label="Add Project" title={editingProject ? 'Edit Project' : 'Add New Project'} editing={editingProject !== null} onCancelEdit={() => { setEditingProject(null); setNewProjectName(''); setProjectEntryScope('team'); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={projects.length}>
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 {editingProject ? 'Edit Project' : 'Add New Project'}
@@ -5572,6 +5582,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">Optional — mark this project's site on a free map.</p>
                 </div>
+                <ProjectEntrySharing
+                  token={token}
+                  value={projectEntryScope}
+                  onChange={setProjectEntryScope}
+                  projectId={editingProject ? editingProject.id : null}
+                  savedScope={editingProject ? ((editingProject.entry_scope as EntryScope) || 'team') : null}
+                  reloadKey={projectSharingReload}
+                />
                 <div className="flex space-x-3">
                   <button
                     type="submit"
@@ -5582,7 +5600,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {editingProject && (
                     <button
                       type="button"
-                      onClick={() => { setEditingProject(null); setNewProjectName(''); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }}
+                      onClick={() => { setEditingProject(null); setNewProjectName(''); setProjectEntryScope('team'); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
                     >
                       Cancel
@@ -5642,6 +5660,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 {p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                               </span>
                             )}
+                            {p.entry_scope && p.entry_scope !== 'team' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200" title="Entry sharing">
+                                {ENTRY_SCOPE_LABEL[p.entry_scope as EntryScope]}
+                              </span>
+                            )}
                           </span>
                           {p.linked_branch_id && p.linked_branch_name !== p.project_name && (
                             <span className="block text-[11px] text-slate-500">Branch: {p.linked_branch_name}</span>
@@ -5669,6 +5692,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           onClick={() => {
                             setEditingProject(p);
                             setNewProjectName(p.project_name);
+                            setProjectEntryScope((p.entry_scope as EntryScope) || 'team');
                             setProjectLocation({
                               lat: p.location_lat != null ? Number(p.location_lat) : null,
                               lng: p.location_lng != null ? Number(p.location_lng) : null,
@@ -7786,87 +7810,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* Manage Projects modal — Admin sets which Projects a User can access */}
+      {/* Manage Projects modal — Admin sets which Projects a User can access
+          (and with it, which PEPM teams they are on — ProjectAccessPopup.tsx). */}
       {managingUser && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setManagingUser(null)}
-        >
-          <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Project Access</h3>
-                <p className="text-xs text-slate-500">{managingUser.name} • {managingUser.email}</p>
-              </div>
-              <button
-                onClick={() => setManagingUser(null)}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {projects.length > 0 && (
-              <div className="px-5 pt-4">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Search className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="text"
-                    value={managePermSearch}
-                    onChange={(e) => setManagePermSearch(e.target.value)}
-                    placeholder="Search Project Name..."
-                    autoComplete="off"
-                    className="block w-full pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="p-5 overflow-y-auto flex-1 space-y-2">
-              {projects.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-6">No projects exist yet. Add one from the Projects tab first.</p>
-              ) : filteredManageProjects.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-6">No Project matches "{managePermSearch}".</p>
-              ) : (
-                filteredManageProjects.map((p) => (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedProjectIds.has(p.id)}
-                      onChange={() => toggleSelectedProject(p.id)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
-                    />
-                    <span className="text-sm font-medium text-slate-900">{p.project_name}</span>
-                  </label>
-                ))
-              )}
-            </div>
-
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
-              <button
-                onClick={() => setManagingUser(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSavePermissions}
-                disabled={savingPermissions}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
-              >
-                {savingPermissions ? 'Saving...' : 'Save Access'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ProjectAccessPopup
+          user={managingUser}
+          projects={projects}
+          users={users}
+          permissions={permissions}
+          selected={selectedProjectIds}
+          onToggle={toggleSelectedProject}
+          search={managePermSearch}
+          onSearch={setManagePermSearch}
+          saving={savingPermissions}
+          onSave={handleSavePermissions}
+          onClose={() => setManagingUser(null)}
+        />
       )}
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin

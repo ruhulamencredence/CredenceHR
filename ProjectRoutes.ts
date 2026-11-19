@@ -7,6 +7,7 @@
 // The shared helpers they use are passed in by startServer().
 
 import type { Express } from "express";
+import { ENTRY_SCOPES, fillForFromHomes, forGaps, homeProjectsOf } from "./PepmTeam";
 
 export interface RegisterProjectRoutesDeps {
   authenticateToken: any;
@@ -101,13 +102,18 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
       if (!project_name) return res.status(400).json({ error: "Project name is required" });
       const location = parseProjectLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
+      // Entry sharing (PepmTeam.ts), "team" unless asked otherwise.
+      const scope = req.body.entry_scope !== undefined ? String(req.body.entry_scope) : "team";
+      if (!(ENTRY_SCOPES as readonly string[]).includes(scope)) return res.status(400).json({ error: "Entry sharing must be Team, Own entries only or By home project." });
 
       const result = await queryDB(
         "INSERT INTO projects (project_name, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?)",
         [project_name.trim(), location.lat, location.lng, location.label, location.radius, req.user.id]
       );
+      if (scope !== "team") await queryDB("UPDATE projects SET entry_scope = ? WHERE id = ?", [scope, result.insertId]);
       res.json({
         id: result.insertId,
+        entry_scope: scope,
         project_name: project_name.trim(),
         location_lat: location.lat,
         location_lng: location.lng,
@@ -135,6 +141,14 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
         "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
         [project_name.trim(), location.lat, location.lng, location.label, location.radius, id]
       );
+      // Entry sharing (PepmTeam.ts): who sees this Project's PEPM entries.
+      let forFilled = 0;
+      if (req.body.entry_scope !== undefined) {
+        const scope = String(req.body.entry_scope);
+        if (!(ENTRY_SCOPES as readonly string[]).includes(scope)) return res.status(400).json({ error: "Entry sharing must be Team, Own entries only or By home project." });
+        await queryDB("UPDATE projects SET entry_scope = ? WHERE id = ?", [scope, id]);
+        if (scope === "home") forFilled = await fillForFromHomes(queryDB, Number(id));
+      }
       // The linked Branch keeps the same map pin, and the same name while the
       // two names still match (see branches.project_id).
       const linked = (await queryDB("SELECT * FROM branches")).find((b: any) => Number(b.project_id) === Number(id));
@@ -153,7 +167,32 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
           await sync(linked.branch_name);
         }
       }
-      res.json({ success: true });
+      res.json({ success: true, for_filled: forFilled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // "By home project" (PepmTeam.ts): entries whose maker works on several
+  // Projects, so their For couldn't be filled by itself — the Admin picks
+  // one per person. Same permission as editing the Project.
+  app.get("/api/projects/:id/for-gaps", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
+    try {
+      res.json(await forGaps(queryDB, Number(req.params.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/projects/:id/for-fill", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
+    try {
+      const projectId = Number(req.params.id);
+      const userId = Number(req.body?.user_id);
+      const forId = Number(req.body?.for_project_id);
+      if (!userId || !forId) return res.status(400).json({ error: "Pick the person and the project." });
+      const homes = await homeProjectsOf(queryDB, userId);
+      if (!homes.some((h) => h.id === forId)) return res.status(400).json({ error: "That project isn't one of this person's projects." });
+      const r: any = await queryDB("UPDATE entries SET for_project_id = ? WHERE project_id = ? AND created_by = ? AND for_project_id IS NULL", [forId, projectId, userId]);
+      res.json({ success: true, filled: Number(r?.affectedRows || 0) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

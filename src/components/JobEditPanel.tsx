@@ -11,6 +11,7 @@ import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, lat
 import { Entry, BudgetItem, MprNumber, PendingJobEdit } from '../types';
 import { Spinner } from './Spinner';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
+import { EntryForField } from './EntryForField';
 
 // Pulls just the leading numeric portion out of a free-text Qty string imported from
 // Excel (e.g. "120.50 pcs" -> 120.5) — mirrors the server's parseQtyNumber (and the
@@ -1674,6 +1675,8 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   const selected = budgetProjectOptions.find((o) => o.key === selectedKey) || null;
 
   const [jobName, setJobName] = useState('');
+  // "For" on a By-home-project Project (EntryForField.tsx).
+  const [forProjectId, setForProjectId] = useState('');
   const [jobDuration, setJobDuration] = useState('');
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -1914,6 +1917,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
         body: JSON.stringify({
           budget_id: selected.budget_id,
           project_id: selected.project_id,
+          ...(forProjectId ? { for_project_id: Number(forProjectId) } : {}),
           job_name: jobName.trim(),
           job_duration: jobDuration.trim(),
           items: itemsPayload,
@@ -1956,6 +1960,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
             ))}
           </select>
         </div>
+        {selected && <EntryForField token={token} projectId={String(selected.project_id)} value={forProjectId} onChange={setForProjectId} />}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Job Name</label>
