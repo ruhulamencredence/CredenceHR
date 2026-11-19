@@ -8,6 +8,7 @@ import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, Calend
 import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues, BillClaimDesignationLimit } from '../types';
 import { SearchSelect } from './Combobox';
+import { BillClaimRulesReaders } from './BillClaimRulesReaders';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
@@ -721,6 +722,8 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
           </table>
         </div>
       </div>
+
+      <BillClaimRulesReaders token={token} refreshKey={historyKey} />
 
       <ChangeHistory token={token} defs={defs} refreshKey={historyKey} />
     </div>

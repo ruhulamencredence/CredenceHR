@@ -177,6 +177,8 @@
   "bill_claim_policy_history",
   "bill_claim_policy_settings",
   "bill_claim_references",
+  "bill_claim_rule_reads",
+  "bill_claim_rule_versions",
   "bill_claims",
   "claim_approval_signatures",
   "claims",

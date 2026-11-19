@@ -29,7 +29,7 @@
 import { requestApprovalReconcile } from "./approvalReconcile";
 import type { Express } from "express";
 import { isAppSession } from "./SessionSecurity";
-import { checkClaimBills, loadCategories, categoriesFor, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
+import { checkClaimBills, loadCategories, categoriesFor, hasReadCurrentRules, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./BillClaimHistory";
 
 interface BillClaimRouteDeps {
@@ -1062,6 +1062,13 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       // items — that becomes a single bill dated From Date.
       const today = todayInDhaka();
       const policyNow = await loadPolicy(queryDB);
+      // Their own claim: the current Bill Claim rules must have been read and
+      // confirmed first (Bill Claim → (i) Rules). Filing for someone else
+      // doesn't confirm for them, and doesn't need it.
+      const filer = actor || filedBy || claimant;
+      if (Number(filer.id) === Number(claimant.id) && !(await hasReadCurrentRules(queryDB, Number(claimant.id)))) {
+        return res.status(403).json({ error: "Read the Bill Claim rules and confirm them first — tap (i) Rules on Bill Claim.", code: "rules_unread" });
+      }
       let editMode: ClaimEditMode | null = null;
       let editRequest: any = null;
       if (editing) {
