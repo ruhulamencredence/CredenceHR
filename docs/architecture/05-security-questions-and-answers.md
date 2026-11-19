@@ -253,3 +253,7 @@
 **প্রশ্ন: Employee Tracking-এর "Nearest project" আর "Employees by place" report কে দেখতে পারেন?**
 
 উত্তর: যিনি Employee Tracking খুলতে পারেন (`tracking` module + Read layer) তিনিই — আলাদা অনুমতি নেই। তিনি শুধু তাঁর Tracking সীমার মানুষদের (বাছা Department / কর্মী) কাছের project আর নিজের branch থেকে দূরত্ব দেখেন; project-এর location-এর তালিকাও (`/api/tracking/sites`) একই অনুমতিতে বাঁধা।
+
+**প্রশ্ন: Remote Attendance-এ "Any project" দিলে একজন User কোন কোন project-এ check in করতে পারেন?**
+
+উত্তর: কোম্পানির যেকোনো project-এ — তবে শুধু সেই project-এর location-এর radius-এর ভেতরে দাঁড়িয়ে (server দূরত্ব মাপে)। নির্দিষ্ট project-এ সীমিত রাখতে Module Access-এ "Only these projects" (From / To তারিখসহ) বা "Their Branch" বাছুন।

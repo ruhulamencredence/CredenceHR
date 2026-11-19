@@ -281,3 +281,5 @@
 | কাউকে ডাটা দেখা বন্ধ | Module Access থেকে অনুমতি তুলুন (সঙ্গে সঙ্গে কার্যকর) |
 
 - **Notification পরীক্ষা (`POST /api/web-push/test`):** login করা account শুধু নিজের phone/browser-এ test message পাঠাতে পারে (অন্যের নয়)। উত্তরে push service-এর (Apple/Google) host ও status code আসে, কোনো key বা token নয়। Profile → Notifications থেকে চালানো হয়।
+
+১৮ নভেম্বর — **Remote Attendance, "Any project":** Users → Module Access-এ check-in-এর জন্য "Any project" থাকলে সাধারণ User এখন কোম্পানির যেকোনো project-এ check in / out করতে পারেন (আগে শুধু যে project-এ তাঁর Budget / MPR access ছিল)। যাঁকে সীমিত রাখতে হবে তাঁর জন্য "Only these projects" বা "Their Branch" — সেগুলো আগের মতোই কড়া। প্রতিটা check-in তখনও project-এর location ও radius-এর ভেতরে হতে হয় (server যাচাই করে), আর Remote Attendance নিজেই আলাদা অনুমতি (`can_use_attendance`)। (`AttendanceRoutes.ts` `getAllowedProjectIds`)

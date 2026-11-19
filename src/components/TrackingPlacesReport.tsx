@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Search, FileSpreadsheet, FileDown, AlertTriangle } from 'lucide-react';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
@@ -224,7 +225,8 @@ export const TrackingPlacesReport: React.FC<{
   const th = 'sticky top-0 z-[1] bg-white/95 backdrop-blur-sm px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b border-slate-200';
   const td = 'px-3 py-2.5 border-b border-slate-100 align-top';
 
-  return (
+  // On document.body, so no transformed / clipped parent of the page can cut it.
+  return createPortal(
     <div className="fixed inset-0 z-[1100] liquid-glass-backdrop flex items-stretch sm:items-center justify-center sm:p-4" onClick={onClose}>
       <div
         role="dialog"
@@ -411,6 +413,7 @@ export const TrackingPlacesReport: React.FC<{
           <span>Straight-line distance from the latest location. At site = inside the project's radius (200 m when none is set); Near = within 1 km.</span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
