@@ -919,10 +919,11 @@ export function registerBillClaimPolicyRoutes(
     requireBillClaimAccess: any;
     queryDB: QueryDB;
     getAdminModules: (userId: number) => Promise<string[]>;
+    hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
     todayInDhaka: () => string;
   }
 ) {
-  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka } = deps;
+  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka } = deps;
 
   // Viewing: Superadmin and the Bill Claim (conveyance) module. Changing: Superadmin.
   const canView = async (req: any) => req.user?.role === "superadmin" || (await getAdminModules(req.user.id)).includes("bill_claim");
@@ -930,6 +931,17 @@ export function registerBillClaimPolicyRoutes(
     try {
       if (await canView(req)) return next();
       res.status(403).json({ error: "You don't have access to Bill Claim Policy." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+  // Who has read the rules (its own page): the page's viewers who also have
+  // the Bill Claim layer "rules_readers" (on unless layers were saved without it).
+  const canSeeReaders = async (req: any) => req.user?.role === "superadmin" || ((await canView(req)) && (await hasModuleLayer(req.user, "bill_claim", "rules_readers")));
+  const requireReaders = async (req: any, res: any, next: any) => {
+    try {
+      if (await canSeeReaders(req)) return next();
+      res.status(403).json({ error: "You don't have access to who has read the Bill Claim rules." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -951,7 +963,8 @@ export function registerBillClaimPolicyRoutes(
         defs: POLICY_DEFS,
         values: await loadPolicy(queryDB),
         categories: await loadCategories(queryDB),
-        can_edit: req.user.role === "superadmin"
+        can_edit: req.user.role === "superadmin",
+        can_see_readers: await canSeeReaders(req)
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1216,7 +1229,7 @@ export function registerBillClaimPolicyRoutes(
     const withModule = new Set(mod.map((m) => Number(m.user_id)));
     return users.filter((u) => u.role === "superadmin" || !!Number(u.can_view_bill_claims) || withModule.has(Number(u.id)));
   };
-  app.get("/api/bill-claim-rules/readers", authenticateToken, requireView, async (_req: any, res) => {
+  app.get("/api/bill-claim-rules/readers", authenticateToken, requireReaders, async (_req: any, res) => {
     try {
       const version = await currentRulesVersion(queryDB);
       const versions: any[] = (await queryDB("SELECT id FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id ASC", [activeCompanyId()])) || [];
@@ -1262,7 +1275,7 @@ export function registerBillClaimPolicyRoutes(
     }
   });
   // A push to everyone who hasn't confirmed the current rules.
-  app.post("/api/bill-claim-rules/remind", authenticateToken, requireView, async (req: any, res) => {
+  app.post("/api/bill-claim-rules/remind", authenticateToken, requireReaders, async (req: any, res) => {
     try {
       const version = await currentRulesVersion(queryDB);
       const done = new Set<number>(
