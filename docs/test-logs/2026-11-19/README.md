@@ -43,3 +43,19 @@ on approval the letter moves onto the new Employee, acknowledged.
 - `scripts/joiner-letter-ui.cjs`: **10/10** — joiner row → "Issue appointment letter" → popup asks for the gross salary,
   prepares the letter (name, 55,000), issues it; confirmation and the ref on the row; phone My Onboarding shows "Your
   Appointment Letter" with "Signed copy not uploaded yet"; open the PDF; no page errors.
+
+## First day steps in the Onboarding Checklist
+
+Three new checklist items (PEPM projects given, Mobile App turned on, Added to their department team) that tick
+themselves, plus "Signed copy of Appointment Letter received" now ticks itself when the letter is acknowledged. Pending
+items get a button (`FirstDayActions.tsx`): Give projects (the Project Access popup), Turn on Mobile App, Give a SIM,
+ID card requests, Department teams — each only for an account allowed to do it.
+
+- `scripts/first-day-api.mjs`: **9/9** — the items exist on an approved joiner's checklist; first-day says no projects /
+  app off; Superadmin may do every step; Give projects and Turn on Mobile App save through their own APIs; both items then
+  tick themselves (with the project name); a plain user → 403.
+- `scripts/first-day-ui.cjs`: **6/6** — Checklist → Open Checklist: "Give projects" and "Turn on Mobile App" shown;
+  turning the app on shows the message; Give projects opens the Project Access popup, saving shows the message and the
+  item ticks (button gone); no page errors.
+- Not covered by a test: the department team item ticking (no team in the test data) — same lookup as the
+  Department teams feature.

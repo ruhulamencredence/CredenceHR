@@ -165,6 +165,10 @@ const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: str
   { task_key: "id_card", label: "ID card issued", category: "System & Access", due_days: 7 },
   { task_key: "business_card", label: "Business card issued", category: "System & Access", due_days: 7 },
   { task_key: "sim", label: "Office SIM issued", category: "System & Access", due_days: 3 },
+  // First day (each ticks itself, and can be done from the checklist).
+  { task_key: "pepm_projects", label: "PEPM projects given (Budget / Jobs / MPR)", category: "System & Access", due_days: 0 },
+  { task_key: "mobile_app", label: "Mobile App turned on", category: "System & Access", due_days: 0 },
+  { task_key: "dept_team", label: "Added to their department team", category: "Work Setup", due_days: 0 },
   { task_key: "supervisor", label: "Supervisor assigned", category: "Work Setup", due_days: 0 },
   { task_key: "asset_handover", label: "Office assets handed over", category: "Work Setup", due_days: 3 },
   { task_key: "orientation", label: "Orientation / induction done", category: "Work Setup", due_days: 7 },
@@ -613,6 +617,28 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       }
     } catch {
       // company_id not there yet on a brand-new database — the plain seed above already has them.
+    }
+    // The first-day items (PEPM projects, Mobile App, department team) for
+    // checklists made before they were defaults — once per company.
+    try {
+      const [cos]: any = await dbPool.query("SELECT DISTINCT company_id FROM hr_onboarding_tasks");
+      for (const co of cos || []) {
+        const cid = Number(co.company_id);
+        const [mark]: any = await dbPool.query("SELECT id FROM hr_ops_settings WHERE company_id = ? AND setting_key = 'onboarding_defaults_v3'", [cid]);
+        if (mark.length) continue;
+        const [have]: any = await dbPool.query("SELECT task_key, sort_order FROM hr_onboarding_tasks WHERE company_id = ?", [cid]);
+        let order = Math.max(0, ...have.map((h: any) => Number(h.sort_order) || 0));
+        for (const t of DEFAULT_ONBOARDING_TASKS.filter((d) => ["pepm_projects", "mobile_app", "dept_team"].includes(d.task_key))) {
+          if (have.some((h: any) => h.task_key === t.task_key)) continue;
+          await dbPool.query(
+            "INSERT INTO hr_onboarding_tasks (company_id, task_key, label, category, due_days, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            [cid, t.task_key, t.label, t.category, t.due_days, ++order]
+          );
+        }
+        await dbPool.query("INSERT INTO hr_ops_settings (company_id, setting_key, setting_value) VALUES (?, 'onboarding_defaults_v3', '1')", [cid]);
+      }
+    } catch {
+      // a brand-new database — the plain seed already has them.
     }
     // Retirement reminders were on by default and aren't wanted: take them off
     // once per company that had saved its reminder kinds (a marker keeps HR
@@ -2519,6 +2545,26 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
     }
   });
 
+  // The first-day facts: the login's PEPM projects, whether the Mobile App is
+  // on for it, and the department team the Employee is in.
+  async function firstDayState(employeeId: number, userId: number | null) {
+    const [projects, users, team]: any[][] = await Promise.all([
+      userId
+        ? queryDB("SELECT p.project_name FROM user_project_permissions upp JOIN projects p ON p.id = upp.project_id WHERE upp.user_id = ? ORDER BY p.project_name", [userId]).catch(() => [])
+        : Promise.resolve([]),
+      userId ? queryDB("/*unscoped*/ SELECT can_use_app FROM users WHERE id = ?", [userId]).catch(() => []) : Promise.resolve([]),
+      queryDB(
+        "/*unscoped*/ SELECT t.name FROM department_team_members m JOIN department_teams t ON t.id = m.team_id WHERE m.employee_id = ? LIMIT 1",
+        [employeeId]
+      ).catch(() => [])
+    ]);
+    return {
+      projects: (projects || []).map((r: any) => String(r.project_name)),
+      app_on: Number(users?.[0]?.can_use_app || 0) === 1,
+      team: team?.[0]?.name ? String(team[0].name) : null
+    };
+  }
+
   // Ticks items whose fact already exists elsewhere in the app.
   async function autoDetect(employeeId: number, items: any[]) {
     const [emps, supervisors, letters, accounts, services, assignments, sims] = await Promise.all([
@@ -2533,11 +2579,18 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
     const sim = (sims || []).find((x: any) => Number(x.employee_id) === employeeId && String(x.status || "active") === "active");
     const e = emps.find((x: any) => Number(x.id) === employeeId);
     if (!e) return;
+    const first = await firstDayState(employeeId, e.user_id ? Number(e.user_id) : null);
     const svc = services.find((s: any) => Number(s.employee_id) === employeeId);
     const hasLetter = (type: string) => letters.some((l: any) => Number(l.employee_id) === employeeId && l.letter_type === type && l.status === "issued");
     const bank = accounts.find((a: any) => Number(a.employee_id) === employeeId && a.account_type === "bank" && Number(a.is_active) !== 0);
     const detect: Record<string, string | null> = {
       appointment_letter: hasLetter("appointment") ? "Appointment letter issued" : null,
+      // Signed at onboarding (the signed copy uploaded, OnboardingSelfServiceRoutes.ts) or acknowledged later.
+      appointment_signed: letters.some(
+        (l: any) => Number(l.employee_id) === employeeId && l.letter_type === "appointment" && l.status === "issued" && l.acknowledged_at
+      )
+        ? "Signed copy received"
+        : null,
       bank_letter: hasLetter("bank_account") ? "Bank letter issued" : null,
       bank_account: bank ? `${bank.bank_name || "Bank"} — ${bank.account_number}` : null,
       login_account: e.user_id ? "Login exists" : null,
@@ -2545,7 +2598,10 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       supervisor: supervisors.some((s: any) => Number(s.employee_id) === employeeId && Number(s.is_direct) === 1) ? "Direct supervisor set" : null,
       probation_set: svc?.probation_end_date ? `Until ${toDate(svc.probation_end_date)}` : null,
       sim: sim ? `${sim.operator || "SIM"} ${sim.phone_number}` : null,
-      asset_handover: e.user_id && assignments.some((a: any) => Number(a.user_id ?? a.assigned_to) === Number(e.user_id)) ? "Asset assigned" : null
+      asset_handover: e.user_id && assignments.some((a: any) => Number(a.user_id ?? a.assigned_to) === Number(e.user_id)) ? "Asset assigned" : null,
+      pepm_projects: first.projects.length ? first.projects.join(", ").slice(0, 250) : null,
+      mobile_app: first.app_on ? "Mobile App on" : null,
+      dept_team: first.team ? `Team: ${first.team}` : null
     };
     for (const it of items) {
       const found = detect[it.task_key];
@@ -2625,6 +2681,37 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
           has_attachment: !!i.attachment_name
         }))
       );
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // The checklist's first-day steps: what is set, and which of them this
+  // account may do right from the checklist (the page shows only those —
+  // each one still goes through its own module's API and permission).
+  app.get("/api/hr-ops/onboarding/:employeeId/first-day", ...gate, async (req: any, res: any) => {
+    try {
+      const empId = Number(req.params.employeeId);
+      const emps: any[] = await queryDB("SELECT id, name, user_id, department FROM all_employees WHERE id = ?", [empId]);
+      const e = emps[0];
+      if (!e) throw bad("Employee not found.", 404);
+      const isSuper = req.user.role === "superadmin";
+      const mods = isSuper ? null : new Set(await getAdminModules(Number(req.user.id)));
+      const has = (m: string) => isSuper || !!mods?.has(m);
+      const me: any[] = (await queryDB("SELECT can_grant_module_access FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
+      res.json({
+        employee_id: empId,
+        user_id: e.user_id ? Number(e.user_id) : null,
+        name: e.name,
+        ...(await firstDayState(empId, e.user_id ? Number(e.user_id) : null)),
+        can: {
+          projects: has("users"),
+          mobile_app: isSuper || Number(me[0]?.can_grant_module_access || 0) === 1,
+          sim: has("mobile_bill"),
+          id_card: has("hr_operations"),
+          team: has("departments")
+        }
+      });
     } catch (err) {
       fail(res, err);
     }
