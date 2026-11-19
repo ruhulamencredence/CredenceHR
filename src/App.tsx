@@ -1947,7 +1947,6 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
               dashboardNavRequest={dashboardNavRequest}
               leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
-              onLogout={handleLogout}
               onOpenBookRide={(tab) => {
                 requestQuickAccessTab('bookRide', tab);
                 sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');

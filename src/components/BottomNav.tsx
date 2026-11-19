@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X, LogOut } from 'lucide-react';
-import { confirmDialog } from '../lib/confirmDialog';
+import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 import { ChatHead } from './ChatHead';
 import type { User } from '../types';
 
@@ -21,8 +20,6 @@ interface BottomNavProps {
   // The Dashboard's chat head (ChatHead.tsx). Passed only for an account
   // that may use Chat (chatAllowed).
   chat?: { token: string; user: User } | null;
-  // Sign out, at the bottom of the More popup (asks first).
-  onLogout?: () => void;
 }
 
 // One tile in the More popup — same look as the mobile Dashboard's tile menu.
@@ -100,7 +97,7 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
   return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
 }
 
-export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [], chat = null, onLogout }: BottomNavProps) {
+export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [], chat = null }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Check In/Out', icon: Route }] : []),
@@ -236,19 +233,6 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                 <div className="liquid-glass liquid-glass-in rounded-[32px] max-h-[64vh] flex flex-col">
                   <div className="shrink-0 flex items-center justify-between pl-5 pr-3 pt-3">
                     <span className="text-sm font-semibold text-slate-800">More</span>
-                    {/* Sign out up here, so it shows without scrolling the tiles. */}
-                    {onLogout && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setMoreOpen(false);
-                          if (await confirmDialog('Sign out of CredenceHR on this phone?', { confirmLabel: 'Sign out', tone: 'danger' })) onLogout();
-                        }}
-                        className="ml-auto mr-2 liquid-glass-chip h-9 px-3.5 rounded-full flex items-center gap-1.5 text-xs font-semibold text-rose-600 active:scale-95 transition-transform"
-                      >
-                        <LogOut className="w-3.5 h-3.5" /> Sign out
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => setMoreOpen(false)}

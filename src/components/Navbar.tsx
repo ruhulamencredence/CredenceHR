@@ -367,7 +367,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               onOpenProfile={onOpenProfile}
               onOpenMenu={onOpenMobileMenu}
               onGoHome={onGoToDashboard}
-              onLogout={onLogout}
             />
           )}
           </div>

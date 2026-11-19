@@ -5,8 +5,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, House, LayoutGrid, LogOut, MessageCircle, UserRound, X } from 'lucide-react';
-import { confirmDialog } from '../lib/confirmDialog';
+import { Bell, House, LayoutGrid, MessageCircle, UserRound, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 
@@ -24,9 +23,7 @@ export const HeaderMoreMenu: React.FC<{
   onOpenProfile: () => void;
   onOpenMenu: () => void;
   onGoHome: () => void;
-  // Sign out (asks first) — the APK has no other one this easy to find.
-  onLogout?: () => void;
-}> = ({ token, showChat, onOpenAlerts, onOpenChat, onOpenProfile, onOpenMenu, onGoHome, onLogout }) => {
+}> = ({ token, showChat, onOpenAlerts, onOpenChat, onOpenProfile, onOpenMenu, onGoHome }) => {
   const [open, setOpen] = useState(false);
   const [alerts, setAlerts] = useState(0);
   const [chats, setChats] = useState(0);
@@ -104,21 +101,6 @@ export const HeaderMoreMenu: React.FC<{
                 {showChat && row(<MessageCircle className="w-[18px] h-[18px]" />, 'Chat', onOpenChat, chats)}
                 {row(<UserRound className="w-[18px] h-[18px]" />, 'Profile', onOpenProfile)}
                 {row(<LayoutGrid className="w-[18px] h-[18px]" />, 'Menu', onOpenMenu)}
-                {onLogout && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setOpen(false);
-                      if (await confirmDialog('Sign out of CredenceHR on this phone?', { confirmLabel: 'Sign out', tone: 'danger' })) onLogout();
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left active:bg-white/40 border-t border-white/40 mt-1"
-                  >
-                    <span className="liquid-glass-inset w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-rose-600">
-                      <LogOut className="w-[18px] h-[18px]" />
-                    </span>
-                    <span className="text-[15px] font-semibold text-rose-600">Sign out</span>
-                  </button>
-                )}
               </div>
             </div>
           </div>,
