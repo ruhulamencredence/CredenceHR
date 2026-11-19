@@ -4,17 +4,20 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { BellRing, BookOpen, FileSpreadsheet, History, Search } from 'lucide-react';
+import { ArrowLeft, BellRing, BookOpen, FileSpreadsheet, History, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { LoadingBlock } from './LoadingBlock';
+import { useElementHeight } from '../lib/useElementHeight';
 
 // Bill Claim Policy → Who has read the rules: everyone who can file a Bill
 // Claim, whether they confirmed the current rules (Bill Claim → (i) Rules,
 // BillClaimRulesSheet.tsx), an older version, only opened them, or never;
 // and the read log. GET /api/bill-claim-rules/readers (Bill Claim module /
-// Superadmin, the same as this page).
+// Superadmin, with the Bill Claim layer "rules_readers"). A page of its own,
+// opened from Bill Claim Policy; the title / search bar and the table's
+// column titles stay on screen while the list scrolls.
 
 type Status = 'read' | 'old' | 'opened' | 'never';
 interface Person {
@@ -43,7 +46,10 @@ const ST: Record<Status, { label: string; hint: string; chip: string; color: str
 };
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 
-export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: number }> = ({ token, refreshKey }) => {
+export const BillClaimRulesReaders: React.FC<{ token: string; onBack: () => void }> = ({ token, onBack }) => {
+  // The sticky bar's height, so the column titles stick right under it.
+  const [barRef, barH] = useElementHeight(56);
+  const stickTop = 64 + barH;
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Status | ''>('');
@@ -61,7 +67,7 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, refreshKey]);
+  }, [token]);
 
   const count = (s: Status) => (data?.people || []).filter((p) => p.status === s).length;
   const departments = useMemo(() => [...new Set((data?.people || []).map((p) => p.department).filter(Boolean) as string[])].sort(), [data]);
@@ -102,8 +108,25 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
     await saveWorkbookCrossPlatform(wb, 'Bill-Claim-rules-readers.xlsx');
   };
 
-  if (error) return <div className="bg-white border border-slate-200 rounded-2xl p-5 text-sm text-rose-600">{error}</div>;
-  if (!data) return <LoadingBlock />;
+  const back = (
+    <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900">
+      <ArrowLeft className="w-4 h-4" /> Bill Claim Policy
+    </button>
+  );
+  if (error)
+    return (
+      <div className="space-y-3">
+        {back}
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 text-sm text-rose-600">{error}</div>
+      </div>
+    );
+  if (!data)
+    return (
+      <div className="space-y-3">
+        {back}
+        <LoadingBlock />
+      </div>
+    );
 
   const total = data.people.length || 1;
   const R = 70;
@@ -112,12 +135,15 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
   const readPct = Math.round((count('read') / total) * 100);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className="px-5 pt-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-4">
+      {back}
+      {/* Title, actions, search — stays at the top while the list scrolls (computer). */}
+      <div ref={barRef} className="md:sticky md:top-16 md:z-20 bg-white border border-slate-200 rounded-2xl shadow-sm px-4 py-3 space-y-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-orange-600" /> Who has read the rules
-          </h3>
+          </h2>
           <p className="text-[11px] text-slate-500 max-w-xl">
             Everyone who can file a Bill Claim reads and confirms these rules once before their first claim (Bill Claim → (i) Rules), and again after any change. Their own claims are refused until then.
           </p>
@@ -133,8 +159,22 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
           </button>
         </div>
       </div>
-      {msg && <p className="mx-5 mt-2 text-xs text-emerald-700">{msg}</p>}
+      {msg && <p className="text-xs text-emerald-700">{msg}</p>}
+      <div className="flex flex-wrap gap-2">
+        <label className="flex items-center gap-2 flex-1 min-w-[220px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+          <Search className="w-3.5 h-3.5 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, Employee ID, designation or department" aria-label="Search" className="bg-transparent text-xs outline-none flex-1 min-w-0" />
+        </label>
+        <select value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Department" className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+          <option value="">All departments</option>
+          {departments.map((d) => (
+            <option key={d}>{d}</option>
+          ))}
+        </select>
+      </div>
+      </div>
 
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
       <div className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] gap-5 items-center px-5 py-4">
         <div className="relative w-[170px] h-[170px] mx-auto">
           <svg width="170" height="170" viewBox="0 0 170 170">
@@ -194,22 +234,14 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
           <span>The first version of the rules — since {when(data.version.at)}.</span>
         )}
       </div>
-
-      <div className="flex flex-wrap gap-2 px-5 pb-3">
-        <label className="flex items-center gap-2 flex-1 min-w-[220px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-          <Search className="w-3.5 h-3.5 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, Employee ID, designation or department" aria-label="Search" className="bg-transparent text-xs outline-none flex-1 min-w-0" />
-        </label>
-        <select value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Department" className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
-          <option value="">All departments</option>
-          {departments.map((d) => (
-            <option key={d}>{d}</option>
-          ))}
-        </select>
       </div>
-      <div className="overflow-x-auto border-t border-slate-100">
+
+      {/* overflow-clip (not hidden) and overflow-visible on wide screens, so
+          the column titles can stick under the bar while the page scrolls. */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+      <div className="overflow-x-auto xl:overflow-visible">
         <table className="w-full min-w-[780px] text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 text-left">
+          <thead className="sticky z-10 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500 text-left shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: stickTop }}>
             <tr>
               <th className="px-4 py-2.5 font-semibold">Employee</th>
               <th className="px-4 py-2.5 font-semibold">Department</th>
@@ -253,8 +285,9 @@ export const BillClaimRulesReaders: React.FC<{ token: string; refreshKey?: numbe
           </tbody>
         </table>
       </div>
+      </div>
 
-      <div className="border-t border-slate-200 px-5 py-4">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm px-5 py-4">
         <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mb-2">
           <History className="w-3.5 h-3.5 text-slate-500" /> Read log
         </h4>

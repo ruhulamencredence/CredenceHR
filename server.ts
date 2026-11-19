@@ -485,7 +485,9 @@ const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice
 // Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
-const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
+// "rules_readers" = Bill Claim Policy -> Who has read the rules (and its
+// reminder), a page of its own; reading, so on by default.
+const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf", "rules_readers"] as const;
 // HR Operations: "read" = the module as it was; New Joiner Onboarding
 // (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
 // application and its temporary login), "onboarding_review" (see, reject,
@@ -3223,7 +3225,9 @@ async function startServer() {
             ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
           : moduleKey === "employees"
             ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-            : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "bill_claim"
+              ? ["read", "rules_readers"]
+            : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3263,7 +3267,9 @@ async function startServer() {
         ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
       : moduleKey === "employees"
         ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-        : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "bill_claim"
+          ? ["read", "rules_readers"]
+        : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3793,7 +3799,7 @@ async function startServer() {
   });
 
   // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
-  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka });
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template
