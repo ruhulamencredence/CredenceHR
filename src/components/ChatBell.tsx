@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { getChatSocket } from '../lib/chatSocket';
+import { useVisibleInterval } from '../lib/useVisibleInterval';
 
 interface ChatBellProps {
   token: string;
@@ -36,16 +37,16 @@ export const ChatBell: React.FC<ChatBellProps> = ({ token, onOpenChat }) => {
 
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
     const socket = getChatSocket();
     socket?.on('receive_message', fetchUnreadCount);
     socket?.on('message_read', fetchUnreadCount);
     return () => {
-      clearInterval(interval);
       socket?.off('receive_message', fetchUnreadCount);
       socket?.off('message_read', fetchUnreadCount);
     };
   }, [fetchUnreadCount]);
+  // Every 30 s, not while the app is in the background (useVisibleInterval).
+  useVisibleInterval(fetchUnreadCount, 30000);
 
   return (
     <button

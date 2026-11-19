@@ -21,7 +21,7 @@
 | Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs<br>🔒`punch_rules` Double punch rule |
 | Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow<br>🔒`tracking_schedule` Tracking Schedule |
 | Check In/Out | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf |
+| Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf<br>`rules_readers` Who has read the rules |
 | Bill Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Notices | `notices` | `read` Write & publish notices<br>🔒`notice_read_report` Who has read it (report & send again)<br>🔒`notice_email` Send notices by email<br>🔒`notice_animations` Animation library (add / remove) |

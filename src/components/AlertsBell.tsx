@@ -14,6 +14,7 @@ import { apiUrl } from '../lib/api';
 import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { useVisibleInterval } from '../lib/useVisibleInterval';
 
 interface AlertsBellProps {
   token: string;
@@ -96,12 +97,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   }, [token]);
 
   // Poll the badge every 30s regardless of whether the dropdown is open, plus
-  // once immediately on mount.
+  // once immediately on mount. Not while the app is in the background; once
+  // on coming back (useVisibleInterval).
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
   }, [fetchUnreadCount]);
+  useVisibleInterval(fetchUnreadCount, 30000);
 
   useEffect(() => {
     if (open) fetchAlerts();

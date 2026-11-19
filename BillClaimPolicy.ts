@@ -40,6 +40,7 @@
 import type { Express } from "express";
 import { createHash } from "crypto";
 import { activeCompanyId } from "./companyContext";
+import { sendPushToUserIds } from "./PushNotificationService";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -308,6 +309,30 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
         " — a MySQL admin can run SET GLOBAL log_bin_trust_function_creators = 1; once (or grant the TRIGGER/SUPER privilege) and restart the app."
     );
   }
+  // The rules people must read before their first Bill Claim: each change to
+  // the rules is a new version (a hash of the rules, so any change counts),
+  // and every open / confirm of them is kept (Bill Claim → (i) Rules).
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_rule_versions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    company_ref INT NOT NULL,
+    rules_hash CHAR(64) NOT NULL,
+    changed_by VARCHAR(150) NULL,
+    summary VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL,
+    KEY idx_bcrv_company (company_ref, id)
+  )`);
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_rule_reads (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    company_ref INT NOT NULL,
+    user_id INT NOT NULL,
+    version_id INT NOT NULL,
+    action VARCHAR(16) NOT NULL,
+    device VARCHAR(60) NULL,
+    ip VARCHAR(64) NULL,
+    created_at DATETIME NOT NULL,
+    KEY idx_bcrr_user (company_ref, user_id, id),
+    KEY idx_bcrr_company (company_ref, id)
+  )`);
   // A category's limit per day, and its limits by designation (JSON list of
   // { designation_id, designation, max_per_bill, daily_limit, monthly_limit } —
   // a field left blank there uses the category's own).
@@ -841,6 +866,52 @@ export async function attachClaimItems(queryDB: QueryDB, rows: any[]): Promise<a
 
 // ---- routes ----
 
+// ---- the rules people read before claiming (Bill Claim → (i) Rules) ----
+
+/** A fingerprint of everything the rules sheet says: the policy and every active category. */
+async function rulesHash(queryDB: QueryDB): Promise<string> {
+  const policy = await loadPolicy(queryDB);
+  const cats = (await loadCategories(queryDB))
+    .filter((c) => c.is_active)
+    .map((c) => [c.name, c.max_per_bill, c.daily_limit, c.monthly_limit, c.receipt_required, c.designation_limits]);
+  return createHash("sha256").update(JSON.stringify({ policy, cats })).digest("hex");
+}
+
+export interface RulesVersion {
+  id: number;
+  no: number;
+  at: string | null;
+  changed_by: string | null;
+  summary: string | null;
+}
+
+/** The current rules version — a new one is opened the first time the rules are seen changed. */
+export async function currentRulesVersion(queryDB: QueryDB): Promise<RulesVersion> {
+  const company = activeCompanyId();
+  const hash = await rulesHash(queryDB);
+  const last: any = ((await queryDB("SELECT * FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id DESC LIMIT 1", [company])) || [])[0];
+  if (!last || last.rules_hash !== hash) {
+    // Who changed it: the latest Change History entry, if there is one.
+    const h: any = last ? ((await queryDB("SELECT actor_name, target_name FROM bill_claim_policy_history WHERE company_ref = ? AND action <> 'denied' ORDER BY id DESC LIMIT 1", [company]).catch(() => [])) || [])[0] : null;
+    await queryDB("INSERT INTO bill_claim_rule_versions (company_ref, rules_hash, changed_by, summary, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())", [
+      company,
+      hash,
+      h?.actor_name || null,
+      h?.target_name ? String(h.target_name).slice(0, 255) : last ? "Rules changed" : "First version"
+    ]);
+  }
+  const rows: any[] = (await queryDB("SELECT * FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id ASC", [company])) || [];
+  const cur = rows[rows.length - 1];
+  return { id: Number(cur.id), no: rows.length, at: cur.created_at ? new Date(cur.created_at + (String(cur.created_at).endsWith("Z") ? "" : "Z")).toISOString() : null, changed_by: cur.changed_by || null, summary: cur.summary || null };
+}
+
+/** Has this person confirmed the current rules? (Their own claims need it.) */
+export async function hasReadCurrentRules(queryDB: QueryDB, userId: number): Promise<boolean> {
+  const v = await currentRulesVersion(queryDB);
+  const row = ((await queryDB("SELECT id FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND version_id = ? AND action = 'confirm' LIMIT 1", [activeCompanyId(), userId, v.id])) || [])[0];
+  return !!row;
+}
+
 export function registerBillClaimPolicyRoutes(
   app: Express,
   deps: {
@@ -848,10 +919,11 @@ export function registerBillClaimPolicyRoutes(
     requireBillClaimAccess: any;
     queryDB: QueryDB;
     getAdminModules: (userId: number) => Promise<string[]>;
+    hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
     todayInDhaka: () => string;
   }
 ) {
-  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka } = deps;
+  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka } = deps;
 
   // Viewing: Superadmin and the Bill Claim (conveyance) module. Changing: Superadmin.
   const canView = async (req: any) => req.user?.role === "superadmin" || (await getAdminModules(req.user.id)).includes("bill_claim");
@@ -859,6 +931,17 @@ export function registerBillClaimPolicyRoutes(
     try {
       if (await canView(req)) return next();
       res.status(403).json({ error: "You don't have access to Bill Claim Policy." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+  // Who has read the rules (its own page): the page's viewers who also have
+  // the Bill Claim layer "rules_readers" (on unless layers were saved without it).
+  const canSeeReaders = async (req: any) => req.user?.role === "superadmin" || ((await canView(req)) && (await hasModuleLayer(req.user, "bill_claim", "rules_readers")));
+  const requireReaders = async (req: any, res: any, next: any) => {
+    try {
+      if (await canSeeReaders(req)) return next();
+      res.status(403).json({ error: "You don't have access to who has read the Bill Claim rules." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -880,7 +963,8 @@ export function registerBillClaimPolicyRoutes(
         defs: POLICY_DEFS,
         values: await loadPolicy(queryDB),
         categories: await loadCategories(queryDB),
-        can_edit: req.user.role === "superadmin"
+        can_edit: req.user.role === "superadmin",
+        can_see_readers: await canSeeReaders(req)
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1087,6 +1171,121 @@ export function registerBillClaimPolicyRoutes(
   app.get("/api/bill-claim-categories", authenticateToken, async (_req: any, res) => {
     try {
       res.json(await loadCategories(queryDB));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- (i) Rules: read before the first claim, and again after a change ----
+  const utc = (v: any) => (v ? new Date(String(v).replace(" ", "T") + (String(v).endsWith("Z") ? "" : "Z")).toISOString() : null);
+  const myReading = async (userId: number) => {
+    const version = await currentRulesVersion(queryDB);
+    const rows: any[] =
+      (await queryDB("SELECT version_id, created_at FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND action = 'confirm' ORDER BY id DESC", [activeCompanyId(), userId])) || [];
+    const current = rows.find((r) => Number(r.version_id) === version.id);
+    return { version, confirmed_at: current ? utc(current.created_at) : null, confirmed_older: !current && rows.length > 0, last_confirmed_at: rows[0] ? utc(rows[0].created_at) : null };
+  };
+  app.get("/api/bill-claim-rules/mine", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
+    try {
+      res.json(await myReading(Number(req.user.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // { action: 'open' | 'confirm', device } — a confirm counts for the current rules only.
+  app.post("/api/bill-claim-rules/read", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
+    try {
+      const action = req.body?.action === "confirm" ? "confirm" : "open";
+      const version = await currentRulesVersion(queryDB);
+      if (action === "confirm" && Number(req.body?.version_id) && Number(req.body.version_id) !== version.id) {
+        return res.status(409).json({ error: "The rules changed while you were reading — read the new ones and confirm again." });
+      }
+      const device = String(req.body?.device || "").trim().slice(0, 60) || null;
+      // One "open" a person a version is enough; every confirm is kept.
+      const already =
+        action === "open"
+          ? ((await queryDB("SELECT id FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND version_id = ? AND action = 'open' AND created_at > UTC_TIMESTAMP() - INTERVAL 30 MINUTE LIMIT 1", [activeCompanyId(), req.user.id, version.id])) || [])[0]
+          : null;
+      if (!already) {
+        await queryDB("INSERT INTO bill_claim_rule_reads (company_ref, user_id, version_id, action, device, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())", [
+          activeCompanyId(),
+          req.user.id,
+          version.id,
+          action,
+          device,
+          actorFrom(req).ip
+        ]);
+      }
+      res.json(await myReading(Number(req.user.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // Bill Claim Policy → Who has read the rules: everyone who can file a Bill
+  // Claim (the Bill Claim switch, the Bill Claim module, or Superadmin), and the log.
+  const claimers = async () => {
+    const users: any[] = (await queryDB("SELECT id, name, role, can_view_bill_claims FROM users WHERE COALESCE(is_onboarding, 0) = 0", []).catch(() => queryDB("SELECT id, name, role, can_view_bill_claims FROM users", []))) || [];
+    const mod: any[] = (await queryDB("SELECT DISTINCT user_id FROM admin_module_permissions WHERE module_key = 'bill_claim' AND company_id = ?", [activeCompanyId()]).catch(() => [])) || [];
+    const withModule = new Set(mod.map((m) => Number(m.user_id)));
+    return users.filter((u) => u.role === "superadmin" || !!Number(u.can_view_bill_claims) || withModule.has(Number(u.id)));
+  };
+  app.get("/api/bill-claim-rules/readers", authenticateToken, requireReaders, async (_req: any, res) => {
+    try {
+      const version = await currentRulesVersion(queryDB);
+      const versions: any[] = (await queryDB("SELECT id FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id ASC", [activeCompanyId()])) || [];
+      const noOf = new Map<number, number>(versions.map((v, i) => [Number(v.id), i + 1]));
+      const people = await claimers();
+      const reads: any[] = (await queryDB("SELECT * FROM bill_claim_rule_reads WHERE company_ref = ? ORDER BY id ASC", [activeCompanyId()])) || [];
+      const emps: any[] = (await queryDB("SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IS NOT NULL ORDER BY is_active ASC", []).catch(() => [])) || [];
+      const empOf = new Map<number, any>(emps.map((e) => [Number(e.user_id), e]));
+      const names = new Map<number, string>(((await queryDB("SELECT id, name FROM users", [])) || []).map((u: any) => [Number(u.id), u.name]));
+      const rows = people.map((u: any) => {
+        const mine = reads.filter((r) => Number(r.user_id) === Number(u.id));
+        const confirms = mine.filter((r) => r.action === "confirm");
+        const cur = confirms.filter((r) => Number(r.version_id) === version.id).pop();
+        const last = confirms[confirms.length - 1];
+        const openedNow = mine.some((r) => Number(r.version_id) === version.id);
+        const e = empOf.get(Number(u.id));
+        return {
+          user_id: Number(u.id),
+          name: u.name,
+          employee_code: e?.employee_id || null,
+          designation: e?.designation || null,
+          department: e?.department || null,
+          status: cur ? "read" : last ? "old" : openedNow || mine.length ? "opened" : "never",
+          confirmed_at: utc((cur || last)?.created_at),
+          confirmed_version: (cur || last) ? noOf.get(Number((cur || last).version_id)) || null : null,
+          device: (cur || last || mine[mine.length - 1])?.device || null,
+          opens: mine.filter((r) => r.action === "open").length
+        };
+      });
+      const log = reads
+        .slice(-200)
+        .reverse()
+        .map((r) => ({ at: utc(r.created_at), name: names.get(Number(r.user_id)) || "Unknown", action: r.action, version: noOf.get(Number(r.version_id)) || null, device: r.device || null }));
+      const changes = (await queryDB("SELECT id, changed_by, summary, created_at FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id DESC LIMIT 20", [activeCompanyId()])) || [];
+      res.json({
+        version,
+        people: rows,
+        log,
+        changes: changes.map((c: any) => ({ no: noOf.get(Number(c.id)) || null, at: utc(c.created_at), by: c.changed_by || null, summary: c.summary || null }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // A push to everyone who hasn't confirmed the current rules.
+  app.post("/api/bill-claim-rules/remind", authenticateToken, requireReaders, async (req: any, res) => {
+    try {
+      const version = await currentRulesVersion(queryDB);
+      const done = new Set<number>(
+        ((await queryDB("SELECT DISTINCT user_id FROM bill_claim_rule_reads WHERE company_ref = ? AND version_id = ? AND action = 'confirm'", [activeCompanyId(), version.id])) || []).map((r: any) => Number(r.user_id))
+      );
+      const to = (await claimers()).map((u: any) => Number(u.id)).filter((id: number) => !done.has(id) && id !== Number(req.user.id));
+      if (to.length) {
+        await sendPushToUserIds(queryDB, to, "Bill Claim rules", "Read the Bill Claim rules and confirm before your next claim — tap (i) Rules on Bill Claim.", { type: "bill_claim_rules" }, Number(req.user.id));
+      }
+      res.json({ success: true, sent: to.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

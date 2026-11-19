@@ -4,10 +4,12 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert, RotateCcw } from 'lucide-react';
+import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert, RotateCcw, BookOpen, ChevronRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues, BillClaimDesignationLimit } from '../types';
 import { SearchSelect } from './Combobox';
+import { BillClaimRulesReaders } from './BillClaimRulesReaders';
+import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
@@ -297,6 +299,11 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
   const [values, setValues] = useState<BillClaimPolicyValues>({});
   const [categories, setCategories] = useState<BillClaimCategory[]>([]);
   const [canEdit, setCanEdit] = useState(false);
+  // Who has read the rules — a page of its own (BillClaimRulesReaders.tsx),
+  // opened by its button here; only with the Bill Claim layer "rules_readers".
+  const [canSeeReaders, setCanSeeReaders] = useState(false);
+  const [readersOpen, setReadersOpen] = useState(false);
+  useBackButtonClose(readersOpen, () => setReadersOpen(false));
   const [savingRules, setSavingRules] = useState(false);
   // Category being edited: an id, 'new', or null.
   const [editing, setEditing] = useState<number | 'new' | null>(null);
@@ -323,6 +330,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
       setValues(data.values);
       setCategories(data.categories);
       setCanEdit(!!data.can_edit);
+      setCanSeeReaders(!!data.can_see_readers);
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -429,6 +437,18 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
   if (loading) {
     return (
       <LoadingBlock />
+    );
+  }
+
+  if (readersOpen && canSeeReaders) {
+    return (
+      <BillClaimRulesReaders
+        token={token}
+        onBack={() => {
+          setReadersOpen(false);
+          window.scrollTo({ top: 0 });
+        }}
+      />
     );
   }
 
@@ -555,7 +575,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
 
   return (
     <div className="space-y-6">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-start gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-wrap items-start gap-3">
         <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
           <ShieldCheck className="w-5 h-5" />
         </span>
@@ -566,6 +586,18 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
             {!canEdit && ' Only the Superadmin can change them.'}
           </p>
         </div>
+        {canSeeReaders && (
+          <button
+            type="button"
+            onClick={() => {
+              setReadersOpen(true);
+              window.scrollTo({ top: 0 });
+            }}
+            className="ml-auto shrink-0 self-center inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"
+          >
+            <BookOpen className="w-3.5 h-3.5" /> Who has read the rules <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {error && (

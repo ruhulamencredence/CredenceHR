@@ -260,3 +260,10 @@
 **প্রশ্ন: Remote Attendance-এ "Any project" দিলে একজন User কোন কোন project-এ check in করতে পারেন?**
 
 উত্তর: কোম্পানির যেকোনো project-এ — তবে শুধু সেই project-এর location-এর radius-এর ভেতরে দাঁড়িয়ে (server দূরত্ব মাপে)। নির্দিষ্ট project-এ সীমিত রাখতে Module Access-এ "Only these projects" (From / To তারিখসহ) বা "Their Branch" বাছুন।
+
+
+**প্রশ্ন: Bill Claim-এর নিয়ম "পড়েছি" না দিলে কেউ কি app এড়িয়ে সরাসরি API দিয়ে claim জমা দিতে পারেন?**
+না। `POST /api/bill-claims` ও নিজের claim edit-এ server দেখে কর্মী বর্তমান নিয়মের version নিশ্চিত করেছেন কিনা (`hasReadCurrentRules`); না করলে 403 `rules_unread`। নিয়ম বদলালে নতুন version হয়, তাই আবার পড়তে হয়। কে পড়েছেন সেই তালিকা ও reminder শুধু Superadmin বা Bill Claim module-ওয়ালারা দেখেন / পাঠান; কর্মী শুধু নিজের অবস্থা দেখেন।
+
+**প্রশ্ন: Bill Claim Policy দেখতে পারেন এমন সবাই কি "Who has read the rules" (কে নিয়ম পড়েছেন) তালিকাও দেখতে পারেন?**
+না, আলাদা অনুমতি লাগে: Bill Claim module-এর layer "Who has read the rules" (`rules_readers`)। যে account-এ Bill Claim-এর layer আলাদা করে save করা নেই, তাতে এটা চালু থাকে; layer save করা থাকলে টিক না দিলে তালিকা ও reminder দুটোই server-এ 403, বোতামও দেখায় না। Superadmin সবসময় পান।
