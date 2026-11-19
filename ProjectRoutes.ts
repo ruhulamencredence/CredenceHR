@@ -141,6 +141,17 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
         "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
         [project_name.trim(), location.lat, location.lng, location.label, location.radius, id]
       );
+      // Budget rows name their Project in text (budget_items.project_name,
+      // matched by name): a new name reaches them too, so the Project's old
+      // Budgets keep working.
+      let budgetRowsRenamed = 0;
+      if (before.length && String(before[0].project_name).trim().toLowerCase() !== project_name.trim().toLowerCase()) {
+        const r: any = await queryDB("UPDATE budget_items SET project_name = ? WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(?))", [project_name.trim(), before[0].project_name]);
+        budgetRowsRenamed = Number(r?.affectedRows || 0);
+      } else if (before.length && String(before[0].project_name) !== project_name.trim()) {
+        // Only letter case / spaces changed: still keep the rows' text the same.
+        await queryDB("UPDATE budget_items SET project_name = ? WHERE LOWER(TRIM(project_name)) = LOWER(TRIM(?))", [project_name.trim(), before[0].project_name]);
+      }
       // Entry sharing (PepmTeam.ts): who sees this Project's PEPM entries.
       let forFilled = 0;
       if (req.body.entry_scope !== undefined) {
@@ -167,7 +178,7 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
           await sync(linked.branch_name);
         }
       }
-      res.json({ success: true, for_filled: forFilled });
+      res.json({ success: true, for_filled: forFilled, budget_rows_renamed: budgetRowsRenamed });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

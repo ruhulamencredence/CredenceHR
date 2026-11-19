@@ -83,3 +83,14 @@ ID card requests, Department teams — each only for an account allowed to do it
   (Anamika struck, + Rupayan, Central Inventory stays), check-in ends / from, + QA Rupayan Site Team; switching to QA
   Head Office says no linked project and offers "Also give PEPM projects"; no page errors.
 - Not tested end to end here: a future-dated transfer running on its day (`applyDueHrActions`, the same code path).
+
+## Project names in Budget rows
+
+- `scripts/project-names-api.mjs`: **13/13** — an import with a typo, a case-only difference and a really new name stops
+  (409) listing the typo (2 rows, the look-alike project suggested) and the new name, not the case-only one; nothing saved,
+  no project made; with project_map (typo → the project, new → "new") all 4 rows import, the typo and lower-case rows under
+  the project's own spelling, no duplicate project, the new one added; renaming the project renames its 3 Budget rows;
+  a later import with the new name goes straight in.
+- `scripts/project-names-ui.cjs`: **6/6** — Data Import → "Import more rows" with a misspelt sheet opens "Project names not
+  in Projects" with the name; nothing saved yet; picking the look-alike and "Import with these projects" imports the row
+  under the real project; no project made for the typo; no page errors.

@@ -43,6 +43,7 @@ import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPol
 import { SearchSelect } from './Combobox';
 import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
 import { ProjectAccessPopup } from './ProjectAccessPopup';
+import { ProjectMatchPopup, type UnknownProject } from './ProjectMatchPopup';
 import { DepartmentTeamsEditor, type DepartmentTeamsEditorHandle } from './DepartmentTeamsEditor';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
@@ -1589,6 +1590,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   // Entry sharing of the Project being added / edited (ProjectEntrySharing.tsx).
   const [projectEntryScope, setProjectEntryScope] = useState<EntryScope>('team');
+  // Budget import: project names to match first (ProjectMatchPopup.tsx).
+  const [projectMatch, setProjectMatch] = useState<{ budgetId: number; body: any; unknown: UnknownProject[] } | null>(null);
+  const [projectMatchBusy, setProjectMatchBusy] = useState(false);
   const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
@@ -2555,25 +2559,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       longTask.step(28, 'Uploading…');
       longTask.creep(65);
+      const body = {
+        rows,
+        file_base64: fileBase64,
+        file_name: file.name,
+        file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      };
       const res = await xhrJson(`/api/budgets/${budgetId}/import`, {
         method: 'POST',
         token,
-        body: {
-          rows,
-          file_base64: fileBase64,
-          file_name: file.name,
-          file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        },
+        body,
         onUpload: (f) => {
           longTask.step(28 + f * 37, f < 1 ? `Uploading… ${Math.round(f * 100)}%` : undefined);
           if (f >= 1) longTask.creep(96, `Saving ${rows.length.toLocaleString()} rows on the server…`, rows.length * 4);
         }
       });
       const data = res.data;
+      // Project names not in Projects: nothing saved yet — the Admin matches
+      // them (ProjectMatchPopup.tsx) and the import runs again.
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ budgetId, body, unknown: data.needs_project_match });
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Import failed');
       await longTask.finish();
       taskDone = true;
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      if (!taskDone) longTask.close();
+      setImportingBudgetId(null);
+      pendingImportBudgetId.current = null;
+    }
+  };
 
+  // The same import again, with the Admin's project for each unknown name.
+  const finishProjectMatch = async (map: Record<string, number | 'new'>) => {
+    if (!projectMatch) return;
+    setProjectMatchBusy(true);
+    try {
+      const res = await xhrJson(`/api/budgets/${projectMatch.budgetId}/import`, { method: 'POST', token, body: { ...projectMatch.body, project_map: map } });
+      const data = res.data;
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ ...projectMatch, unknown: data.needs_project_match });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+      setProjectMatch(null);
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setProjectMatch(null);
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      setProjectMatchBusy(false);
+    }
+  };
+
+  const afterBudgetImport = (data: any) => {
+    {
       setMessage({
         type: 'success',
         text: `Imported ${data.items_inserted} new row(s)${
@@ -2585,12 +2629,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // "<Budget> - MPR Updated up to <date>": check and publish it now.
       if (data.notice_draft && canSee('notices')) setBudgetNotice(data.notice_draft);
       fetchAllData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
-    } finally {
-      if (!taskDone) longTask.close();
-      setImportingBudgetId(null);
-      pendingImportBudgetId.current = null;
     }
   };
 
@@ -7915,6 +7953,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           templates={accessTemplates}
           onChanged={loadAccessTemplates}
           onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
+
+      {projectMatch && (
+        <ProjectMatchPopup
+          unknown={projectMatch.unknown}
+          projects={projects}
+          busy={projectMatchBusy}
+          onCancel={() => {
+            setProjectMatch(null);
+            setMessage({ type: 'error', text: 'Import cancelled — nothing was saved.' });
+          }}
+          onConfirm={finishProjectMatch}
         />
       )}
 
