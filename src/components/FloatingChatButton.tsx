@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { getChatSocket } from '../lib/chatSocket';
+import { useVisibleInterval } from '../lib/useVisibleInterval';
 
 interface FloatingChatButtonProps {
   token: string;
@@ -59,7 +60,6 @@ export const FloatingChatButton: React.FC<FloatingChatButtonProps> = ({ token, o
 
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000);
     const socket = getChatSocket();
     // A real new message both refreshes the count and wiggles the button
     // right away, instead of waiting for the idle nudge below.
@@ -70,18 +70,17 @@ export const FloatingChatButton: React.FC<FloatingChatButtonProps> = ({ token, o
     socket?.on('receive_message', onNewMessage);
     socket?.on('message_read', fetchUnreadCount);
     return () => {
-      clearInterval(interval);
       socket?.off('receive_message', onNewMessage);
       socket?.off('message_read', fetchUnreadCount);
     };
   }, [fetchUnreadCount, triggerAttention]);
+  // Every 30 s, not while the app is in the background (useVisibleInterval).
+  useVisibleInterval(fetchUnreadCount, 30000);
 
   // Every so often, nudge the button with a brief wiggle on its own —
   // a quiet attention-getter for anyone who hasn't noticed it yet.
-  useEffect(() => {
-    const interval = setInterval(triggerAttention, 15000);
-    return () => clearInterval(interval);
-  }, [triggerAttention]);
+  // Not while the app is in the background, nor at once on coming back.
+  useVisibleInterval(triggerAttention, 15000, false);
 
   if (hidden) return null;
 

@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Bell, House, LayoutGrid, MessageCircle, UserRound, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { useVisibleInterval } from '../lib/useVisibleInterval';
 
 // The ⋮ button on the right of the blended phone header (Navbar.tsx `blend`
 // — My Claims, Leave, My Tasks…): the header there only has room for Back,
@@ -48,9 +49,9 @@ export const HeaderMoreMenu: React.FC<{
   }, [count, showChat]);
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 30000);
-    return () => clearInterval(t);
   }, [refresh]);
+  // Every 30 s, not while the app is in the background (useVisibleInterval).
+  useVisibleInterval(refresh, 30000);
   useEffect(() => {
     if (open) refresh();
   }, [open, refresh]);
