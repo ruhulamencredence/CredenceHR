@@ -52,6 +52,21 @@ erDiagram
     int claim_id FK
     decimal amount
   }
+  bill_claim_rule_reads {
+    bigint id PK
+    int user_id FK
+    int company_ref
+    int version_id
+    varchar action
+    varchar device
+    varchar ip
+  }
+  bill_claim_rule_versions {
+    int id PK
+    int company_ref
+    varchar changed_by
+    varchar summary
+  }
   bill_claims {
     int id PK
     int user_id FK
@@ -166,6 +181,7 @@ erDiagram
   leave_categories ||..o{ bill_claim_items : "category_id"
   bill_claims ||--o{ bill_claim_references : "bill_claim_id"
   claims ||--o{ bill_claim_references : "claim_id"
+  users ||..o{ bill_claim_rule_reads : "user_id"
   users ||--o{ bill_claims : "user_id"
   approval_requests ||..o{ claim_approval_signatures : "approval_request_id"
   users ||--o{ claims : "user_id"

@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭১টি টেবিল, ২৯৪৭টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৩টি টেবিল, ২৯৬১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2634,6 +2634,30 @@ Unique: `uniq_bcp_company_key`(company_id,policy_key)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `claim_id`(claim_id)
+
+### `bill_claim_rule_reads`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | bigint(20) | না | PK auto_increment | |
+| `company_ref` | int(11) | না |  | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `version_id` | int(11) | না |  | |
+| `action` | varchar(16) | না |  | |
+| `device` | varchar(60) | হ্যাঁ |  | |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `created_at` | datetime | না |  | |
+
+### `bill_claim_rule_versions`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_ref` | int(11) | না |  | |
+| `rules_hash` | char(64) | না |  | |
+| `changed_by` | varchar(150) | হ্যাঁ |  | |
+| `summary` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | datetime | না |  | |
 
 ### `bill_claims`
 
