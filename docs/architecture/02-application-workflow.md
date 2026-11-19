@@ -401,6 +401,14 @@ flowchart LR
 - **MPR No ও Qty:** team-এর কেউ একটা MPR No নিলে team-এর যে কেউ তার বাকি Qty নিতে পারে; অন্য প্রজেক্টের জন্য বন্ধ। Qty-র সীমা পুরো team মিলিয়ে।
 - **Transfer:** প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের কোনো entry আর দেখা বা বদলানো যায় না (নিজের দেওয়াগুলোও না); নতুন জনকে প্রজেক্ট দিলেই সব পুরনো entry পায়। entry কোথাও সরে না।
 - **আগের ডাটা:** চালু হওয়ার সময় একবার আগের প্রতিটা Budget Final Submit তার entry-র প্রজেক্টগুলোতে আটকানো হিসেবে লেখা হয় (`ensurePepmTeamSchema`) — আগে যা আটকানো ছিল ঠিক তাই থাকে।
+- **Entry sharing (১৯ নভেম্বর):** প্রতিটা প্রজেক্টের নিজের নিয়ম — Admin Panel → Projects → Add / Edit → **Entry sharing** (`projects.entry_scope`, `ProjectEntrySharing.tsx`; বদলাতে Projects module-এর Edit layer)।
+  - **Team** (default, আগের মতো): প্রজেক্টের সবাই সব entry দেখে ও বদলায়।
+  - **Own entries only:** প্রত্যেকে শুধু নিজের দেওয়া entry দেখে ও বদলায়; Final Submit শুধু নিজেরগুলো আটকায়।
+  - **By home project** (যেমন Central Inventory, যেটা সবাইকে দেওয়া): entry দেওয়ার সময় "For (your project)" — যে দিচ্ছে তার নিজের অন্য (By home project নয় এমন) প্রজেক্ট (`entries.for_project_id`, `EntryForField.tsx`, `GET /api/entries/for-options`)। একটা থাকলে নিজে বসে, কয়েকটা থাকলে বাছতে হয়, একটাও না থাকলে খালি — তখন শুধু সে নিজে দেখে। entry দেখে ও বদলায় যে দিয়েছে আর For-প্রজেক্টের team; অন্য team-এর নয়। Job-এ পরে যোগ হওয়া সারি, split আর Job Edit-এর নতুন সারি Job-এর For পায়। For একবার বসলে পরে transfer হলেও বদলায় না।
+  - **Final Submit, MPR No:** lock আর MPR No-র মালিকানা এখন (Budget, প্রজেক্ট, "share key") ধরে — Team = পুরো প্রজেক্ট, Own = একজন, By home project = For-এর team (`budget_project_locks.share_key`)। তাই Anamika team-এর Final Submit Central Inventory-তে শুধু Anamika-র অংশ আটকায়, Rupayan-এরটা খোলা থাকে। Item-এর বাকি Qty আগের মতো প্রজেক্ট ধরে (একটা মোট)।
+  - **পুরনো entry:** By home project করলে আগের entry-গুলো যে দিয়েছে তার একটাই প্রজেক্ট থাকলে সেটা For পায়; কয়েকটা থাকলে Edit পাতায় মানুষ ধরে তালিকা আসে, Admin "Set For" দিয়ে বাছেন (`GET /api/projects/:id/for-gaps`, `POST /api/projects/:id/for-fill`)।
+  - **Team বানানো:** আলাদা জায়গা নেই — Admin Panel → Users → নাম → Access → Projects (Budget / Jobs / MPR)-এ টিক (`ProjectAccessPopup.tsx`): টিক দেওয়া প্রজেক্ট উপরে, প্রতিটার নিচে team-এর বাকিদের নাম আর ঐ প্রজেক্টে সে কী দেখবে; প্রজেক্টের পাশে Entry sharing chip।
+  - Reports (`?scope=all`, Reports Read layer) আগের মতো সব দেখে, entry-তে For-এর নামসহ; Entry Details-এ "For Anamika" লেখা থাকে।
 
 **অন্য প্রজেক্ট / সবার entry:** অন্যের entry (team-এর বাইরে) দেখা যায় শুধু Admin Panel → PEPM Reports-এ (`?scope=all`), Reports module-এর Read layer থাকলে (Superadmin সবসময়)। team-এর বাইরের entry-তে Self Service-এর edit, split, Add MPR আর delete শুধু Reports-এর Edit (`edit_add`) বা Delete (`delete_trash`) layer থাকলে — শুধু Admin role হলে চলে না। Admin Panel-এর Reports নিজের API দিয়ে (`/api/reports/entries/:id`) একই layer-এ edit / delete করে।
 

@@ -261,7 +261,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
 
   // One MPR row as the Dispatch page shows it.
   const ROW_SQL = `
-    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.budget_id, e.created_by,
+    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.budget_id, e.created_by, e.for_project_id,
       e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at, e.md_queued_by, e.md_confirmed_at,
       qu.name AS queued_by_name, cu.name AS confirmed_by_name,
       p.project_name, m.mpr_no, j.job_no, b.budget_name, u.name AS user_name,
@@ -678,7 +678,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by)) || !entry.md_queued_at || entry.md_confirmed_at) continue;
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by, entry.for_project_id)) || !entry.md_queued_at || entry.md_confirmed_at) continue;
         const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
         if (Number(sent[0]?.n || 0) > 0) continue;
         const r: any = await queryDB("UPDATE entries SET md_confirmed_at = NOW(), md_confirmed_by = ? WHERE id = ? AND md_queued_at IS NOT NULL AND md_confirmed_at IS NULL", [me, id]);
@@ -763,7 +763,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by))) {
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by, entry.for_project_id))) {
           notYours++;
           continue;
         }

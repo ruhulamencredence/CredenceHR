@@ -1205,6 +1205,9 @@ export interface Project {
   location_lng?: number | null;
   location_label?: string | null;
   location_radius?: number | null; // meters — optional site-radius circle around the pin
+  // PEPM Entry sharing (PepmTeam.ts): who sees this Project's entries —
+  // the whole team, each person their own, or by home project.
+  entry_scope?: 'team' | 'own' | 'home';
   // The Branch this Project is kept in step with (branches.project_id) and
   // its type — null when no Branch is linked.
   linked_branch_id?: number | null;
@@ -1296,6 +1299,9 @@ export interface Entry {
   user_name?: string;
   // Who entered the row — a Project team has several members (PepmTeam.ts).
   entered_by_name?: string | null;
+  // "By home project" Projects (PepmTeam.ts): the project the entry is For.
+  for_project_id?: number | null;
+  for_project_name?: string | null;
   budget_name?: string | null;
   created_at?: string;
   // Pulled from the matching imported Budget Excel row (budget_id + MRF No + Description)

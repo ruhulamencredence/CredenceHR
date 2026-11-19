@@ -67,6 +67,7 @@ import { Spinner } from './Spinner';
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { useCachedState } from '../lib/screenCache';
+import { EntryForField } from './EntryForField';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -342,6 +343,7 @@ const EntryRow = React.memo(function EntryRow({
         {it.job_no}
         {/* A Project team has several members (PepmTeam.ts): who entered this row. */}
         {it.entered_by_name && <div className="text-[10px] font-normal text-slate-400 truncate" title={`Entered by ${it.entered_by_name}`}>by {it.entered_by_name}</div>}
+        {it.for_project_name && <div className="text-[10px] font-semibold text-violet-600 truncate" title="Shared with this project's team">For {it.for_project_name}</div>}
       </td>
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
@@ -645,6 +647,7 @@ const EntryCard = React.memo(function EntryCard({
             {split && <SplitBadge split={split} />}
           </div>
           {it.entered_by_name && <div className="text-[10px] text-slate-400 truncate">by {it.entered_by_name}</div>}
+          {it.for_project_name && <div className="text-[10px] font-semibold text-violet-600 truncate">For {it.for_project_name}</div>}
         </div>
         {isEditing ? (
           <div className="flex items-center gap-1 flex-shrink-0">
@@ -1533,6 +1536,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Form state
   const [entryDate, setEntryDate] = useState<string>(todayDateOnlyString());
   const [projectId, setProjectId] = useState<string>('');
+  // "For" on a By-home-project Project (EntryForField.tsx).
+  const [forProjectId, setForProjectId] = useState<string>('');
   // Admin-set Delivery Date "minimum lead time" for the New Job Entry form's
   // own rows below (Condition Set's "entry" type — see
   // deliveryDateConditions.ts). Re-resolves whenever the Project/Budget
@@ -2710,6 +2715,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             body: JSON.stringify({
               budget_id: selectedBudget.id,
               project_id: Number(projectId),
+              ...(forProjectId ? { for_project_id: Number(forProjectId) } : {}),
               job_name: jobName.trim(),
               job_duration: jobDuration.trim(),
               items: itemsPayload
@@ -3854,6 +3860,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </p>
                 )}
               </div>
+
+              {/* For (a "By home project" Project, e.g. Central Inventory). */}
+              {!editingJob && <EntryForField token={token} projectId={projectId} value={forProjectId} onChange={setForProjectId} />}
 
               {/* Job Name (Manually entered by the user) */}
               <div>
