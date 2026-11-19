@@ -13,8 +13,11 @@ import { retryImport } from '../lib/chunkReload';
 type LottieProps = React.ComponentProps<typeof import('lottie-react')['Lottie']>;
 type LottieLightProps = React.ComponentProps<typeof import('lottie-react')['LottieLight']>;
 
-const LottieFull = lazy(retryImport(() => import('lottie-react').then((m) => ({ default: m.Lottie }))));
-const LottieSmall = lazy(retryImport(() => import('lottie-react').then((m) => ({ default: m.LottieLight }))));
+// Each player on its own (vite.config.ts aliases): an animation shown with
+// LottieLight never downloads the full player, and neither downloads the
+// unused svg one.
+const LottieFull = lazy(retryImport(() => import('lottie-react/full').then((m) => ({ default: m.Lottie }))));
+const LottieSmall = lazy(retryImport(() => import('lottie-react/light').then((m) => ({ default: m.LottieLight }))));
 
 const Placeholder: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className, style }) => (
   <span className={className} style={{ display: 'inline-block', ...style }} />

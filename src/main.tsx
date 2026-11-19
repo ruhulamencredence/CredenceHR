@@ -85,6 +85,22 @@ try {
 } catch {
   // not available — website look
 }
+// The Android app: lighter "glass" so popups and sheets scroll smoothly. A
+// frosted blur repaints everything behind it on every frame, and the Android
+// WebView does that on the CPU on many phones (a measured More sheet: 30 fps
+// with the full blur, 53 without). index.css html[data-lite-glass] makes the
+// blurs smaller (the same look, lighter); a low-end phone (4 cores or fewer,
+// or 4 GB of memory or less) gets them smaller still.
+// The website and the iPhone app keep the full look.
+try {
+  if (Capacitor.getPlatform() === 'android') {
+    const cores = Number(navigator.hardwareConcurrency || 8);
+    const memory = Number((navigator as any).deviceMemory || 8);
+    document.documentElement.dataset.liteGlass = cores <= 4 || memory <= 4 ? 'low' : '1';
+  }
+} catch {
+  // not available — full look
+}
 applyBackgroundTheme(getSavedBackgroundTheme());
 // Light / Dark / Like this device (colorMode.ts; index.html already set it before the first paint).
 applyColorMode(getSavedColorMode());
