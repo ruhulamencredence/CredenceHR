@@ -28,7 +28,7 @@ async function person(name, email) {
 }
 const H = await person('Rafiq Head', 'rafiq.head@credence.test');
 // An HR admin with the Approvals module (Edit) and one with Conveyance.
-const hrId = (await api(SA, 'POST', '/api/users', { name: 'Nasrin HR', email: 'nasrin.r01@credence.test', password: 'Pass12345x', role: 'admin' })).body.id;
+const hrId = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Nasrin HR', email: 'nasrin.r01@credence.test', password: 'Pass12345x', role: 'admin' })).body.id;
 await api(SA, 'PUT', `/api/users/${hrId}/module-permissions`, { modules: ['approvals', 'leave_applications', 'bill_claim', 'attendance'] });
 await api(SA, 'PUT', `/api/users/${hrId}/module-permission-layers`, { module: 'approvals', layers: ['read', 'edit_add'] });
 const HR = await login('nasrin.r01@credence.test', 'Pass12345x');

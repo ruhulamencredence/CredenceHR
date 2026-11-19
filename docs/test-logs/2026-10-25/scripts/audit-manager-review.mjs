@@ -24,7 +24,7 @@ const money = (v) => Math.round(Number(v || 0) * 100) / 100;
 const SA = await login('admin@credence.test', 'AdminPass123');
 // ---------------- fixtures ----------------
 async function adminUser(name, email, modules, layers) {
-  const id = (await api(SA, 'POST', '/api/users', { name, email, password: 'Audit#2026x', role: 'admin' })).body.id;
+  const id = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name, email, password: 'Audit#2026x', role: 'admin' })).body.id;
   await api(SA, 'PUT', `/api/users/${id}/module-permissions`, { modules });
   for (const [module, ls] of Object.entries(layers || {})) await api(SA, 'PUT', `/api/users/${id}/module-permission-layers`, { module, layers: ls });
   return { id, token: await login(email, 'Audit#2026x') };

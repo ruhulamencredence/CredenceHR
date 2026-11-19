@@ -184,6 +184,9 @@
 **প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
 উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
 
+**প্রশ্ন: কর্মী রেকর্ড ছাড়া কি কেউ login বানাতে পারে?**
+উত্তর: Users → Add New User থেকে login হয় একজন কর্মীর (Employees-এ আছেন, login নেই; Login ID = Employee ID), নয়তো non-employee কারণ লিখে (auditor, vendor ইত্যাদি) — কারণ account-এ লেখা থাকে। নতুন joiner-এর login আসে Onboarding থেকে, কর্মী রেকর্ডের সাথে। কারণ ছাড়া কর্মীহীন login server ফিরিয়ে দেয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/add-user-rule-api.mjs` (১০টা)।
+
 **প্রশ্ন: নতুন joiner-এর Appointment Letter (বেতনসহ) কে দেখতে পারে?**
 উত্তর: যে joiner-এর চিঠি তিনি নিজে (My Onboarding), আর HR Operations-এর onboarding অনুমতি থাকা HR — শুধু নিজের company-র joiner-দের। issue বা cancel করতে `onboarding_create` লাগে। অন্য joiner বা সাধারণ কর্মী পান না (403)। টেস্ট: `docs/test-logs/2026-11-19/scripts/joiner-letter-api.mjs` (২৪টা)।
 

@@ -10,4 +10,4 @@ const k=await api(null,'POST','/api/auth/forgot/email',{identifier:'alice.rv@cre
 P('Forgot-password answers the same for a known and an unknown email (no account enumeration)',k.status===u.status&&JSON.stringify(k.body)===JSON.stringify(u.body),`known ${j(k)} | unknown ${j(u)}`);
 let c=[];for(let i=0;i<12;i++)c.push((await api(null,'POST','/api/auth/forgot/email/verify',{identifier:'alice.rv@credence.test',code:String(100000+i),new_password:'Brandnew123'})).status);
 P('Guessing the 6-digit reset code is throttled (12 wrong tries)',c.some(x=>x===429||x===423),`statuses ${[...new Set(c)]}`);
-const wk=await api(SA,'POST','/api/users',{name:'Weak2',email:'weak2@credence.test',password:'111111',role:'user'}); console.log('INFO password 111111 still accepted?',j(wk));
+const wk=await api(SA,'POST', '/api/users', { non_employee_reason: 'QA test account', name:'Weak2',email:'weak2@credence.test',password:'111111',role:'user'}); console.log('INFO password 111111 still accepted?',j(wk));

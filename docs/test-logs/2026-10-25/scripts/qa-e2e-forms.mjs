@@ -111,7 +111,7 @@ await T('E2E-05', sql('SELECT COUNT(*) FROM all_employees') === before, 'New Emp
 
 // The new employee gets a login (API, as Admin Panel -> Create Login) and Leave.
 const SA = (await api(null, 'POST', '/api/auth/login', { identifier: 'admin@credence.test', password: 'AdminPass123' })).body.token;
-const u = await api(SA, 'POST', '/api/users', { name: 'Ui Form Person', email: 'ui.form.person@credence.test', password: 'easy', role: 'user', employee_id: Number(empId) });
+const u = await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Ui Form Person', email: 'ui.form.person@credence.test', password: 'easy', role: 'user', employee_id: Number(empId) });
 const uid = Number(u.body.id || sql("SELECT id FROM users WHERE email='ui.form.person@credence.test'"));
 if (!sql(`SELECT user_id FROM all_employees WHERE id=${empId}`).match(/^\d+$/)) sql(`UPDATE all_employees SET user_id=${uid} WHERE id=${empId}`);
 await api(SA, 'PUT', `/api/users/${uid}/leave-application-access`, { can_view_leave_application: true });

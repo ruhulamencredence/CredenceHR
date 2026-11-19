@@ -20,7 +20,7 @@ async function call(tok, method, path, body) {
 const fill = (p) => p.replace(/:[A-Za-z_]+(\([^)]*\))?/g, '1');
 const login = async (i, p) => (await (await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: i, password: p }) })).json()).token;
 const SA = await login('admin@credence.test', 'AdminPass123');
-const mk = async (name, email, role) => { await call(SA, 'POST', '/api/users', { name, email, password: 'QaPass#2026', role }); return login(email, 'QaPass#2026'); };
+const mk = async (name, email, role) => { await call(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name, email, password: 'QaPass#2026', role }); return login(email, 'QaPass#2026'); };
 const USER = await mk('QA Plain User', 'qa.user@credence.test', 'user');
 const ADMIN0 = await mk('QA Admin No Modules', 'qa.admin0@credence.test', 'admin');
 const PUBLIC = [/^\/api\/auth\/(login|register|refresh|logout)/, /^\/api\/auth\/fingerprint\/(app\/login|passkey\/login)/, /^\/api\/public\//, /^\/api\/password-reset/, /^\/api\/auth\/(forgot|reset|password)/, /^\/api\/health/, /^\/api\/app-version/, /^\/api\/onboarding\/public/];

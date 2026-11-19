@@ -59,3 +59,14 @@ ID card requests, Department teams — each only for an account allowed to do it
   item ticks (button gone); no page errors.
 - Not covered by a test: the department team item ticking (no team in the test data) — same lookup as the
   Department teams feature.
+
+## Users → Add New User: a login is an Employee's (or a non-employee with a reason)
+
+- `scripts/add-user-rule-api.mjs`: **10/10** — no employee and no reason → 400 pointing to Onboarding; a too-short reason
+  → 400; a non-employee login with a reason is made and the reason kept; employees-without-login lists the record with ID,
+  designation, department; a login for that employee takes its name, Login ID = Employee ID, links it, signs in; no longer
+  listed; a second login for the same employee → 400; a plain user can't list them (403).
+- `scripts/add-user-rule-ui.cjs`: **6/6** — "Login for" choice, the new-joiner hint, typing the Employee ID finds the
+  employee and fills the name, Create User links the login, "Not an employee" asks who it is, no page errors.
+- QA scripts that create test logins through `POST /api/users` now send `non_employee_reason: 'QA test account'`
+  (docs/test-logs/2026-10-25/scripts and others).

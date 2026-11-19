@@ -20,7 +20,7 @@ import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./d
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
-import { registerUserManagementRoutes } from "./UserManagement";
+import { registerUserManagementRoutes, ensureUserExtraColumns } from "./UserManagement";
 import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
@@ -380,6 +380,8 @@ async function initDB() {
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // PEPM Project teams: the per-Project Final Submit locks (PepmTeam.ts).
     await ensurePepmTeamSchema(queryDB).catch((e: any) => console.warn("⚠️ PEPM project locks: " + e.message));
+    // Add New User: why a login isn't an Employee's (UserManagement.ts).
+    await ensureUserExtraColumns(queryDB);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) {
       startZkSyncSchedule(dbPool);
