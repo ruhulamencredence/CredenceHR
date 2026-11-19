@@ -101,8 +101,8 @@ const RosterRow = React.memo(function RosterRow({
               <span className="truncate">{e.name}</span>
               {e.gets_ot && <span className="shrink-0 text-[9px] font-bold text-orange-700 bg-orange-50 rounded px-1" title="Gets OT (Payroll → OT Rules)">OT</span>}
             </span>
-            <span className="block text-[10px] text-slate-500 truncate max-w-[11rem]">
-              {[e.employee_code, e.department].filter(Boolean).join(' · ')}
+            <span className="block text-[10px] text-slate-500 truncate max-w-[11rem]" title={[e.employee_code, e.designation, e.department].filter(Boolean).join(' · ')}>
+              {[e.employee_code, e.designation, e.department].filter(Boolean).join(' · ')}
               {duty || off ? ` · ${duty} duty, ${off} off` : ''}
             </span>
           </span>
@@ -406,6 +406,9 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   const [notice, setNotice] = useState('');
   const [q, setQ] = useState('');
   const [dept, setDept] = useState('');
+  // Designation filter (within the department picked): e.g. only the Office
+  // Support Staff of HR & Administration, to give them a Weekly pattern.
+  const [desig, setDesig] = useState('');
   const [pending, setPending] = useState<Map<string, Cell>>(new Map());
   const [brush, setBrush] = useState<Brush | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -465,13 +468,23 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   const days = useMemo(() => monthDays(month), [month]);
   const today = ymdOf(new Date());
   const departments = useMemo(() => [...new Set((data?.employees || []).map((e) => e.department).filter(Boolean) as string[])].sort(), [data]);
+  // Designations of the department picked (all when none), with how many each.
+  const designations = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const e of data?.employees || []) if ((!dept || e.department === dept) && e.designation) m.set(e.designation, (m.get(e.designation) || 0) + 1);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [data, dept]);
+  // A designation that isn't in the newly picked department is let go.
+  useEffect(() => {
+    if (desig && !designations.some(([d]) => d === desig)) setDesig('');
+  }, [designations, desig]);
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return (data?.employees || []).filter((e) => (!dept || e.department === dept) && (!t || `${e.name} ${e.employee_code || ''} ${e.designation || ''}`.toLowerCase().includes(t)));
-  }, [data, q, dept]);
+    return (data?.employees || []).filter((e) => (!dept || e.department === dept) && (!desig || e.designation === desig) && (!t || `${e.name} ${e.employee_code || ''} ${e.designation || ''}`.toLowerCase().includes(t)));
+  }, [data, q, dept, desig]);
   // One page of rows on screen; search / department / month go back to page 1.
   const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [q, dept, month]);
+  useEffect(() => setPage(0), [q, dept, desig, month]);
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageNo = Math.min(page, pageCount - 1);
   const pageRows = useMemo(() => rows.slice(pageNo * PAGE_SIZE, pageNo * PAGE_SIZE + PAGE_SIZE), [rows, pageNo]);
@@ -743,6 +756,16 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                 </option>
               ))}
             </select>
+            <div className="min-w-[12rem] max-w-xs">
+              <SearchSelect value={desig} onChange={(e) => setDesig(e.target.value)} aria-label="Designation" className="w-full text-sm px-3 py-2 rounded-xl bg-white border border-slate-200">
+                <option value="">All designations</option>
+                {designations.map(([d, n]) => (
+                  <option key={d} value={d}>
+                    {d} ({n})
+                  </option>
+                ))}
+              </SearchSelect>
+            </div>
             {canManage && (
               <button type="button" onClick={() => setPattern(true)} disabled={!activeShifts.length || !rows.length} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                 <Wand2 className="w-4 h-4 text-violet-600" /> Weekly pattern{selected.size ? ` (${selected.size})` : ''}
@@ -791,7 +814,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
               ))}
             </div>
           ) : data && !rows.length ? (
-            <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{q || dept ? 'No employee matches.' : 'No active employees.'}</div>
+            <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{q || dept || desig ? 'No employee matches.' : 'No active employees.'}</div>
           ) : (
             data && (
               <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
