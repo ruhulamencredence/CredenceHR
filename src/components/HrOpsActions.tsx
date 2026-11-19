@@ -34,6 +34,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 
 import { SearchSelect } from './Combobox';
+import { TransferAccessPanel, type TransferAccess } from './TransferAccessPanel';
 interface HrAction {
   id: number;
   employee_id: number;
@@ -104,6 +105,8 @@ export const NewActionModal: React.FC<{
   const [reason, setReason] = useState('');
   // Suspension only: also block the employee's login while it lasts.
   const [blockLogin, setBlockLogin] = useState(false);
+  // Transfer: what moves with the person (TransferAccessPanel.tsx).
+  const [access, setAccess] = useState<TransferAccess>({ pepm: true, attendance: true, team: true, extra_project_ids: [] });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const emp = employees.find((e) => e.id === employeeId) || null;
@@ -122,6 +125,7 @@ export const NewActionModal: React.FC<{
   useEffect(() => {
     setTo({});
     setPct('');
+    setAccess({ pepm: true, attendance: true, team: true, extra_project_ids: [] });
   }, [type, employeeId]);
 
   const save = async () => {
@@ -133,6 +137,7 @@ export const NewActionModal: React.FC<{
       const payload: Record<string, any> = {};
       for (const k of fields) if (to[k] !== undefined && to[k] !== '') payload[k] = to[k];
       if (type === 'suspension' && blockLogin) payload.block_login = true;
+      if (type === 'transfer' && to.branch_id) payload.access = access;
       const r = await api.post<any>('/api/hr-ops/actions', { employee_id: employeeId, action_type: type, effective_date: eff, to: payload, reason });
       onSaved(r.status);
     } catch (e: any) {
@@ -299,6 +304,18 @@ export const NewActionModal: React.FC<{
             )}
           </div>
         ))}
+        {type === 'transfer' && emp && to.branch_id && (
+          <TransferAccessPanel
+            token={token}
+            employeeId={employeeId!}
+            branchId={to.branch_id}
+            departmentId={to.department_id || ''}
+            effectiveDate={eff}
+            projects={meta.projects}
+            value={access}
+            onChange={setAccess}
+          />
+        )}
         <div>
           <label className={labelCls}>Reason / justification</label>
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className={inputCls} placeholder="Visible to approvers and kept in the service book" />

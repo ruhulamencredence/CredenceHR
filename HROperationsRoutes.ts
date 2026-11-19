@@ -1122,6 +1122,19 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
     await queryDB("UPDATE all_employees SET branch_id = ?, branch = ? WHERE id = ?", [Number(to.branch_id), to.branch ?? null, empId]);
   }
   if (Object.keys(service).length > 0) await upsertService(queryDB, empId, service, actorId);
+  // What HR ticked to move with a transfer (PEPM projects, check-in, team).
+  if (action.action_type === "transfer" && to.access) {
+    try {
+      const done = await applyTransferAccess(queryDB, action, to);
+      if (done.length) {
+        const hist = parseJson(action.history_json, []);
+        hist.push({ action: "access_moved", by: actorId, at: new Date().toISOString(), note: done.join("; ") });
+        await queryDB("UPDATE hr_actions SET history_json = ? WHERE id = ?", [JSON.stringify(hist), action.id]);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Transfer ${action.id}: could not move PEPM / check-in / team: ` + err.message);
+    }
+  }
 }
 
 // Final approval: salary + transfer parts now, the rest now or on its date.
@@ -1767,6 +1780,17 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
   });
 
   // ---------------- personnel actions ----------------
+  // The Transfer form's "also changes" panel (transferAccessPlan).
+  app.post("/api/hr-ops/actions/transfer-plan", ...gate, async (req: any, res: any) => {
+    try {
+      const b = req.body || {};
+      const eff = toDate(b.effective_date) || todayInDhaka();
+      res.json(await transferAccessPlan(queryDB, Number(b.employee_id), b.branch_id ? Number(b.branch_id) : null, b.department_id ? Number(b.department_id) : null, eff));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   async function createAction(body: any, actor: { id: number; name: string }, batchId: string | null) {
     const empId = Number(body.employee_id);
     const type = String(body.action_type || "");
@@ -1800,6 +1824,14 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
       to.supervisor = s.name;
     }
     if (raw.grade) to.grade = String(raw.grade).trim().slice(0, 100);
+    // A transfer may also move PEPM projects, check-in and team (applyTransferAccess).
+    if (type === "transfer" && raw.access && typeof raw.access === "object") {
+      const ids = Array.isArray(raw.access.extra_project_ids)
+        ? [...new Set(raw.access.extra_project_ids.map(Number).filter((n: number) => Number.isFinite(n) && n > 0))].slice(0, 50)
+        : [];
+      for (const pid of ids) if (!world.projects.some((p: any) => Number(p.id) === pid)) throw bad("Project not found.");
+      to.access = { pepm: !!raw.access.pepm, attendance: !!raw.access.attendance, team: !!raw.access.team, extra_project_ids: ids };
+    }
     const gross = num(raw.gross_salary);
     if (gross !== null) {
       if (gross <= 0) throw bad("Gross salary must be more than zero.");
@@ -3197,4 +3229,157 @@ export async function issueJoinerAppointmentLetter(queryDB: QueryDB, app: any, i
     [r.ref_no, Number(app.id), r.template_id, r.subject, r.body, r.letter_date, actorId]
   );
   return { id: Number(ins.insertId), ref_no: r.ref_no };
+}
+
+// ---------------- a transfer moves the person's access with them ----------------
+// A Transfer to another Branch (HR Operations -> Personnel Actions) can also,
+// on its effective date, move what is tied to the place of work:
+//   PEPM projects     the old Branch's linked Project off, the new one's on
+//                     (Admin Panel -> Branches -> linked Project). Projects
+//                     not tied to the old Branch (Central Inventory…) stay.
+//                     A Branch with no Project (Head Office) gives none; HR
+//                     may pick projects to give (extra_project_ids).
+//   Remote Attendance the old Project's check-in ends the day before, the new
+//                     one starts on the day (user_attendance_projects). An
+//                     account on "Their Branch" follows the Branch already.
+//   Department team   the team whose auto rule (Departments -> Teams) covers
+//                     the new Branch (and department).
+// HR ticks which of these to do (to_json.access). The plan is worked out
+// again on the day, so a change made meanwhile is respected.
+export interface TransferAccessChoice {
+  pepm?: boolean;
+  attendance?: boolean;
+  team?: boolean;
+  extra_project_ids?: number[];
+}
+
+type Named = { id: number; name: string };
+
+export async function transferAccessPlan(queryDB: QueryDB, empId: number, toBranchId: number | null, toDepartmentId: number | null, eff: string) {
+  const emp: any = ((await queryDB("SELECT id, name, user_id, branch_id, branch, department_id FROM all_employees WHERE id = ?", [empId])) || [])[0];
+  if (!emp) throw Object.assign(new Error("Employee not found."), { statusCode: 404 });
+  const branchOf = async (id: any): Promise<{ id: number; name: string; project: Named | null } | null> => {
+    if (!id) return null;
+    const b: any = ((await queryDB("SELECT b.id, b.branch_name, b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE b.id = ?", [Number(id)]).catch(() => [])) || [])[0];
+    if (!b) return null;
+    return { id: Number(b.id), name: String(b.branch_name), project: b.project_id && b.project_name ? { id: Number(b.project_id), name: String(b.project_name) } : null };
+  };
+  const fromB = await branchOf(emp.branch_id);
+  const toB = await branchOf(toBranchId);
+  const userId = emp.user_id ? Number(emp.user_id) : null;
+  const fromP = fromB?.project || null;
+  const toP = toB?.project || null;
+
+  const mine: Named[] = userId
+    ? (((await queryDB("SELECT p.id, p.project_name FROM user_project_permissions u JOIN projects p ON p.id = u.project_id WHERE u.user_id = ? ORDER BY p.project_name", [userId]).catch(() => [])) || []) as any[]).map((r) => ({
+        id: Number(r.id),
+        name: String(r.project_name)
+      }))
+    : [];
+  const pepm = {
+    remove: fromP && (!toP || toP.id !== fromP.id) ? mine.filter((p) => p.id === fromP.id) : [],
+    add: toP && !mine.some((p) => p.id === toP.id) ? [toP] : [],
+    keep: mine.filter((p) => !(fromP && (!toP || toP.id !== fromP.id) && p.id === fromP.id))
+  };
+
+  const byBranch = userId ? Number((((await queryDB("SELECT attendance_projects_by_branch AS v FROM users WHERE id = ?", [userId]).catch(() => [])) || [])[0] || {}).v || 0) === 1 : false;
+  const att: any[] = userId
+    ? ((await queryDB("SELECT a.project_id, a.valid_from, a.valid_to, p.project_name FROM user_attendance_projects a JOIN projects p ON p.id = a.project_id WHERE a.user_id = ?", [userId]).catch(() => [])) as any[]) || []
+    : [];
+  const activeOn = (r: any) => (!r.valid_from || toDate(r.valid_from)! <= eff) && (!r.valid_to || toDate(r.valid_to)! >= eff);
+  const dayBefore = addDays(eff, -1);
+  const attendance = {
+    by_branch: byBranch,
+    end: byBranch || !fromP || (toP && toP.id === fromP.id) ? [] : att.filter((r) => Number(r.project_id) === fromP.id && activeOn(r)).map((r) => ({ id: Number(r.project_id), name: String(r.project_name), valid_to: dayBefore })),
+    start: byBranch || !toP || att.some((r) => Number(r.project_id) === toP.id && activeOn(r)) ? [] : [{ id: toP.id, name: toP.name, valid_from: eff }]
+  };
+
+  const curTeam: any = ((await queryDB("/*unscoped*/ SELECT t.id, t.name FROM department_team_members m JOIN department_teams t ON t.id = m.team_id WHERE m.employee_id = ? LIMIT 1", [empId]).catch(() => [])) || [])[0];
+  let newTeam: any = null;
+  if (toB) {
+    const dept = toDepartmentId ?? (emp.department_id ? Number(emp.department_id) : null);
+    const rules: any[] =
+      ((await queryDB(
+        "/*unscoped*/ SELECT r.team_id, r.department_id, t.name FROM department_team_auto r JOIN department_teams t ON t.id = r.team_id WHERE t.is_active = 1 AND LOWER(TRIM(r.branch)) = LOWER(TRIM(?))",
+        [toB.name]
+      ).catch(() => [])) as any[]) || [];
+    newTeam = rules.find((r) => r.department_id && Number(r.department_id) === dept) || rules.find((r) => !r.department_id) || null;
+  }
+  const team = {
+    from: curTeam ? { id: Number(curTeam.id), name: String(curTeam.name) } : null,
+    to: newTeam && (!curTeam || Number(curTeam.id) !== Number(newTeam.team_id)) ? { id: Number(newTeam.team_id), name: String(newTeam.name) } : null
+  };
+  return {
+    employee: { id: empId, name: emp.name, user_id: userId },
+    from_branch: fromB ? { id: fromB.id, name: fromB.name } : null,
+    to_branch: toB ? { id: toB.id, name: toB.name } : null,
+    from_project: fromP,
+    to_project: toP,
+    pepm,
+    attendance,
+    team
+  };
+}
+
+// On the effective date: does what HR ticked. Returns what was done, for the action's history.
+export async function applyTransferAccess(queryDB: QueryDB, action: any, to: any): Promise<string[]> {
+  const choice: TransferAccessChoice = to?.access || {};
+  if (!choice.pepm && !choice.attendance && !choice.team && !(choice.extra_project_ids || []).length) return [];
+  const eff = toDate(action.effective_date)!;
+  const empId = Number(action.employee_id);
+  // The Branch has already moved by now (applyServicePart), so plan from the old one.
+  const from = parseJson(action.from_json, {});
+  const plan = await transferAccessPlan(queryDB, empId, to.branch_id ?? null, to.department_id ?? null, eff);
+  if (from.branch_id && (!plan.from_branch || plan.from_branch.id !== Number(from.branch_id))) {
+    const old: any = ((await queryDB("SELECT b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE b.id = ?", [Number(from.branch_id)]).catch(() => [])) || [])[0];
+    const oldP = old?.project_id ? { id: Number(old.project_id), name: String(old.project_name || "") } : null;
+    const userId = plan.employee.user_id;
+    if (oldP && (!plan.to_project || plan.to_project.id !== oldP.id) && userId) {
+      const has: any[] = (await queryDB("SELECT id FROM user_project_permissions WHERE user_id = ? AND project_id = ?", [userId, oldP.id]).catch(() => [])) || [];
+      plan.pepm.remove = has.length ? [oldP] : [];
+      if (!plan.attendance.by_branch) {
+        const att: any[] = (await queryDB("SELECT project_id FROM user_attendance_projects WHERE user_id = ? AND project_id = ? AND (valid_to IS NULL OR valid_to >= ?)", [userId, oldP.id, eff]).catch(() => [])) || [];
+        plan.attendance.end = att.length ? [{ id: oldP.id, name: oldP.name, valid_to: addDays(eff, -1) }] : [];
+      }
+    }
+  }
+  const done: string[] = [];
+  const userId = plan.employee.user_id;
+  if (choice.pepm && userId) {
+    for (const p of plan.pepm.remove) {
+      await queryDB("DELETE FROM user_project_permissions WHERE user_id = ? AND project_id = ?", [userId, p.id]);
+      done.push(`PEPM: ${p.name} removed`);
+    }
+    for (const p of plan.pepm.add) {
+      await queryDB("INSERT IGNORE INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [userId, p.id]);
+      done.push(`PEPM: ${p.name} given`);
+    }
+  }
+  if (userId) {
+    for (const pid of choice.extra_project_ids || []) {
+      const p: any = ((await queryDB("SELECT id, project_name FROM projects WHERE id = ?", [Number(pid)]).catch(() => [])) || [])[0];
+      if (!p) continue;
+      await queryDB("INSERT IGNORE INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [userId, Number(p.id)]);
+      done.push(`PEPM: ${p.project_name} given`);
+    }
+  }
+  if (choice.attendance && userId && !plan.attendance.by_branch) {
+    for (const a of plan.attendance.end) {
+      await queryDB("UPDATE user_attendance_projects SET valid_to = ? WHERE user_id = ? AND project_id = ?", [a.valid_to, userId, a.id]);
+      done.push(`Check-in at ${a.name} ended ${a.valid_to}`);
+    }
+    for (const a of plan.attendance.start) {
+      await queryDB(
+        "INSERT INTO user_attendance_projects (user_id, project_id, valid_from, valid_to) VALUES (?, ?, ?, NULL) ON DUPLICATE KEY UPDATE valid_from = VALUES(valid_from), valid_to = NULL",
+        [userId, a.id, a.valid_from]
+      );
+      done.push(`Check-in at ${a.name} from ${a.valid_from}`);
+    }
+  }
+  if (choice.team && plan.team.to) {
+    await queryDB("/*unscoped*/ DELETE FROM department_team_members WHERE employee_id = ?", [empId]);
+    await queryDB("/*unscoped*/ INSERT IGNORE INTO department_team_members (team_id, employee_id) VALUES (?, ?)", [plan.team.to.id, empId]);
+    done.push(`Team: ${plan.team.to.name}`);
+  }
+  return done;
 }

@@ -70,3 +70,16 @@ ID card requests, Department teams — each only for an account allowed to do it
   employee and fills the name, Create User links the login, "Not an employee" asks who it is, no page errors.
 - QA scripts that create test logins through `POST /api/users` now send `non_employee_reason: 'QA test account'`
   (docs/test-logs/2026-10-25/scripts and others).
+
+## Transfer moves PEPM projects, check-in and team
+
+- `scripts/transfer-access-api.mjs`: **18/18** — sites linked to QA Anamika / QA Rupayan, a QA Head Office with none, an
+  auto team for the Rupayan site. Plan: Anamika → Rupayan (PEPM off/on, Central Inventory stays; check-in ends the day
+  before / starts on the day; team Anamika Site → Rupayan Site); plan to Head Office (nothing comes in, Anamika goes).
+  Transfer today, approved: PEPM, check-in, team and branch all moved, written in the history. Then to Head Office with
+  only PEPM ticked + QA Gulshan picked by HR: Rupayan off, Gulshan on, check-in and team untouched. A future-dated one
+  changes nothing yet. A plain user can't read the plan (403).
+- `scripts/transfer-access-ui.cjs`: **8/8** — New HR Action → Transfer → employee → new branch: "Also changes" with PEPM
+  (Anamika struck, + Rupayan, Central Inventory stays), check-in ends / from, + QA Rupayan Site Team; switching to QA
+  Head Office says no linked project and offers "Also give PEPM projects"; no page errors.
+- Not tested end to end here: a future-dated transfer running on its day (`applyDueHrActions`, the same code path).
