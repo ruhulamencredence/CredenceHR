@@ -189,11 +189,14 @@ const AttendanceClockBg: React.FC = () => {
   );
 };
 
+// Where the punch came from (office device, project, off-site) — on the
+// computer only. On the phone the In / Out tiles show just the time: the
+// employee knows where they punched, and the reports keep the place.
 const placeLine = (source: string | null | undefined, place: string | null | undefined) => {
   const text =
     source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : source === 'offsite' ? `Off-site · ${place || 'outside the project area'}` : place ? `at ${place}` : '';
   return text ? (
-    <div className="mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
+    <div className="hidden md:block mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
       {text}
     </div>
   ) : null;
