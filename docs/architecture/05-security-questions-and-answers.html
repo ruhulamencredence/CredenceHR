@@ -403,6 +403,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>কারো login-এ কে কবে কী অনুমতি দিল বা সরাল, দেখা যায়?</td>
+<td>হ্যাঁ। HR Operations → Service Book → <strong>Login &amp; Access</strong>: প্রতিটি বদল আগে → পরে, কে করল, কখন (<code>user_access_log</code>); তার আগের বদল Users → Activity-র পুরনো রেকর্ড থেকে। দেখতে আলাদা layer <code>p360_access</code> লাগে (শুরুতে কারও নেই); password-এর মান বা hash কখনো লেখা হয় না। ব্যর্থ অনুরোধ লেখা হয় না।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>সব ডাটা-পড়ার লগ আছে?</td>
 <td>না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)।</td>
 <td>⚠️</td>
