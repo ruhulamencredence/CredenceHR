@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৪টি টেবিল, ২৯৭২টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৪টি টেবিল, ২৯৭৪টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1565,6 +1565,7 @@ Unique: `uq_user_attendance_project`(user_id,project_id)
 | `reminder_minutes` | int(11) | না | default 60 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `start_early_minutes` | int(11) | না | default 30 | |
 
 ### `zk_attendance_logs`
 
@@ -3793,6 +3794,7 @@ Unique: `unique_driver_employee`(employee_id)
 | `pickup_cancelled_at` | datetime | হ্যাঁ |  | |
 | `pickup_reminded_at` | datetime | হ্যাঁ |  | |
 | `pickup_start_reminded_at` | datetime | হ্যাঁ |  | |
+| `early_start_reason` | varchar(255) | হ্যাঁ |  | |
 | `destination_lat` | decimal(10,7) | হ্যাঁ |  | |
 | `destination_lng` | decimal(10,7) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
