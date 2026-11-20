@@ -91,6 +91,7 @@ const clickText = (p, t) => p.evaluate((t) => { const el = [...document.querySel
   ok(p.errs.length === 0, 'approver: no page errors ' + JSON.stringify(p.errs));
   await b.close();
   sql(`UPDATE approval_templates SET is_default=0, is_active=0 WHERE id=${tpl}`);
+  sql(`UPDATE vehicles SET status='retired' WHERE id=${veh}`);
   if (oldDefault) sql(`UPDATE approval_templates SET is_default=1 WHERE id IN (${oldDefault})`);
   process.exit(fails ? 1 : 0);
 })();

@@ -29,7 +29,8 @@ import { ApproverSignatureCard } from './ApproverSignatureCard';
 import { SearchSelect } from './Combobox';
 import { formatDuration } from '../lib/rideDuration';
 import { ChangeTripPopup, tripTitle, clock } from './RideTrip';
-import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { rideTimeOf, vehicleChoices, type SlotVehicle } from '../lib/vehicleSlots';
 interface ApproveApplicationsProps {
   token: string;
   onBack: () => void;
@@ -151,11 +152,7 @@ const hrChangeRows = (d: NonNullable<MyApprovalItem['hr_action_details']>) =>
     return { label, from: f(d.from[k]), to: f(d.to[k]) };
   });
 
-interface AvailableVehicle {
-  id: number;
-  vehicle_no: string;
-  model: string;
-}
+type AvailableVehicle = SlotVehicle;
 
 
 // Two letters for the requester's round tile on a phone card.
@@ -1296,9 +1293,10 @@ useLiveRefresh(() => load(true));
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a vehicle…</option>
-                            {availableVehicles.map((v) => (
-                              <option key={v.id} value={v.id}>
-                                {v.model} ({v.vehicle_no})
+                            {/* Free for this ride's time first; a car booked then can't be picked. */}
+                            {vehicleChoices(availableVehicles, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map(({ v, label, busy }) => (
+                              <option key={v.id} value={v.id} disabled={busy}>
+                                {label}
                               </option>
                             ))}
                           </SearchSelect>
@@ -1308,9 +1306,9 @@ useLiveRefresh(() => load(true));
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a driver…</option>
-                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id).map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {driverOptionLabel(d, assignForm[key]?.vehicle_id)}
+                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map((d) => (
+                              <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}>
+                                {driverOptionLabel(d, assignForm[key]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}
                               </option>
                             ))}
                           </SearchSelect>

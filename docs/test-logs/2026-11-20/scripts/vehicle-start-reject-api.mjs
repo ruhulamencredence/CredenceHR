@@ -97,5 +97,6 @@ await api(T.token, 'POST', `/api/vehicles/requisitions/${soon2}/cancel`, { reaso
 // ---- clean up ----
 await api(SA, 'PUT', '/api/vehicles/ride-settings', { grace_minutes: s0.b.grace_minutes, reminder_minutes: s0.b.reminder_minutes, start_early_minutes: 30 });
 sql(`UPDATE approval_templates SET is_default=0, is_active=0 WHERE id=${tpl}`);
+sql(`UPDATE vehicles SET status='retired' WHERE id=${veh}`);
 if (oldDefault) sql(`UPDATE approval_templates SET is_default=1 WHERE id IN (${oldDefault})`);
 console.log(fails ? `${fails} of ${n} FAILED` : `ALL ${n} PASS`); process.exit(fails ? 1 : 0);

@@ -46,3 +46,24 @@ UI: `promptDialog` (src/lib/confirmDialog.tsx, same liquid-glass card with a tex
   started with the reason kept; Approve Application: Remarks says a reason is needed, Reject with none stopped with a
   message and still pending, with one rejected; no page errors.
 
+## Vehicles booked by time (not held from assign to the ride's end)
+
+Server: `VehicleManagementRoutes.ts` — `rideWindow`, `bookingsOf`, `claimVehicle(vehicleId, ride, driverUserId)` (car +
+driver overlap with `ride_gap_minutes`, 15 s in-process hold), `releaseVehicle` (syncs `on_ride` / `available`), Start Ride
+sets `on_ride` and refuses while the car is on another ride, `/api/vehicles/available` + `/driver-picker` with bookings,
+`/api/vehicles/day-board`. UI: `src/lib/vehicleSlots.ts`, `driverPicker.ts` (time-aware labels / sort / busy),
+`VehicleDayBoard.tsx`, pickers in `ApproveApplications.tsx`, `PendingApprovalsCard.tsx`, `VehicleManagement.tsx`,
+`VehicleManagementAdmin.tsx`, `RideTrip.tsx` (pick-up).
+
+- `scripts/vehicle-slots-api.mjs`: **22/22** — gap setting (and range); ride A 10:00–13:00 gets V1 and V1 stays
+  "available"; ride B at 13:15 refused on V1 (inside the gap, names ride A) and with driver 1, gets V2 + driver 2; ride C
+  at 14:00 gets V1 + driver 1; 08:00–09:45 refused (gap 30) then fits with gap 0; maintenance car refused; available list /
+  driver picker / day board carry the bookings; two overlapping rides given V2 at the same instant → only one; a ride 20
+  min away gets V1, Start Ride → V1 "on_ride", another V1 ride can't start meanwhile, Completed → "available"; cancelling
+  ride A frees its time.
+- `scripts/vehicle-slots-ui.cjs`: **10/10** — Approve Application: for an 11:00 ride the car booked 10:00–13:00 shows
+  "Busy 10:00–13:00" and can't be picked, the other "Free at this time"; the driver on the 10:00 ride is Busy; the ride is
+  given the free car and driver; Vehicle Management: Day board shows both rides on their cars for that day, the Ride
+  deadline text explains the gap; phone width with no sideways scroll; no page errors.
+- Re-run: vehicle-start-reject-api 19/19, vehicle-start-reject-ui 12/12 (both now retire the cars they make).
+

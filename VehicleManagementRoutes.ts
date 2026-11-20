@@ -313,6 +313,13 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_ride_settings table: " + err.message);
   }
+  // ride_gap_minutes — the time kept free on a car (and its driver) before
+  // and after each booked ride, to get back and go to the next one.
+  try {
+    await dbPool.query("ALTER TABLE vehicle_ride_settings ADD COLUMN ride_gap_minutes INT NOT NULL DEFAULT 30");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add vehicle_ride_settings.ride_gap_minutes: " + err.message);
+  }
   // start_early_minutes — how long before its start time a ride can be started
   // (Start Ride). Earlier only by Vehicle Management / a Vehicle Maintainer, with a reason.
   try {
@@ -697,21 +704,22 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     return Number.isNaN(t.getTime()) ? null : t;
   }
 
-  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number; start_early_minutes: number }> {
+  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number; start_early_minutes: number; ride_gap_minutes: number }> {
     try {
       const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
       if (rows.length > 0) {
-        const early = rows[0].start_early_minutes;
+        const num = (v: any, d: number) => (v == null || !Number.isFinite(Number(v)) ? d : Number(v));
         return {
           grace_minutes: Number(rows[0].grace_minutes) || 0,
           reminder_minutes: Number(rows[0].reminder_minutes) || 0,
-          start_early_minutes: early == null || !Number.isFinite(Number(early)) ? 30 : Number(early)
+          start_early_minutes: num(rows[0].start_early_minutes, 30),
+          ride_gap_minutes: num(rows[0].ride_gap_minutes, 30)
         };
       }
     } catch {
       // table not there yet — defaults
     }
-    return { grace_minutes: 30, reminder_minutes: 60, start_early_minutes: 30 };
+    return { grace_minutes: 30, reminder_minutes: 60, start_early_minutes: 30, ride_gap_minutes: 30 };
   }
 
   // Who can still act on a waiting request: the current approval step's
@@ -959,22 +967,115 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // returned/stored, just denormalized from that account rather than typed in.
   // Throws a plain Error with a message safe to send straight back to the
   // client on bad input.
-  // Atomic compare-and-set: two concurrent bookings can both pass
-  // validateVehicleAssignment's "available" check, but only one UPDATE
-  // can match status = 'available', so only one claim succeeds.
-  async function claimVehicle(vehicleId: number) {
-    const result: any = await queryDB("UPDATE vehicles SET status = ? WHERE id = ? AND status = ?", [
-      "on_ride",
-      vehicleId,
-      "available"
-    ]);
-    if (!result || Number(result.affectedRows) === 0) {
-      throw new Error("That vehicle was just booked by someone else. Pick another vehicle.");
+  // ---- Booking by time ----
+  // A car (and its driver) is booked only for a ride's own time — from its
+  // start to its expected return — plus the gap (Ride settings,
+  // ride_gap_minutes) on each side. Giving a car to tomorrow's ride no longer
+  // takes it off today's: any ride whose time doesn't overlap can have it.
+  // vehicles.status is "on_ride" only while a ride is actually on the road
+  // (Start Ride → Completed / released); "maintenance" / "retired" keep a car
+  // off every ride, as before.
+
+  // The time a ride holds its car: [start, end]. A pick-up leg holds it from
+  // pickup_at (or now, when it is "when called") for an hour. A ride on the
+  // road holds it until now at least (it isn't back yet).
+  function rideWindow(r: any, now = new Date()): { start: Date; end: Date } | null {
+    let start: Date | null;
+    let end: Date | null;
+    if (r.leg === "pickup") {
+      start = r.pickup_at ? new Date(r.pickup_at) : now;
+      end = new Date(start.getTime() + 3600e3);
+    } else {
+      start = rideStartAt(ymd(r.ride_date), String(r.start_time || ""));
+      if (!start) return null;
+      // From the start and the estimated duration (expected_return_at is a
+      // wall-clock DATETIME read in the server's own time zone; a ride that
+      // runs over is covered below — on the road it holds the car until now).
+      const hours = Number(r.estimated_duration_hours) > 0 ? Number(r.estimated_duration_hours) : 1;
+      end = new Date(start.getTime() + hours * 3600e3);
     }
+    if (r.status === "ongoing") {
+      const began = r.leg === "pickup" ? r.pickup_started_at : r.started_at;
+      if (began && new Date(began) < start) start = new Date(began);
+      if (end < now) end = now;
+    }
+    return { start, end };
   }
 
+  // Booked rides of a car or a driver (given a car, or on the road), each with its time.
+  async function bookingsOf(kind: "vehicle" | "driver", ids?: number[]) {
+    const col = kind === "vehicle" ? "assigned_vehicle_id" : "driver_user_id";
+    const rows: any[] =
+      (await queryDB(
+        `SELECT r.*, u.name AS rider_name FROM vehicle_requisitions r LEFT JOIN users u ON u.id = r.employee_user_id
+          WHERE r.${col} IS NOT NULL AND r.status IN ('assigned', 'ongoing')${ids && ids.length ? ` AND r.${col} IN (${ids.map(() => "?").join(",")})` : ""}`,
+        ids && ids.length ? ids : []
+      ).catch(() => [])) || [];
+    const now = new Date();
+    const out = new Map<number, { requisition_id: number; start: string; end: string; status: string; who: string; leg: string | null }[]>();
+    for (const r of rows) {
+      const w = rideWindow(r, now);
+      if (!w) continue;
+      const key = Number(r[col]);
+      const list = out.get(key) || [];
+      list.push({ requisition_id: Number(r.id), start: w.start.toISOString(), end: w.end.toISOString(), status: r.status, who: r.rider_name || "", leg: r.leg || null });
+      out.set(key, list);
+    }
+    for (const list of out.values()) list.sort((a, b) => a.start.localeCompare(b.start));
+    return out;
+  }
+
+  // Claims made a moment ago whose ride row may not be written yet — so two
+  // people giving the same car at the same instant can't both get it.
+  const pendingClaims = new Map<string, { start: number; end: number; until: number; rid: number }[]>();
+  const niceTime = (d: Date) => {
+    const [ymdS, hm] = dhakaClock(d).split(" ");
+    const [y, m, dd] = ymdS.split("-");
+    return `${dd}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y} ${hm}`;
+  };
+
+  // Is this car (and driver) free for this ride's time? Throws a message
+  // naming the ride in the way; otherwise holds the time for a few seconds
+  // until the caller has written the ride.
+  async function claimVehicle(vehicleId: number, ride?: any, driverUserId?: number) {
+    const w = ride ? rideWindow({ ...ride, status: ride.leg === "pickup" ? "assigned" : ride.status === "ongoing" ? "ongoing" : "assigned" }) : null;
+    if (!w) return;
+    const { ride_gap_minutes } = await loadRideSettings();
+    const gap = ride_gap_minutes * 60 * 1000;
+    const rid = Number(ride.id) || 0;
+    const [vb, db] = await Promise.all([bookingsOf("vehicle", [vehicleId]), driverUserId ? bookingsOf("driver", [driverUserId]) : Promise.resolve(new Map())]);
+    // Holds whose ride is already written (it is in the bookings) or called
+    // off (cancelled, rejected…) no longer count; only a hold still in flight does.
+    const heldRids = [...new Set([...(pendingClaims.get(`v:${vehicleId}`) || []), ...(driverUserId ? pendingClaims.get(`d:${driverUserId}`) || [] : [])].map((c) => c.rid).filter((x) => x > 0))];
+    const settled = new Set<number>(
+      heldRids.length
+        ? (((await queryDB(`SELECT id FROM vehicle_requisitions WHERE id IN (${heldRids.map(() => "?").join(",")}) AND (assigned_vehicle_id IS NOT NULL OR status NOT IN ('pending', 'approved', 'dropped'))`, heldRids).catch(() => [])) || []) as any[]).map((x) => Number(x.id))
+        : []
+    );
+    const clash = (list: any[]) =>
+      list.find((b) => Number(b.requisition_id) !== rid && w.start.getTime() < Date.parse(b.end) + gap && w.end.getTime() > Date.parse(b.start) - gap);
+    // From here to the end nothing waits, so the check and the hold go together.
+    const nowMs = Date.now();
+    const pend = (key: string) => (pendingClaims.get(key) || []).filter((c) => c.until > nowMs && !settled.has(c.rid));
+    const pendClash = (key: string) => pend(key).find((c) => c.rid !== rid && w.start.getTime() < c.end + gap && w.end.getTime() > c.start - gap);
+    const v = clash(vb.get(vehicleId) || []);
+    if (v) throw new Error(`That vehicle is booked ${niceTime(new Date(v.start))} – ${niceTime(new Date(v.end))}${v.who ? ` (${v.who}'s ride #${v.requisition_id})` : ` (ride #${v.requisition_id})`}, with a ${ride_gap_minutes} min gap — pick another vehicle.`);
+    if (pendClash(`v:${vehicleId}`)) throw new Error("That vehicle was just booked by someone else for this time. Pick another vehicle.");
+    if (driverUserId) {
+      const d = clash(db.get(driverUserId) || []);
+      if (d) throw new Error(`That driver is on ${d.who ? `${d.who}'s ride` : "a ride"} #${d.requisition_id}, ${niceTime(new Date(d.start))} – ${niceTime(new Date(d.end))} — pick another driver.`);
+      if (pendClash(`d:${driverUserId}`)) throw new Error("That driver was just given another ride for this time. Pick another driver.");
+    }
+    const hold = { start: w.start.getTime(), end: w.end.getTime(), until: nowMs + 15000, rid };
+    pendingClaims.set(`v:${vehicleId}`, [...pend(`v:${vehicleId}`), hold]);
+    if (driverUserId) pendingClaims.set(`d:${driverUserId}`, [...pend(`d:${driverUserId}`), hold]);
+  }
+
+  // A car is "on_ride" while one of its rides is on the road, else
+  // "available" — never touching "maintenance" / "retired".
   async function releaseVehicle(vehicleId: number) {
-    await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", vehicleId]);
+    const onRoad: any[] = (await queryDB("SELECT id FROM vehicle_requisitions WHERE assigned_vehicle_id = ? AND status = 'ongoing' LIMIT 1", [vehicleId]).catch(() => [])) || [];
+    await queryDB("UPDATE vehicles SET status = ? WHERE id = ? AND status IN ('available', 'on_ride')", [onRoad.length ? "on_ride" : "available", vehicleId]);
   }
 
   async function validateVehicleAssignment(body: any) {
@@ -986,7 +1087,8 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const vehicleRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [vehicleId]);
     const vehicle = vehicleRows[0];
     if (!vehicle) throw new Error("Vehicle not found.");
-    if (vehicle.status !== "available") throw new Error("That vehicle is not currently available.");
+    // A car on the road now can still be given a later ride (claimVehicle checks the times).
+    if (vehicle.status === "maintenance" || vehicle.status === "retired") throw new Error(`That vehicle is in ${vehicle.status === "retired" ? "retirement" : "maintenance"} — pick another vehicle.`);
 
     const driverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [driverUserId]);
     const driverUser = driverRows[0];
@@ -1196,13 +1298,25 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // approver acting via the self-service route above can still pick a
   // vehicle without 'vehicle_management' Module Access. GET /api/vehicles
   // (the full inventory record, Admin Panel's own list) stays module-gated.
+  // Every car that can take rides (not in maintenance / retired), each with
+  // its booked rides and the gap kept around them — the pickers mark a car
+  // Busy for a ride whose time overlaps (src/lib/vehicleSlots.ts); the
+  // server checks it again when the car is given (claimVehicle).
   app.get("/api/vehicles/available", authenticateToken, async (_req: any, res: any) => {
     try {
       const rows: any = await queryDB("SELECT * FROM vehicles");
+      const usable = (rows as any[]).filter((v: any) => v.status === "available" || v.status === "on_ride");
+      const [booked, { ride_gap_minutes }] = await Promise.all([bookingsOf("vehicle", usable.map((v: any) => Number(v.id))), loadRideSettings()]);
       res.json(
-        rows
-          .filter((v: any) => v.status === "available")
-          .map((v: any) => ({ id: Number(v.id), vehicle_no: v.vehicle_no, model: v.model, vehicle_type: v.vehicle_type }))
+        usable.map((v: any) => ({
+          id: Number(v.id),
+          vehicle_no: v.vehicle_no,
+          model: v.model,
+          vehicle_type: v.vehicle_type,
+          on_road: v.status === "on_ride",
+          bookings: booked.get(Number(v.id)) || [],
+          gap_minutes: ride_gap_minutes
+        }))
       );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1227,11 +1341,14 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   app.get("/api/vehicles/driver-picker", authenticateToken, async (req: any, res: any) => {
     try {
       const roster = await driverRoster();
+      const [driverBookings, { ride_gap_minutes: gapMin }] = await Promise.all([bookingsOf("driver"), loadRideSettings()]);
       if (roster.length > 0) {
         return res.json(
           roster
             .filter((d) => d.is_active && d.user_id)
             .map((d) => ({
+              bookings: driverBookings.get(Number(d.user_id)) || [],
+              gap_minutes: gapMin,
               id: d.user_id,
               name: d.name,
               employee_code: d.employee_code,
@@ -1248,7 +1365,47 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       }
       const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
       const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
-      res.json(await attachPersonInfo(queryDB, visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false }))));
+      res.json(await attachPersonInfo(queryDB, visible.map((u: any) => ({ id: Number(u.id), name: u.name, registered: false, bookings: driverBookings.get(Number(u.id)) || [], gap_minutes: gapMin }))));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Vehicle Management -> Ride Requests -> Day board: every car with the rides
+  // it is booked for on one day (Dhaka date), and the gap kept around them.
+  app.get("/api/vehicles/day-board", ...adminGate, async (req: any, res: any) => {
+    try {
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.date || "")) ? String(req.query.date) : dhakaToday();
+      const from = Date.parse(`${day}T00:00:00+06:00`);
+      const to = from + 864e5;
+      const vehicles: any[] = ((await queryDB("SELECT * FROM vehicles")) as any[]).filter((v) => v.status !== "retired");
+      const [booked, settings] = await Promise.all([bookingsOf("vehicle"), loadRideSettings()]);
+      // Rides already done that day, for the picture of the whole day.
+      const done: any[] =
+        (await queryDB("SELECT r.*, u.name AS rider_name FROM vehicle_requisitions r LEFT JOIN users u ON u.id = r.employee_user_id WHERE r.assigned_vehicle_id IS NOT NULL AND r.status = 'completed' AND r.started_at IS NOT NULL").catch(() => [])) || [];
+      const doneBy = new Map<number, any[]>();
+      for (const r of done) {
+        const start = new Date(r.started_at).getTime();
+        const end = new Date(r.actual_return_at || r.started_at).getTime();
+        if (end < from || start >= to) continue;
+        const list = doneBy.get(Number(r.assigned_vehicle_id)) || [];
+        list.push({ requisition_id: Number(r.id), start: new Date(start).toISOString(), end: new Date(Math.max(end, start + 60e3)).toISOString(), status: "completed", who: r.rider_name || "", leg: r.leg || null });
+        doneBy.set(Number(r.assigned_vehicle_id), list);
+      }
+      res.json({
+        date: day,
+        gap_minutes: settings.ride_gap_minutes,
+        vehicles: vehicles
+          .map((v) => ({
+            id: Number(v.id),
+            vehicle_no: v.vehicle_no,
+            model: v.model,
+            vehicle_type: v.vehicle_type,
+            status: v.status,
+            rides: [...(doneBy.get(Number(v.id)) || []), ...(booked.get(Number(v.id)) || [])].filter((b) => Date.parse(b.end) > from && Date.parse(b.start) < to)
+          }))
+          .sort((a, b) => String(a.vehicle_no).localeCompare(String(b.vehicle_no)))
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1541,7 +1698,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       );
 
       if (requisition.assigned_vehicle_id) {
-        await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", requisition.assigned_vehicle_id]);
+        await releaseVehicle(Number(requisition.assigned_vehicle_id));
       }
       rideLive(requisition);
       // Whoever didn't mark it (requester / driver) sees it close too.
@@ -1611,15 +1768,18 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (!Number.isInteger(grace) || grace < 0 || grace > 1440) return res.status(400).json({ error: "Grace time must be 0–1440 minutes." });
       if (!Number.isInteger(reminder) || reminder < 0 || reminder > 1440) return res.status(400).json({ error: "Reminder time must be 0–1440 minutes." });
       // Not sent by an older page: keep what is saved.
-      const early = req.body?.start_early_minutes == null ? (await loadRideSettings()).start_early_minutes : Number(req.body.start_early_minutes);
+      const saved = await loadRideSettings();
+      const early = req.body?.start_early_minutes == null ? saved.start_early_minutes : Number(req.body.start_early_minutes);
       if (!Number.isInteger(early) || early < 0 || early > 1440) return res.status(400).json({ error: "Start Ride window must be 0–1440 minutes." });
+      const gap = req.body?.ride_gap_minutes == null ? saved.ride_gap_minutes : Number(req.body.ride_gap_minutes);
+      if (!Number.isInteger(gap) || gap < 0 || gap > 600) return res.status(400).json({ error: "Gap between rides must be 0–600 minutes." });
       const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
       if (rows.length === 0) {
-        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, start_early_minutes, updated_by) VALUES (?, ?, ?, ?, ?)", [1, grace, reminder, early, req.user.id]);
+        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, start_early_minutes, ride_gap_minutes, updated_by) VALUES (?, ?, ?, ?, ?, ?)", [1, grace, reminder, early, gap, req.user.id]);
       } else {
-        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, start_early_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, early, req.user.id]);
+        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, start_early_minutes = ?, ride_gap_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, early, gap, req.user.id]);
       }
-      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder, start_early_minutes: early });
+      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder, start_early_minutes: early, ride_gap_minutes: gap });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1760,7 +1920,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
 
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
-      await claimVehicle(vehicleId);
+      await claimVehicle(vehicleId, requisition, driverUserId);
       try {
         await queryDB(
           "UPDATE vehicle_requisitions SET status = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
@@ -1828,7 +1988,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
-      await claimVehicle(vehicleId);
+      await claimVehicle(vehicleId, requisition, driverUserId);
       try {
         await queryDB(
           "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
@@ -1926,7 +2086,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
       const now = new Date();
-      await claimVehicle(vehicleId);
+      await claimVehicle(vehicleId, { id: 0, ride_date: rideDate, start_time: startTime, estimated_duration_hours: duration, expected_return_at: expectedReturn }, driverUserId);
       let result: any;
       try {
         result = await queryDB(
@@ -1994,7 +2154,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
 
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
-      await claimVehicle(vehicleId);
+      await claimVehicle(vehicleId, requisition, driverUserId);
       try {
         await queryDB(
           "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ?, assigned_by = ?, assigned_at = ? WHERE id = ?",
@@ -2115,6 +2275,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
           earlyReason = reason;
         }
       }
+      // The car has to be back from its previous ride first.
+      if (requisition.assigned_vehicle_id) {
+        const other: any = ((await queryDB("SELECT id, driver_name FROM vehicle_requisitions WHERE assigned_vehicle_id = ? AND status = 'ongoing' AND id <> ? LIMIT 1", [requisition.assigned_vehicle_id, id]).catch(() => [])) || [])[0];
+        if (other) return res.status(400).json({ error: `This car is still on ride #${other.id}${other.driver_name ? ` (driver ${other.driver_name})` : ""} — that ride has to be completed first.`, code: "car_on_road" });
+      }
       const done: any =
         requisition.leg === "pickup"
           ? await queryDB("UPDATE vehicle_requisitions SET status = ?, pickup_started_at = ? WHERE id = ? AND status = ?", ["ongoing", now, id, "assigned"])
@@ -2127,6 +2292,8 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
             ]);
       if (Number(done?.affectedRows ?? 1) === 0) return res.status(409).json({ error: "This ride was just changed by someone else — refresh and try again." });
       if (earlyReason) await queryDB("UPDATE vehicle_requisitions SET early_start_reason = ? WHERE id = ?", [`${earlyReason} (started early by ${req.user.name || "user #" + req.user.id})`.slice(0, 255), id]).catch(() => {});
+      // On the road now: the car shows "on ride" until the ride ends.
+      if (requisition.assigned_vehicle_id) await releaseVehicle(Number(requisition.assigned_vehicle_id));
       rideLive(requisition);
 
       const notify = new Set<number>([Number(requisition.employee_user_id), Number(requisition.driver_user_id) || 0, Number(requisition.assigned_by) || 0]);
@@ -2398,7 +2565,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (!allowed) throw bad("Only Vehicle Management, the drop's driver or whoever gave its car can give the pick-up a car.", 403);
       if (r.status !== "dropped") throw bad("This ride isn't waiting for a pick-up car.");
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
-      await claimVehicle(vehicleId);
+      await claimVehicle(vehicleId, { ...r, leg: "pickup" }, driverUserId);
       const now = new Date();
       try {
         const done: any = await queryDB(
@@ -3011,6 +3178,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Once, at start: cars that were held "on_ride" only by a ride given but
+  // not yet started (the old rule) are free again for other times.
+  void (async () => {
+    const held: any[] = (await queryDB("SELECT id FROM vehicles WHERE status = 'on_ride'").catch(() => [])) || [];
+    for (const v of held) await releaseVehicle(Number(v.id)).catch(() => undefined);
+  })();
 
   return { expireOverdueRides };
 }
