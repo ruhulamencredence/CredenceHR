@@ -313,6 +313,13 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_ride_settings table: " + err.message);
   }
+  // start_early_minutes — how long before its start time a ride can be started
+  // (Start Ride). Earlier only by Vehicle Management / a Vehicle Maintainer, with a reason.
+  try {
+    await dbPool.query("ALTER TABLE vehicle_ride_settings ADD COLUMN start_early_minutes INT NOT NULL DEFAULT 30");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add vehicle_ride_settings.start_early_minutes: " + err.message);
+  }
   // Trip type (Book a Ride): 'round' — the car waits and brings the passenger
   // back (the only kind before); 'drop_pickup' — the car drops them, goes
   // back, and comes again for them (two legs on one ride); 'one_way' — only
@@ -351,7 +358,10 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
     ["picked_up_at", "DATETIME NULL"],
     ["pickup_cancelled_at", "DATETIME NULL"],
     ["pickup_reminded_at", "DATETIME NULL"],
-    ["pickup_start_reminded_at", "DATETIME NULL"]
+    ["pickup_start_reminded_at", "DATETIME NULL"],
+    // Started before the "Start Ride" window (Ride settings) by Vehicle
+    // Management / a Vehicle Maintainer — why.
+    ["early_start_reason", "VARCHAR(255) NULL"]
   ]) {
     try {
       await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} ${type}`);
@@ -687,16 +697,21 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     return Number.isNaN(t.getTime()) ? null : t;
   }
 
-  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number }> {
+  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number; start_early_minutes: number }> {
     try {
       const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
       if (rows.length > 0) {
-        return { grace_minutes: Number(rows[0].grace_minutes) || 0, reminder_minutes: Number(rows[0].reminder_minutes) || 0 };
+        const early = rows[0].start_early_minutes;
+        return {
+          grace_minutes: Number(rows[0].grace_minutes) || 0,
+          reminder_minutes: Number(rows[0].reminder_minutes) || 0,
+          start_early_minutes: early == null || !Number.isFinite(Number(early)) ? 30 : Number(early)
+        };
       }
     } catch {
       // table not there yet — defaults
     }
-    return { grace_minutes: 30, reminder_minutes: 60 };
+    return { grace_minutes: 30, reminder_minutes: 60, start_early_minutes: 30 };
   }
 
   // Who can still act on a waiting request: the current approval step's
@@ -1595,13 +1610,16 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const reminder = Number(req.body?.reminder_minutes);
       if (!Number.isInteger(grace) || grace < 0 || grace > 1440) return res.status(400).json({ error: "Grace time must be 0–1440 minutes." });
       if (!Number.isInteger(reminder) || reminder < 0 || reminder > 1440) return res.status(400).json({ error: "Reminder time must be 0–1440 minutes." });
+      // Not sent by an older page: keep what is saved.
+      const early = req.body?.start_early_minutes == null ? (await loadRideSettings()).start_early_minutes : Number(req.body.start_early_minutes);
+      if (!Number.isInteger(early) || early < 0 || early > 1440) return res.status(400).json({ error: "Start Ride window must be 0–1440 minutes." });
       const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
       if (rows.length === 0) {
-        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, updated_by) VALUES (?, ?, ?, ?)", [1, grace, reminder, req.user.id]);
+        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, start_early_minutes, updated_by) VALUES (?, ?, ?, ?, ?)", [1, grace, reminder, early, req.user.id]);
       } else {
-        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, req.user.id]);
+        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, start_early_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, early, req.user.id]);
       }
-      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder });
+      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder, start_early_minutes: early });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2068,6 +2086,35 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (requisition.status !== "assigned") return res.status(400).json({ error: "Only a ride with a vehicle assigned can be started." });
 
       const now = new Date();
+      // Not long before its time: a ride can be started from start_early_minutes
+      // before it (Ride settings). Earlier only by Vehicle Management / a
+      // Vehicle Maintainer (or the Superadmin), with a reason that is kept.
+      const plannedStart = requisition.leg === "pickup" ? (requisition.pickup_at ? new Date(requisition.pickup_at) : null) : rideStartAt(requisition.ride_date, requisition.start_time);
+      let earlyReason: string | null = null;
+      if (plannedStart && !Number.isNaN(plannedStart.getTime())) {
+        const { start_early_minutes } = await loadRideSettings();
+        const opensAt = new Date(plannedStart.getTime() - start_early_minutes * 60 * 1000);
+        if (now.getTime() < opensAt.getTime()) {
+          const mods = req.user.role === "superadmin" ? ["vehicle_management"] : req.user.role === "admin" || req.user.role === "user" ? await getAdminModules(req.user.id) : [];
+          const canOverride = mods.includes("vehicle_management") || mods.includes("vehicle_maintainer");
+          const reason = typeof req.body?.early_reason === "string" ? req.body.early_reason.trim().slice(0, 255) : "";
+          if (!canOverride || reason.length < 3) {
+            // "22-Nov-2026 10:00", the way dates read across the app.
+            const nice = (d: Date) => {
+              const [ymd, hm] = dhakaClock(d).split(" ");
+              const [y, m, dd] = ymd.split("-");
+              return `${dd}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y} ${hm}`;
+            };
+            return res.status(400).json({
+              error: `This ride starts at ${nice(plannedStart)} — it can be started from ${nice(opensAt)}.${canOverride ? " To start it now, write why." : ""}`,
+              code: "too_early",
+              can_override: canOverride,
+              opens_at: opensAt.toISOString()
+            });
+          }
+          earlyReason = reason;
+        }
+      }
       const done: any =
         requisition.leg === "pickup"
           ? await queryDB("UPDATE vehicle_requisitions SET status = ?, pickup_started_at = ? WHERE id = ? AND status = ?", ["ongoing", now, id, "assigned"])
@@ -2079,6 +2126,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
               "assigned"
             ]);
       if (Number(done?.affectedRows ?? 1) === 0) return res.status(409).json({ error: "This ride was just changed by someone else — refresh and try again." });
+      if (earlyReason) await queryDB("UPDATE vehicle_requisitions SET early_start_reason = ? WHERE id = ?", [`${earlyReason} (started early by ${req.user.name || "user #" + req.user.id})`.slice(0, 255), id]).catch(() => {});
       rideLive(requisition);
 
       const notify = new Set<number>([Number(requisition.employee_user_id), Number(requisition.driver_user_id) || 0, Number(requisition.assigned_by) || 0]);

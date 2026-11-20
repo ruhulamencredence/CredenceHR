@@ -237,6 +237,11 @@ useLiveRefresh(() => load());
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
+    // A ride request is never rejected without a reason (the server refuses too).
+    if (item.source_type === 'vehicle_requisition' && action === 'rejected' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: 'Write why this ride is rejected in Remarks — the rider sees it.' });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
@@ -630,7 +635,7 @@ useLiveRefresh(() => load());
                       <input
                         type="text"
                         aria-label="Remarks"
-                        placeholder={item.source_type === 'bill_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
+                        placeholder={item.source_type === 'bill_claim' ? 'Remarks (a reason is needed to Return or Reject)' : item.source_type === 'vehicle_requisition' ? 'Remarks (a reason is needed to Reject)' : 'Remarks (optional)'}
                         value={remarksDraft[item.id] || ''}
                         onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

@@ -264,6 +264,11 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
+    // A ride request is never rejected without a reason (the server refuses too).
+    if (target?.source_type === 'vehicle_requisition' && action === 'rejected' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: 'Write why this ride is rejected in Remarks — the rider sees it.' });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
@@ -578,7 +583,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           <input
                             type="text"
                             aria-label="Remarks"
-                            placeholder={r.source_type === 'bill_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
+                            placeholder={r.source_type === 'bill_claim' ? 'Remarks (needed to Return/Reject)' : r.source_type === 'vehicle_requisition' ? 'Remarks (a reason is needed to Reject)' : 'Remarks (optional)'}
                             value={remarksDraft[r.id] || ''}
                             onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                             className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

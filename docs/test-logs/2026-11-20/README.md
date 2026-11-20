@@ -27,3 +27,22 @@ the difference to `user_access_log`; `logUserAccess` for the Transfer and HR Act
   (PEPM + / −, Check-in ended / from, Department team).
 - Re-run, nothing broken: user-delete-guard 7/7, add-user-rule 10/10, first-day 9/9, joiner-letter 24/24,
   project-names 13/13, entry-sharing 38/38.
+
+## Vehicle: Start Ride window, and no Reject without a reason
+
+Server: `VehicleManagementRoutes.ts` (`start_early_minutes` in Ride settings, default 30; `too_early` answer with
+`can_override`; `early_start_reason`), `server.ts` `performApprovalAction` (a ride request needs a reason to reject).
+UI: `promptDialog` (src/lib/confirmDialog.tsx, same liquid-glass card with a text box), Start Ride in
+`VehicleManagement.tsx` / `VehicleManagementAdmin.tsx`, Remarks hint + check in `ApproveApplications.tsx`,
+`ApprovalManager.tsx`, `PendingApprovalsCard.tsx`.
+
+- `scripts/vehicle-start-reject-api.mjs`: **19/19** — reject with no reason / only spaces refused and still pending, with a
+  reason rejected, the Vehicle Maintainer Layer too, Approve needs nothing; Ride settings default 30, an older page keeps
+  it, only the Superadmin, range checked; tomorrow's ride: the driver can't start it (not even with a reason), Vehicle
+  Management is asked why and then starts it, reason + who kept, completed and car freed; a ride 20 min away: the driver
+  starts it with no reason recorded; window 0: refused until the start time.
+- `scripts/vehicle-start-reject-ui.cjs`: **12/12** — driver on a phone presses Start Ride a day early and is told when it
+  opens (ride not started); Vehicle Management: "Start this ride early?" popup, Start now off until a reason is typed,
+  started with the reason kept; Approve Application: Remarks says a reason is needed, Reject with none stopped with a
+  message and still pending, with one rejected; no page errors.
+

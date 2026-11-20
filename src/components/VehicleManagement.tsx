@@ -16,7 +16,7 @@ import { formatDuration } from '../lib/rideDuration';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
-import { confirmDialog } from '../lib/confirmDialog';
+import { confirmDialog, promptDialog } from '../lib/confirmDialog';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 import { useWideWeb } from '../lib/useWideWeb';
@@ -403,11 +403,17 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   }
 
   // Start Ride: an assigned ride becomes Ongoing (Live Map + live tracking on).
-  async function startRide(id: number) {
+  async function startRide(id: number, earlyReason?: string) {
     setError(null);
     try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders(), body: JSON.stringify(earlyReason ? { early_reason: earlyReason } : {}) });
       const data = await res.json();
+      // Before its Start Ride window: Vehicle Management / a Maintainer may start it with a reason.
+      if (!res.ok && data.code === 'too_early' && data.can_override && !earlyReason) {
+        const why = await promptDialog(data.error, { title: 'Start this ride early?', placeholder: 'Why it starts early (kept with the ride)', confirmLabel: 'Start now', minLength: 3 });
+        if (why) return startRide(id, why);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
       void loadMyTrips();
       if (tab === 'status') void loadRequisitions(true);

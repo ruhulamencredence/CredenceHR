@@ -1538,6 +1538,12 @@ async function performApprovalAction(
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
+  // A ride request is never turned down without saying why — the rider sees
+  // the reason (Ride Status and the alert). Ride Requests already asked for
+  // it; Approve Application and the API now must too.
+  if (request.source_type === "vehicle_requisition" && action === "rejected" && !String(remarks || "").trim()) {
+    throw new ApprovalActionError(400, "Write why this ride is rejected — the rider sees it.");
+  }
   // An attendance correction for a day whose salary is already processed /
   // paid can't be approved (it would change a closed month) — checked before
   // anything is recorded, so the request is never left half-approved.

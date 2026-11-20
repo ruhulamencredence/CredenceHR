@@ -468,6 +468,11 @@ useLiveRefresh(() => load(true));
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
     }
+    // A ride request is never rejected without a reason (the server refuses too).
+    if (item.source_type === 'vehicle_requisition' && action === 'rejected' && !(remarksDraft[key] || '').trim()) {
+      setMessage({ type: 'error', text: 'Write why this ride is rejected in Remarks — the rider sees it.' });
+      return;
+    }
     // The hand-over Layers (Asset Fulfiller / Vehicle Maintainer): a Reject
     // needs the reason too (e.g. "not in stock"), and is asked once more.
     if (action === 'rejected' && (item.asset_fulfiller_bypass || item.vehicle_maintainer_bypass)) {
@@ -1346,7 +1351,7 @@ useLiveRefresh(() => load(true));
                         <input
                           type="text"
                           aria-label="Remarks"
-                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
+                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : item.source_type === 'vehicle_requisition' ? 'Remarks (a reason is needed to Reject)' : 'Remarks (optional)'}
                           value={remarksDraft[key] || ''}
                           onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                           className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

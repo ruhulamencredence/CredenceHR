@@ -35,7 +35,7 @@ import { RideDetails } from './RideDetails';
 import { SearchSelect } from './Combobox';
 import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
 import { VehicleDriversPanel } from './VehicleDriversPanel';
-import { confirmDialog } from '../lib/confirmDialog';
+import { confirmDialog, promptDialog } from '../lib/confirmDialog';
 import { DurationPicker } from './DurationPicker';
 import { formatDuration } from '../lib/rideDuration';
 import { personLabel } from '../lib/personLabel';
@@ -161,8 +161,8 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // Ride deadline rules (vehicle_ride_settings): a waiting request expires
   // grace_minutes after its start time; approvers are reminded
   // reminder_minutes before it. Only a Superadmin edits them.
-  const [rideRules, setRideRules] = useState<{ grace_minutes: number; reminder_minutes: number; can_change: boolean } | null>(null);
-  const [rideRulesDraft, setRideRulesDraft] = useState({ grace_minutes: '30', reminder_minutes: '60' });
+  const [rideRules, setRideRules] = useState<{ grace_minutes: number; reminder_minutes: number; start_early_minutes?: number; can_change: boolean } | null>(null);
+  const [rideRulesDraft, setRideRulesDraft] = useState({ grace_minutes: '30', reminder_minutes: '60', start_early_minutes: '30' });
   const [rideRulesMsg, setRideRulesMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -171,7 +171,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       .then((d) => {
         if (!d) return;
         setRideRules(d);
-        setRideRulesDraft({ grace_minutes: String(d.grace_minutes), reminder_minutes: String(d.reminder_minutes) });
+        setRideRulesDraft({ grace_minutes: String(d.grace_minutes), reminder_minutes: String(d.reminder_minutes), start_early_minutes: String(d.start_early_minutes ?? 30) });
       })
       .catch(() => {});
   }, []);
@@ -182,11 +182,11 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       const res = await fetch(apiUrl('/api/vehicles/ride-settings'), {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ grace_minutes: Number(rideRulesDraft.grace_minutes), reminder_minutes: Number(rideRulesDraft.reminder_minutes) })
+        body: JSON.stringify({ grace_minutes: Number(rideRulesDraft.grace_minutes), reminder_minutes: Number(rideRulesDraft.reminder_minutes), start_early_minutes: Number(rideRulesDraft.start_early_minutes) })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not save.');
-      setRideRules((prev) => (prev ? { ...prev, grace_minutes: data.grace_minutes, reminder_minutes: data.reminder_minutes } : prev));
+      setRideRules((prev) => (prev ? { ...prev, grace_minutes: data.grace_minutes, reminder_minutes: data.reminder_minutes, start_early_minutes: data.start_early_minutes } : prev));
       setRideRulesMsg('Saved.');
     } catch (err: any) {
       setRideRulesMsg(err.message);
@@ -413,10 +413,16 @@ useLiveRefresh(() => loadRequisitions());
   }
 
   // Start Ride: an assigned ride becomes ongoing (live map + tracking on).
-  async function startRide(id: number) {
+  async function startRide(id: number, earlyReason?: string) {
     try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders(), body: JSON.stringify(earlyReason ? { early_reason: earlyReason } : {}) });
       const data = await res.json();
+      // Before its Start Ride window: Vehicle Management / a Maintainer may start it with a reason.
+      if (!res.ok && data.code === 'too_early' && data.can_override && !earlyReason) {
+        const why = await promptDialog(data.error, { title: 'Start this ride early?', placeholder: 'Why it starts early (kept with the ride)', confirmLabel: 'Start now', minLength: 3 });
+        if (why) return startRide(id, why);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
       loadRequisitions();
     } catch (err: any) {
@@ -526,7 +532,9 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="font-semibold text-gray-800 text-sm">Ride deadline</div>
                 A request still waiting on approval or a vehicle expires {rideRules.grace_minutes} min after its start time; approvers and
                 Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it. A ride given a vehicle but never started is
-                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed.
+                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed. Start Ride works from{' '}
+                {rideRules.start_early_minutes ?? 30} min before the start time; earlier only by Vehicle Management or a Vehicle Maintainer,
+                with a reason.
               </div>
               {rideRules.can_change && (
                 <>
@@ -549,6 +557,17 @@ useLiveRefresh(() => loadRequisitions());
                       max={1440}
                       value={rideRulesDraft.reminder_minutes}
                       onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, reminder_minutes: e.target.value })}
+                      className="w-24 border rounded px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label>
+                    <span className="block mb-0.5">Start Ride from (min before)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={rideRulesDraft.start_early_minutes}
+                      onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, start_early_minutes: e.target.value })}
                       className="w-24 border rounded px-2 py-1.5 text-sm"
                     />
                   </label>
