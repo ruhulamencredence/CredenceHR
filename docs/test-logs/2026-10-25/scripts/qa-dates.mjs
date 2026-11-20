@@ -79,7 +79,11 @@ const a14 = await api(SA, 'POST', '/api/employees', { name: 'Exactly Fourteen', 
 const a13 = await api(SA, 'POST', '/api/employees', { name: 'One Day Short', designation: 'Helper', department_id: 1, joining_date: '2024-01-01', date_of_birth: ageDob(14, 1) });
 T('DT-15', ok(a14) && !ok(a13), 'Turning 14 today is allowed; one day short of 14 is refused', `${a14.status} / ${a13.status}`);
 const cats = (await api(P, 'GET', '/api/bill-claim-categories')).body;
-const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
+// Not Transport: a Transport bill's amount comes only from its Check In/Out (policy transport_from_check_in_out).
+const catList = Array.isArray(cats) ? cats : cats.categories || [];
+const cat = catList.find((c) => !/transport/i.test(c.name)) || catList[0];
+// Bill Claim needs its rules read and confirmed first (BillClaimPolicy.ts, rules_unread).
+await api(P, 'POST', '/api/bill-claim-rules/read', { action: 'confirm' });
 const cl = await api(P, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 100, description: 'dates' }], description: 'dates' });
 const cd = sql(`SELECT DATE_FORMAT(claim_date,'%Y-%m-%d') FROM bill_claims WHERE id=${cl.body.id || 0}`);
 T('DT-16', ok(cl) && cd === day(0), `A claim filed now is dated with the Dhaka date (${day(0)}), whatever the server clock's zone`, `${J(cl)}; claim_date ${cd}; server UTC date ${new Date().toISOString().slice(0, 10)}`);

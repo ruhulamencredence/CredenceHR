@@ -48,11 +48,15 @@ for (const t of ['leave', 'bill_claim', 'timesheet']) {
   note(`Template "${t}": Layer 1 = ${L1.name}, Layer 2 = ${L2.name} (${r.status})`);
 }
 const cats = (await api(SUP.token, 'GET', '/api/bill-claim-categories')).body;
-const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
+// Not Transport: a Transport bill's amount comes only from its Check In/Out (policy transport_from_check_in_out).
+const catList = Array.isArray(cats) ? cats : cats.categories || [];
+const cat = catList.find((c) => !/transport/i.test(c.name)) || catList[0];
 
 // ---------------- submit three requests ----------------
 async function submitAll(P, tag, offset) {
   const leave = await api(P.token, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: day(10 + offset), end_date: day(10 + offset), purpose: `${tag} leave` });
+  // Bill Claim needs its rules read and confirmed first (BillClaimPolicy.ts, rules_unread).
+  await api(P.token, 'POST', '/api/bill-claim-rules/read', { action: 'confirm' });
   const claim = await api(P.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 350 + offset, description: `${tag} CNG` }], description: `${tag} client visit` });
   const ts = await api(P.token, 'POST', '/api/attendance/corrections', { project_id: proj.body.id, attendance_date: day(-2 - offset), check_in_at: `${day(-2 - offset)} 09:05:00`, check_out_at: `${day(-2 - offset)} 18:00:00`, remarks: `${tag} forgot to check in` });
   return [['leave_application', 'Leave', leave], ['bill_claim', 'Bill Claim', claim], ['attendance_correction', 'Timesheet correction', ts]];

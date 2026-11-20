@@ -33,10 +33,13 @@ await api(SA, 'PUT', `/api/users/${hrId}/module-permissions`, { modules: ['appro
 await api(SA, 'PUT', `/api/users/${hrId}/module-permission-layers`, { module: 'approvals', layers: ['read', 'edit_add'] });
 const HR = await login('nasrin.r01@credence.test', 'Pass12345x');
 const cats = (await api(H.token, 'GET', '/api/bill-claim-categories')).body;
-const cat = list(cats)[0];
+// Not Transport: a Transport bill's amount comes only from its Check In/Out (policy transport_from_check_in_out).
+const cat = list(cats).find((c) => !/transport/i.test(c.name)) || list(cats)[0];
 console.log(`Setup: ${H.name} — no Direct Supervisor, Department has no Supervisor, no Approval Template for leave / conveyance / timesheet.\n`);
 
 const leave = await api(H.token, 'POST', '/api/leave-applications', { leave_type: 'casual', start_date: day(12), end_date: day(12), purpose: 'Family program' });
+// Bill Claim needs its rules read and confirmed first (BillClaimPolicy.ts, rules_unread).
+await api(H.token, 'POST', '/api/bill-claim-rules/read', { action: 'confirm' });
 const claim = await api(H.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 420, description: 'CNG' }], description: 'Client visit' });
 const ts = await api(H.token, 'POST', '/api/attendance/corrections', { project_id: proj.body.id, attendance_date: day(-2), check_in_at: `${day(-2)} 09:05:00`, check_out_at: `${day(-2)} 18:00:00`, remarks: 'Forgot to check in' });
 const items = [['leave_application', 'Leave', leave, 'leave_applications'], ['bill_claim', 'Bill Claim', claim, 'bill_claims'], ['attendance_correction', 'Timesheet correction', ts, 'attendance_corrections']];

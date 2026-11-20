@@ -78,7 +78,11 @@ T('C5', Number(recovered) === 2000 && paidEvents === 1, 'Pay pressed 3 times at 
 
 // C6 — two conveyance claims for the same day at once (one claim a day).
 const cats = (await api(E.token, 'GET', '/api/bill-claim-categories')).body;
-const cat = (Array.isArray(cats) ? cats : cats.categories || [])[0];
+// Not Transport: a Transport bill's amount comes only from its Check In/Out (policy transport_from_check_in_out).
+const catList = Array.isArray(cats) ? cats : cats.categories || [];
+const cat = catList.find((c) => !/transport/i.test(c.name)) || catList[0];
+// Bill Claim needs its rules read and confirmed first (BillClaimPolicy.ts, rules_unread).
+await api(E.token, 'POST', '/api/bill-claim-rules/read', { action: 'confirm' });
 const claims = await burst(3, () => api(E.token, 'POST', '/api/bill-claims', { from_date: day(0), to_date: day(0), items: [{ category_id: cat?.id, bill_date: day(0), amount: 300, description: 'race' }], description: 'race' }));
 const claimRows = Number(sql(`SELECT COUNT(*) FROM bill_claims WHERE user_id=${E.uid}`));
 T('C6', claimRows === 1, 'Three Conveyance claims for today sent at once: one is kept (one claim a day)', `rows ${claimRows}; answers ${codes(claims)}`);
