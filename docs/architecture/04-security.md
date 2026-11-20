@@ -193,6 +193,7 @@
 | পাসওয়ার্ড রিসেট অনুরোধ ও কোড | `password_reset_log`, `password_reset_requests` | — |
 | অ্যাক্সেস বদল (কে কাকে কোন অনুমতি দিল, পাসওয়ার্ড রিসেট) | `user_access_audit` | — |
 | Payroll: কে খুলল, কী করল | `payroll_access_log` | — |
+| Login-এ প্রতিটি বদল আগে → পরে (Block, Mobile App, PEPM project, Check-in জায়গা, Module access, layer, Self Service switch, password reset — hash কখনো নয়), Transfer ও HR Action-এর নিজে করা বদলসহ; HR Operations → Service Book → Login & Access-এ দেখা যায় (`p360_access` layer) | `user_access_log` (`UserAccessLog.ts`) | — |
 | কর্মীর তথ্য বদল (আগের/পরের মান), বেতনের ব্যাংক/MFS অ্যাকাউন্ট যোগ-বদল-মোছা (কর্মীকে alert যায়) | `employee_change_log` | — |
 | MPR entry সম্পাদনা/স্থায়ী মোছা | `entry_edit_history`, `entry_permanent_delete_log` | — |
 | ই-স্বাক্ষর ঘটনা | `document_events` | — |

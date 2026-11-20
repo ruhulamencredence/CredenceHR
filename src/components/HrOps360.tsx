@@ -48,13 +48,16 @@ import {
   User,
   Users,
   Wallet,
-  Building2
+  Building2,
+  Activity,
+  KeyRound
 } from 'lucide-react';
 import { ServiceBookSkeleton } from './HrOpsSkeleton';
 import { apiUrl } from '../lib/api';
 import { NewActionModal } from './HrOpsActions';
 import { LetterComposer } from './HrOpsLetters';
 import { ServiceTimeline, serviceLength, saveServiceBookPdf } from './HrOpsServiceBook';
+import { ActivityTimeline, MoreActivityTab, AccessLogTab, useActivity, type ActivityEvent } from './HrOpsActivity';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 import {
   useHrApi,
@@ -87,7 +90,7 @@ import {
 } from './HrOps360Parts';
 import { confirmDialog } from '../lib/confirmDialog';
 
-type TabKey = 'overview' | 'personal' | 'career' | 'documents' | 'attendance' | 'leave' | 'claims' | 'salary' | 'loans' | 'discipline' | 'other';
+type TabKey = 'overview' | 'personal' | 'career' | 'documents' | 'attendance' | 'leave' | 'claims' | 'salary' | 'loans' | 'discipline' | 'other' | 'more' | 'access';
 
 // True inside the employee's own (read-only) Service Book.
 const SelfBook = createContext(false);
@@ -95,7 +98,8 @@ const SelfBook = createContext(false);
 const p360Path = (self: boolean, path: string) =>
   self ? path.replace(/^\/api\/hr-ops\/p360\/\d+(?=\/section|$)/, '/api/hr-ops/my/p360').replace(/^\/api\/hr-ops\/p360\/(records|documents)\//, '/api/hr-ops/my/p360/$1/') : path;
 
-const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }>; payroll?: boolean }[] = [
+// hr: HR's view only (never My Service Book); access: also needs the Login & Access layer.
+const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }>; payroll?: boolean; hr?: boolean; access?: boolean }[] = [
   { key: 'overview', label: 'Overview', icon: LayoutDashboard },
   { key: 'personal', label: 'Personal & Family', icon: User },
   { key: 'career', label: 'Experience & Education', icon: GraduationCap },
@@ -106,7 +110,9 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?
   { key: 'salary', label: 'Salary', icon: Wallet, payroll: true },
   { key: 'loans', label: 'Loans', icon: HandCoins, payroll: true },
   { key: 'discipline', label: 'Disciplinary', icon: ShieldCheck },
-  { key: 'other', label: 'Assets & Records', icon: Package }
+  { key: 'other', label: 'Assets & Records', icon: Package },
+  { key: 'more', label: 'More activity', icon: Activity, hr: true },
+  { key: 'access', label: 'Login & Access', icon: KeyRound, hr: true, access: true }
 ];
 
 const thisYear = new Date().getFullYear();
@@ -310,6 +316,8 @@ export const Employee360: React.FC<{
   };
 
   const perms = ov?.permissions;
+  // HR's view: the extra timeline events and whether Login & Access may be shown.
+  const activity = useActivity(api, !self && ov && loadedFor === employeeId ? ov.employee.id : null, reloadKey);
   const e = ov?.employee;
   const s = ov?.summary;
   const needsLogin = (what: string) => setMsg({ type: 'error', text: `${e?.name} has no app login yet, so ${what} can't be recorded. Create the login from Employees first.` });
@@ -472,7 +480,7 @@ export const Employee360: React.FC<{
 
           {/* Tabs */}
           <div className="flex gap-1 overflow-x-auto border-b border-slate-200 -mx-1 px-1">
-            {TABS.filter((t) => !t.payroll || perms?.payroll).map((t) => (
+            {TABS.filter((t) => (!t.payroll || perms?.payroll) && (!t.hr || !self) && (!t.access || activity?.can_access_log)).map((t) => (
               <button
                 key={t.key}
                 type="button"
@@ -486,7 +494,7 @@ export const Employee360: React.FC<{
             ))}
           </div>
 
-          {tab === 'overview' && <OverviewTab ov={ov} emp={emp} onEditService={() => setModal({ kind: 'service' })} />}
+          {tab === 'overview' && <OverviewTab ov={ov} emp={emp} activity={self ? null : activity?.events ?? null} onEditService={() => setModal({ kind: 'service' })} />}
           {tab === 'personal' && (
             <PersonalTab api={api} ov={ov} reloadKey={reloadKey} onEdit={(row) => setModal({ kind: 'record', record: 'family', row })} onChanged={() => refresh('Saved.')} />
           )}
@@ -509,6 +517,8 @@ export const Employee360: React.FC<{
           {tab === 'loans' && perms?.payroll && <LoansTab api={api} ov={ov} reloadKey={reloadKey} onNew={() => setModal({ kind: 'loan' })} />}
           {tab === 'discipline' && <DisciplineTab api={api} ov={ov} reloadKey={reloadKey} />}
           {tab === 'other' && <OtherTab api={api} ov={ov} reloadKey={reloadKey} />}
+          {tab === 'more' && !self && <MoreActivityTab api={api} employeeId={ov.employee.id} reloadKey={reloadKey} />}
+          {tab === 'access' && !self && activity?.can_access_log && <AccessLogTab api={api} employeeId={ov.employee.id} reloadKey={reloadKey} />}
         </>
       )}
 
@@ -589,7 +599,7 @@ export const Employee360: React.FC<{
 
 type Api = ReturnType<typeof useHrApi>;
 
-const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEditService: () => void }> = ({ ov, emp, onEditService }) => {
+const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; activity: ActivityEvent[] | null; onEditService: () => void }> = ({ ov, emp, activity, onEditService }) => {
   const canEmailReports = useCanEmailReports();
   const self = useContext(SelfBook);
   const e = ov.employee;
@@ -634,7 +644,8 @@ const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEdi
           </span>
         }
       >
-        <ServiceTimeline events={ov.events} />
+        {/* HR's view adds the other activity (the PDF stays the official history); My Service Book is unchanged. */}
+        {self ? <ServiceTimeline events={ov.events} /> : <ActivityTimeline service={ov.events} extra={activity} />}
       </Card>
     </div>
   );

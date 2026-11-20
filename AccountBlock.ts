@@ -16,6 +16,7 @@
 
 import type { Express } from "express";
 import { requestApprovalReconcile } from "./approvalReconcile";
+import { logUserAccess } from "./UserAccessLog";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -109,7 +110,13 @@ export async function setAccountBlocked(
 export async function blockEmployeeLogin(queryDB: QueryDB, employeeId: number, reason: string, actorId: number | null) {
   const rows: any[] = await queryDB("SELECT user_id FROM all_employees WHERE id = ?", [employeeId]);
   const userId = rows[0]?.user_id ? Number(rows[0].user_id) : null;
-  if (userId) await setAccountBlocked(queryDB, userId, true, reason, actorId);
+  if (!userId) return;
+  const was: any[] = (await queryDB("SELECT is_blocked FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+  await setAccountBlocked(queryDB, userId, true, reason, actorId);
+  // Service Book -> Login & Access: an HR Action blocked it, not the Users page.
+  if (!Number(was[0]?.is_blocked || 0)) {
+    await logUserAccess(queryDB, { userId, actorId, source: "hr_action", action: "Login blocked by HR Action", changes: [{ what: "Login", from: "Open", to: `Blocked · ${reason}` }] });
+  }
 }
 
 interface AccountBlockDeps {

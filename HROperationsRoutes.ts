@@ -46,6 +46,7 @@
 
 import { fallbackServiceStatus } from "./hrServiceStatus";
 import type { Express } from "express";
+import { logUserAccess, type AccessChange } from "./UserAccessLog";
 import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { applyCompanyTransfer } from "./CompanyRoutes";
@@ -3380,6 +3381,16 @@ export async function applyTransferAccess(queryDB: QueryDB, action: any, to: any
     await queryDB("/*unscoped*/ DELETE FROM department_team_members WHERE employee_id = ?", [empId]);
     await queryDB("/*unscoped*/ INSERT IGNORE INTO department_team_members (team_id, employee_id) VALUES (?, ?)", [plan.team.to.id, empId]);
     done.push(`Team: ${plan.team.to.name}`);
+  }
+  // Service Book -> Login & Access: the Transfer did this, not a person on the Users page.
+  if (userId && done.length) {
+    const given = done.filter((d) => d.startsWith("PEPM: ") && d.endsWith(" given")).map((d) => d.slice(6, -6));
+    const removed = done.filter((d) => d.startsWith("PEPM: ") && d.endsWith(" removed")).map((d) => d.slice(6, -8));
+    const changes: AccessChange[] = [];
+    if (given.length || removed.length) changes.push({ what: "PEPM projects", added: given, removed });
+    for (const d of done.filter((x) => x.startsWith("Check-in at "))) changes.push({ what: "Check-in places", to: d });
+    for (const d of done.filter((x) => x.startsWith("Team: "))) changes.push({ what: "Department team", to: d.slice(6) });
+    await logUserAccess(queryDB, { userId, actorName: "Transfer (HR Action)", source: "transfer", action: `Transfer effective ${eff}`, changes });
   }
   return done;
 }
