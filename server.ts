@@ -20,7 +20,8 @@ import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./d
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
-import { registerUserManagementRoutes } from "./UserManagement";
+import { registerUserManagementRoutes, ensureUserExtraColumns } from "./UserManagement";
+import { ensureUserRecordsGuard } from "./UserRecordsGuard";
 import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
@@ -106,6 +107,8 @@ import { registerLoanPlanRoutes } from "./LoanPlan";
 import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
+import { registerEmployeeActivityRoutes } from "./EmployeeActivityRoutes";
+import { ensureUserAccessLogSchema, userAccessLogMiddleware } from "./UserAccessLog";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerHrQuickReportsRoutes, ensureHrQuickReportsSchema } from "./HrQuickReports";
 import { payrollAmountGuard } from "./payrollAmountMask";
@@ -373,6 +376,10 @@ async function initDB() {
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
+    // …and a login's work (attendance, claims, leave…) outlives the login (UserRecordsGuard.ts).
+    await ensureUserRecordsGuard(dbPool);
+    // Service Book -> Login & Access log (UserAccessLog.ts).
+    await ensureUserAccessLogSchema(queryDB);
     // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
     await backfillEmployeeLoginIds(queryDB);
     await autoLinkByEmployeeId(queryDB);
@@ -380,6 +387,8 @@ async function initDB() {
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // PEPM Project teams: the per-Project Final Submit locks (PepmTeam.ts).
     await ensurePepmTeamSchema(queryDB).catch((e: any) => console.warn("⚠️ PEPM project locks: " + e.message));
+    // Add New User: why a login isn't an Employee's (UserManagement.ts).
+    await ensureUserExtraColumns(queryDB);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) {
       startZkSyncSchedule(dbPool);
@@ -495,7 +504,7 @@ const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf", "rules_readers"] as const;
 // explicit-only — the no-saved-layers default is "read" alone.
 // "reminders_receive" (explicit-only too): HR reminders of probation,
 // contract, document, retirement and increment dates (HrRemindersRoutes.ts).
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot", "hr_headcount", "hr_emp_export"] as const;
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot", "hr_headcount", "hr_emp_export", "p360_access"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -1528,6 +1537,12 @@ async function performApprovalAction(
   }
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
+  }
+  // A ride request is never turned down without saying why — the rider sees
+  // the reason (Ride Status and the alert). Ride Requests already asked for
+  // it; Approve Application and the API now must too.
+  if (request.source_type === "vehicle_requisition" && action === "rejected" && !String(remarks || "").trim()) {
+    throw new ApprovalActionError(400, "Write why this ride is rejected — the rider sees it.");
   }
   // An attendance correction for a day whose salary is already processed /
   // paid can't be approved (it would change a closed month) — checked before
@@ -2978,6 +2993,8 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   // No database error text in API answers (ApiErrors.ts).
   maskDatabaseErrors(app);
+  // Service Book -> Login & Access: what each change to a login changed (UserAccessLog.ts).
+  app.use(userAccessLogMiddleware(queryDB));
   // ZKTeco machines on the internet send their punches here (ADMS "Cloud
   // server", /iclock/...) — only registered push machines are answered
   // (zkMachines.ts).
@@ -3196,7 +3213,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3718,6 +3735,7 @@ async function startServer() {
   // Employee 360 (HR Operations -> Service Book): experience / education /
   // family / training records + every other module's data for one Employee.
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
+  registerEmployeeActivityRoutes(app, { authenticateToken, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB });
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });

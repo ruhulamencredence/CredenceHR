@@ -18,6 +18,7 @@ import { LetterComposer, type ComposerInit } from './HrOpsLetters';
 import { HrOpsJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 import { useHrApi, Notice, Badge, fmtDate, inputCls, btnPrimary, btnGhost, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { LoadingBlock } from './LoadingBlock';
+import { FirstDayAction, useFirstDay } from './FirstDayActions';
 
 interface Joiner {
   employee_id: number;
@@ -96,6 +97,9 @@ const OnboardingChecklist: React.FC<{ token: string; meta: HrOpsMeta; employees:
   const [joiners, setJoiners] = useState<Joiner[]>([]);
   const [loading, setLoading] = useState(true);
   const [current, setCurrent] = useState<number | null>(null);
+  // First-day steps done from here (FirstDayActions.tsx).
+  const [firstDayKey, setFirstDayKey] = useState(0);
+  const firstDay = useFirstDay(token, current, firstDayKey);
   const [items, setItems] = useState<Item[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, { note: string; value_text: string }>>({});
@@ -286,6 +290,19 @@ const OnboardingChecklist: React.FC<{ token: string; meta: HrOpsMeta; employees:
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {it.status === 'pending' && (
+                            <FirstDayAction
+                              token={token}
+                              taskKey={it.task_key}
+                              fd={firstDay}
+                              onDone={(text) => {
+                                setMsg({ type: 'success', text });
+                                setFirstDayKey((n) => n + 1);
+                                if (current) loadItems(current);
+                              }}
+                              onError={(text) => setMsg({ type: 'error', text })}
+                            />
+                          )}
                           {LETTER_FOR_TASK[it.task_key] && it.status === 'pending' && (
                             <button type="button" className={btnGhost} onClick={() => setComposer({ employee_id: current, letter_type: LETTER_FOR_TASK[it.task_key] })}>
                               <FileText className="w-3.5 h-3.5" /> Issue Letter

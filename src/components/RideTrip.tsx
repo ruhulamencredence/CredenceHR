@@ -14,7 +14,8 @@ import { X, Repeat, ArrowRight, Check } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { SearchSelect } from './Combobox';
-import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { pickupTimeOf, slotClash, busyLabel, type SlotBooking } from '../lib/vehicleSlots';
 
 export type TripType = 'round' | 'drop_pickup' | 'one_way';
 export interface TripValue {
@@ -419,12 +420,15 @@ export function PickupAssignPopup({
   onDone
 }: {
   r: TripRide;
-  vehicles: { id: number; vehicle_no: string; model?: string | null }[];
+  vehicles: { id: number; vehicle_no: string; model?: string | null; bookings?: SlotBooking[]; gap_minutes?: number }[];
   drivers: DriverOption[];
   onClose: () => void;
   onDone: () => void;
 }) {
-  const sameCar = vehicles.some((v) => v.id === r.drop_vehicle_id) ? String(r.drop_vehicle_id) : '';
+  // The pick-up's own time (pickup_at, or now when called): cars and drivers booked then can't be picked.
+  const t = pickupTimeOf({ id: r.id, pickup_at: (r as any).pickup_at });
+  const clashOf = (v: { bookings?: SlotBooking[]; gap_minutes?: number }) => slotClash(v, t);
+  const sameCar = vehicles.some((v) => v.id === r.drop_vehicle_id && !clashOf(v)) ? String(r.drop_vehicle_id) : '';
   const [vehicleId, setVehicleId] = useState(sameCar);
   const [driverId, setDriverId] = useState(r.drop_driver_user_id ? String(r.drop_driver_user_id) : '');
   const [busy, setBusy] = useState(false);
@@ -438,19 +442,24 @@ export function PickupAssignPopup({
       <label className="block text-xs font-semibold text-slate-700 mb-1">Vehicle</label>
       <SearchSelect aria-label="Vehicle" value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={field}>
         <option value="">— Select vehicle —</option>
-        {vehicles.map((v) => (
-          <option key={v.id} value={String(v.id)}>
-            {`${v.vehicle_no}${v.model ? ` — ${v.model}` : ''}${v.id === r.drop_vehicle_id ? ' · the drop car' : ''}`}
-          </option>
-        ))}
+        {[...vehicles]
+          .sort((a, b) => Number(!!clashOf(a)) - Number(!!clashOf(b)))
+          .map((v) => {
+            const c = clashOf(v);
+            return (
+              <option key={v.id} value={String(v.id)} disabled={!!c}>
+                {`${v.vehicle_no}${v.model ? ` — ${v.model}` : ''}${v.id === r.drop_vehicle_id ? ' · the drop car' : ''}${c ? ` — ${busyLabel(c, t)}` : ' — Free at this time'}`}
+              </option>
+            );
+          })}
       </SearchSelect>
       {!sameCar && r.drop_vehicle_id && <p className="mt-1 text-[11px] text-amber-700">The drop car isn't free now — pick another.</p>}
       <label className="block text-xs font-semibold text-slate-700 mt-3 mb-1">Driver</label>
       <SearchSelect aria-label="Driver" value={driverId} onChange={(e) => setDriverId(e.target.value)} className={field}>
         <option value="">— Select driver —</option>
-        {sortDrivers(drivers).map((d) => (
-          <option key={d.id} value={String(d.id)}>
-            {driverOptionLabel(d)}
+        {sortDrivers(drivers, vehicleId, t).map((d) => (
+          <option key={d.id} value={String(d.id)} disabled={!!driverBusy(d, t)}>
+            {driverOptionLabel(d, vehicleId, t)}
           </option>
         ))}
       </SearchSelect>

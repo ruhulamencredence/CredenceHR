@@ -11,7 +11,10 @@
 // in their details and documents and submits them to HR.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ClipboardCheck, Lock, LogOut, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ClipboardCheck, Lock, LogOut, Clock, CheckCircle2, AlertTriangle, FileSignature, Eye, Download } from 'lucide-react';
+import { PdfPreviewModal } from './PdfPreviewModal';
+import { letterPdfBytes, saveLetterPdf } from './HrOpsShared';
+import { letterFileName, type LetterPdfCompany } from '../lib/hrLetterPdf';
 import { apiUrl } from '../lib/api';
 import { PasswordInput } from './PasswordInput';
 import type { User } from '../types';
@@ -35,7 +38,62 @@ interface MyApplication extends OnboardingFormState {
   submitted_at: string | null;
   expires_in_seconds: number | null;
   must_change_password: boolean;
+  // Issued by HR at Hire (JoinerLetterPopup.tsx): read, sign, upload the signed copy.
+  appointment_letter: {
+    id: number;
+    ref_no: string;
+    subject: string;
+    body: string;
+    letter_date: string | null;
+    company: LetterPdfCompany;
+    signed_doc_type: string;
+  } | null;
 }
+
+// The Appointment Letter card: open the PDF to print and sign, then upload
+// the signed copy in the documents part of the form below.
+const AppointmentLetterCard: React.FC<{ app: MyApplication }> = ({ app }) => {
+  const l = app.appointment_letter!;
+  const [pdf, setPdf] = useState<Uint8Array | null>(null);
+  const signed = (app.documents || []).some((d) => d.doc_type === l.signed_doc_type);
+  const letter = { ref_no: l.ref_no, letter_date: l.letter_date, subject: l.subject, body: l.body, employee_name: app.name };
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+          <FileSignature className="w-5 h-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-slate-900">Your Appointment Letter</div>
+          <div className="text-[11px] text-slate-500 font-mono">{l.ref_no}</div>
+        </div>
+      </div>
+      <ol className="list-decimal list-inside text-xs text-slate-600 space-y-1">
+        <li>Open the letter and read it.</li>
+        <li>Print it, sign it, and take a clear photo or scan.</li>
+        <li>
+          Upload it below as <b>{l.signed_doc_type}</b>.
+        </li>
+      </ol>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={async () => setPdf(await letterPdfBytes(l.company, letter))} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+          <Eye className="w-3.5 h-3.5" /> Open the letter
+        </button>
+        <button type="button" onClick={() => saveLetterPdf(l.company, letter)} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+          <Download className="w-3.5 h-3.5" /> Download
+        </button>
+        {signed ? (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Signed copy uploaded
+          </span>
+        ) : (
+          <span className="text-xs font-semibold text-amber-700">Signed copy not uploaded yet</span>
+        )}
+      </div>
+      <PdfPreviewModal isOpen={pdf !== null} pdfBytes={pdf} filename={letterFileName(l.ref_no, app.name)} onClose={() => setPdf(null)} onDownload={() => saveLetterPdf(l.company, letter)} />
+    </section>
+  );
+};
 
 // Ends this sign-in on this device and goes back to the sign-in page.
 export function signOutOnboarding(token: string | null) {
@@ -239,6 +297,8 @@ export const OnboardingShell: React.FC<{ token: string; user: User }> = ({ token
                 </div>
               )}
             </section>
+
+            {app.appointment_letter && !app.must_change_password && <AppointmentLetterCard app={app} />}
 
             {app.must_change_password ? (
               <ChangeTempPassword

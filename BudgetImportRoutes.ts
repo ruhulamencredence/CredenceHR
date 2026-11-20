@@ -1003,6 +1003,67 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         return res.status(400).json({ error: "No rows found in the uploaded Excel file" });
       }
 
+      // Project names in the sheet that aren't in Admin Panel -> Projects (a
+      // typo, or a short name) are not created silently any more: the import
+      // stops before saving anything and lists them, with look-alike Projects,
+      // and the Admin picks one for each — or "new" to add it as a Project
+      // (project_map: { "<name as in the sheet>": <project id> | "new" }).
+      const norm = (v: any) => String(v ?? "").trim().toLowerCase();
+      const squash = (v: string) => norm(v).replace(/[^a-z0-9\u0980-\u09ff]/g, "");
+      const allProjects: any[] = (await queryDB("SELECT id, project_name FROM projects")) || [];
+      const byName = new Map<string, any>(allProjects.map((p: any) => [norm(p.project_name), p]));
+      const projectMap: Record<string, any> = req.body.project_map && typeof req.body.project_map === "object" ? req.body.project_map : {};
+      const mapFor = (name: string) => projectMap[name] ?? projectMap[name.trim()] ?? Object.entries(projectMap).find(([k]) => norm(k) === norm(name))?.[1];
+      const unknown = new Map<string, number>();
+      for (const r of rows) {
+        const name = String(r?.project_name ?? "").trim();
+        if (!name) continue;
+        // Same name in another letter case / spacing: the Project's own spelling.
+        if (byName.has(norm(name))) {
+          r.project_name = byName.get(norm(name)).project_name;
+          continue;
+        }
+        const choice = mapFor(name);
+        if (choice === "new") continue;
+        if (choice !== undefined && allProjects.some((p: any) => Number(p.id) === Number(choice))) continue;
+        unknown.set(name, (unknown.get(name) || 0) + 1);
+      }
+      if (unknown.size) {
+        const words = (v: string) => new Set(norm(v).split(/[^a-z0-9\u0980-\u09ff]+/).filter((w) => w.length > 2));
+        return res.status(409).json({
+          error: "Some project names in the sheet aren't in Projects — pick the right one for each.",
+          needs_project_match: [...unknown.entries()].map(([name, count]) => {
+            const sq = squash(name);
+            const w = words(name);
+            const suggestions = allProjects
+              .map((p: any) => {
+                const pq = squash(p.project_name);
+                const shared = [...words(p.project_name)].filter((x) => w.has(x)).length;
+                const score = (pq && sq && (pq.includes(sq) || sq.includes(pq)) ? 3 : 0) + shared;
+                return { id: Number(p.id), name: String(p.project_name), score };
+              })
+              .filter((x) => x.score > 0)
+              .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+              .slice(0, 5)
+              .map(({ id, name }) => ({ id, name }));
+            return { name, rows: count, suggestions };
+          })
+        });
+      }
+      // The names the Admin matched are saved as the Project's own name.
+      for (const r of rows) {
+        const name = String(r?.project_name ?? "").trim();
+        if (!name) continue;
+        // Same name in another letter case / spacing: the Project's own spelling.
+        if (byName.has(norm(name))) {
+          r.project_name = byName.get(norm(name)).project_name;
+          continue;
+        }
+        const choice = mapFor(name);
+        const p = choice !== undefined && choice !== "new" ? allProjects.find((x: any) => Number(x.id) === Number(choice)) : null;
+        if (p) r.project_name = p.project_name;
+      }
+
       // Save the original Excel file itself against this Budget (overwrites any
       // previously saved file, so it always reflects the most recently imported sheet).
       if (file_base64 && typeof file_base64 === "string") {

@@ -16,7 +16,7 @@ import { formatDuration } from '../lib/rideDuration';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
-import { confirmDialog } from '../lib/confirmDialog';
+import { confirmDialog, promptDialog } from '../lib/confirmDialog';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 import { useWideWeb } from '../lib/useWideWeb';
@@ -26,7 +26,8 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { GLASS_CARD } from './RideDestinationPicker';
 import { RideBookingFlow } from './RideBookingFlow';
 import { ArrowLeft, CalendarDays, ChevronRight, Car, X, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
-import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { rideTimeOf, vehicleChoices, type SlotVehicle, type RideTime } from '../lib/vehicleSlots';
 import { SearchSelect } from './Combobox';
 import { TripRide, TripBadge, TripLegs, ChangeTripPopup, ReleaseCarPopup, PickupTimePopup, PickupAssignPopup, rideCall } from './RideTrip';
 import {
@@ -105,12 +106,7 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
 };
 
 
-interface AvailableVehicle {
-  id: number;
-  vehicle_no: string;
-  model: string;
-  vehicle_type: string | null;
-}
+type AvailableVehicle = SlotVehicle;
 
 // A directory row this component actually needs for the Vehicle Maintainer's
 // employee picker — only ones with a login account (user_id) can be booked
@@ -403,11 +399,17 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
   }
 
   // Start Ride: an assigned ride becomes Ongoing (Live Map + live tracking on).
-  async function startRide(id: number) {
+  async function startRide(id: number, earlyReason?: string) {
     setError(null);
     try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders(), body: JSON.stringify(earlyReason ? { early_reason: earlyReason } : {}) });
       const data = await res.json();
+      // Before its Start Ride window: Vehicle Management / a Maintainer may start it with a reason.
+      if (!res.ok && data.code === 'too_early' && data.can_override && !earlyReason) {
+        const why = await promptDialog(data.error, { title: 'Start this ride early?', placeholder: 'Why it starts early (kept with the ride)', confirmLabel: 'Start now', minLength: 3 });
+        if (why) return startRide(id, why);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
       void loadMyTrips();
       if (tab === 'status') void loadRequisitions(true);
@@ -604,24 +606,26 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
       <p className="text-sm text-slate-500">{text}</p>
     </div>
   );
+  // t: the ride's time — cars and drivers booked then show Busy and can't be picked (vehicleSlots.ts).
   const vehicleDriverPicker = (
     value: { vehicle_id: string; driver_user_id: string },
-    set: (v: { vehicle_id: string; driver_user_id: string }) => void
+    set: (v: { vehicle_id: string; driver_user_id: string }) => void,
+    t: RideTime | null = null
   ) => (
     <>
       <SearchSelect value={value.vehicle_id} onChange={(e) => set({ ...value, vehicle_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a vehicle…</option>
-        {availableVehicles.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.model} ({v.vehicle_no})
+        {vehicleChoices(availableVehicles, t).map(({ v, label, busy }) => (
+          <option key={v.id} value={v.id} disabled={busy}>
+            {label}
           </option>
         ))}
       </SearchSelect>
       <SearchSelect value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
         <option value="">Pick a driver…</option>
-        {sortDrivers(driverCandidates, value.vehicle_id).map((d) => (
-          <option key={d.id} value={d.id}>
-            {driverOptionLabel(d, value.vehicle_id)}
+        {sortDrivers(driverCandidates, value.vehicle_id, t).map((d) => (
+          <option key={d.id} value={d.id} disabled={!!driverBusy(d, t)}>
+            {driverOptionLabel(d, value.vehicle_id, t)}
           </option>
         ))}
       </SearchSelect>
@@ -1080,7 +1084,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                 r,
                 assigningFor === r.id ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    {vehicleDriverPicker(assignForm, setAssignForm)}
+                    {vehicleDriverPicker(assignForm, setAssignForm, rideTimeOf(r))}
                     <button onClick={() => assignVehicle(r.id)} className={BTN_PRIMARY_SM}>
                       Confirm Assignment
                     </button>
@@ -1317,9 +1321,9 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     className={RIDE_INPUT}
                   >
                     <option value="">Pick a vehicle…</option>
-                    {availableVehicles.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.model} ({v.vehicle_no})
+                    {vehicleChoices(availableVehicles, rideTimeOf(directBookForm)).map(({ v, label, busy }) => (
+                      <option key={v.id} value={v.id} disabled={busy}>
+                        {label}
                       </option>
                     ))}
                   </SearchSelect>
@@ -1333,8 +1337,10 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                     className={RIDE_INPUT}
                   >
                     <option value="">Pick a driver…</option>
-                    {driverCandidates.map((d) => (
-                      <option key={d.id} value={d.id}>{personLabel(d)}</option>
+                    {sortDrivers(driverCandidates, directBookForm.vehicle_id, rideTimeOf(directBookForm)).map((d) => (
+                      <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf(directBookForm))}>
+                        {driverOptionLabel(d, directBookForm.vehicle_id, rideTimeOf(directBookForm))}
+                      </option>
                     ))}
                   </SearchSelect>
                   <p className="text-[11px] text-slate-400 mt-1">Must be a login account — needed for the Live Ride Map's location tracking.</p>
@@ -1355,7 +1361,7 @@ export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
                   r,
                   bypassingFor === r.id ? (
                     <div className="flex flex-wrap items-center gap-2">
-                      {vehicleDriverPicker(bypassForm, setBypassForm)}
+                      {vehicleDriverPicker(bypassForm, setBypassForm, rideTimeOf(r))}
                       <button onClick={() => bypassAssign(r.id)} className={BTN_PRIMARY_SM}>
                         Confirm Directly
                       </button>

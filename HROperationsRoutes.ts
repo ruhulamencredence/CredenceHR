@@ -46,12 +46,14 @@
 
 import { fallbackServiceStatus } from "./hrServiceStatus";
 import type { Express } from "express";
+import { logUserAccess, type AccessChange } from "./UserAccessLog";
 import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { applyCompanyTransfer } from "./CompanyRoutes";
 import { blockEmployeeLogin } from "./AccountBlock";
 import { isMailerConfigured, sendMail } from "./mailer";
 import { requestApprovalReconcile } from "./approvalReconcile";
+import { activeCompanyId } from "./companyContext";
 
 import { attachPersonInfo } from "./personInfo";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -164,6 +166,10 @@ const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: str
   { task_key: "id_card", label: "ID card issued", category: "System & Access", due_days: 7 },
   { task_key: "business_card", label: "Business card issued", category: "System & Access", due_days: 7 },
   { task_key: "sim", label: "Office SIM issued", category: "System & Access", due_days: 3 },
+  // First day (each ticks itself, and can be done from the checklist).
+  { task_key: "pepm_projects", label: "PEPM projects given (Budget / Jobs / MPR)", category: "System & Access", due_days: 0 },
+  { task_key: "mobile_app", label: "Mobile App turned on", category: "System & Access", due_days: 0 },
+  { task_key: "dept_team", label: "Added to their department team", category: "Work Setup", due_days: 0 },
   { task_key: "supervisor", label: "Supervisor assigned", category: "Work Setup", due_days: 0 },
   { task_key: "asset_handover", label: "Office assets handed over", category: "Work Setup", due_days: 3 },
   { task_key: "orientation", label: "Orientation / induction done", category: "Work Setup", due_days: 7 },
@@ -553,8 +559,17 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       console.warn(`⚠️ Could not ensure ${name} table exists: ` + err.message);
     }
   }
+  // A new joiner's Appointment Letter is issued at Hire, before there is an
+  // Employee (OnboardingSelfServiceRoutes.ts): onboarding_id then, and
+  // employee_id once the onboarding is approved.
+  try {
+    const cols: any[] = (await dbPool.query("SHOW COLUMNS FROM hr_letters LIKE 'employee_id'"))[0] || [];
+    if (cols[0] && String(cols[0].Null).toUpperCase() === "NO") await dbPool.query("ALTER TABLE hr_letters MODIFY employee_id INT NULL");
+  } catch (err: any) {
+    console.warn("⚠️ hr_letters.employee_id NULL: " + err.message);
+  }
   // Where a letter was emailed to someone who can no longer log in.
-  for (const col of ["emailed_to VARCHAR(255) NULL", "emailed_at TIMESTAMP NULL"]) {
+  for (const col of ["emailed_to VARCHAR(255) NULL", "emailed_at TIMESTAMP NULL", "onboarding_id INT NULL"]) {
     try {
       await dbPool.query(`ALTER TABLE hr_letters ADD COLUMN ${col}`);
     } catch (err: any) {
@@ -603,6 +618,28 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       }
     } catch {
       // company_id not there yet on a brand-new database — the plain seed above already has them.
+    }
+    // The first-day items (PEPM projects, Mobile App, department team) for
+    // checklists made before they were defaults — once per company.
+    try {
+      const [cos]: any = await dbPool.query("SELECT DISTINCT company_id FROM hr_onboarding_tasks");
+      for (const co of cos || []) {
+        const cid = Number(co.company_id);
+        const [mark]: any = await dbPool.query("SELECT id FROM hr_ops_settings WHERE company_id = ? AND setting_key = 'onboarding_defaults_v3'", [cid]);
+        if (mark.length) continue;
+        const [have]: any = await dbPool.query("SELECT task_key, sort_order FROM hr_onboarding_tasks WHERE company_id = ?", [cid]);
+        let order = Math.max(0, ...have.map((h: any) => Number(h.sort_order) || 0));
+        for (const t of DEFAULT_ONBOARDING_TASKS.filter((d) => ["pepm_projects", "mobile_app", "dept_team"].includes(d.task_key))) {
+          if (have.some((h: any) => h.task_key === t.task_key)) continue;
+          await dbPool.query(
+            "INSERT INTO hr_onboarding_tasks (company_id, task_key, label, category, due_days, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            [cid, t.task_key, t.label, t.category, t.due_days, ++order]
+          );
+        }
+        await dbPool.query("INSERT INTO hr_ops_settings (company_id, setting_key, setting_value) VALUES (?, 'onboarding_defaults_v3', '1')", [cid]);
+      }
+    } catch {
+      // a brand-new database — the plain seed already has them.
     }
     // Retirement reminders were on by default and aren't wanted: take them off
     // once per company that had saved its reminder kinds (a marker keeps HR
@@ -1086,6 +1123,19 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
     await queryDB("UPDATE all_employees SET branch_id = ?, branch = ? WHERE id = ?", [Number(to.branch_id), to.branch ?? null, empId]);
   }
   if (Object.keys(service).length > 0) await upsertService(queryDB, empId, service, actorId);
+  // What HR ticked to move with a transfer (PEPM projects, check-in, team).
+  if (action.action_type === "transfer" && to.access) {
+    try {
+      const done = await applyTransferAccess(queryDB, action, to);
+      if (done.length) {
+        const hist = parseJson(action.history_json, []);
+        hist.push({ action: "access_moved", by: actorId, at: new Date().toISOString(), note: done.join("; ") });
+        await queryDB("UPDATE hr_actions SET history_json = ? WHERE id = ?", [JSON.stringify(hist), action.id]);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Transfer ${action.id}: could not move PEPM / check-in / team: ` + err.message);
+    }
+  }
 }
 
 // Final approval: salary + transfer parts now, the rest now or on its date.
@@ -1218,7 +1268,12 @@ export async function getMyHrActionApprovals(queryDB: QueryDB, userId: number): 
 
 async function nextRefNo(queryDB: QueryDB, settings: Record<string, string>, letterType: string, letterDate: string): Promise<string> {
   const year = letterDate.slice(0, 4);
-  const letters: any[] = await queryDB("SELECT * FROM hr_letters");
+  // Joiners' letters (no Employee yet, so not in the company-scoped list)
+  // hold their numbers too.
+  const letters: any[] = [
+    ...((await queryDB("SELECT * FROM hr_letters")) || []),
+    ...(((await queryDB("/*unscoped*/ SELECT ref_no, letter_type, letter_date FROM hr_letters WHERE employee_id IS NULL").catch(() => [])) as any[]) || [])
+  ];
   const code = LETTER_CODE.get(letterType) || "GEN";
   const sameSeries = letters.filter((l: any) => l.letter_type === letterType && (toDate(l.letter_date) || "").slice(0, 4) === year);
   let seq = sameSeries.length + 1;
@@ -1726,6 +1781,17 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
   });
 
   // ---------------- personnel actions ----------------
+  // The Transfer form's "also changes" panel (transferAccessPlan).
+  app.post("/api/hr-ops/actions/transfer-plan", ...gate, async (req: any, res: any) => {
+    try {
+      const b = req.body || {};
+      const eff = toDate(b.effective_date) || todayInDhaka();
+      res.json(await transferAccessPlan(queryDB, Number(b.employee_id), b.branch_id ? Number(b.branch_id) : null, b.department_id ? Number(b.department_id) : null, eff));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   async function createAction(body: any, actor: { id: number; name: string }, batchId: string | null) {
     const empId = Number(body.employee_id);
     const type = String(body.action_type || "");
@@ -1759,6 +1825,14 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
       to.supervisor = s.name;
     }
     if (raw.grade) to.grade = String(raw.grade).trim().slice(0, 100);
+    // A transfer may also move PEPM projects, check-in and team (applyTransferAccess).
+    if (type === "transfer" && raw.access && typeof raw.access === "object") {
+      const ids = Array.isArray(raw.access.extra_project_ids)
+        ? [...new Set(raw.access.extra_project_ids.map(Number).filter((n: number) => Number.isFinite(n) && n > 0))].slice(0, 50)
+        : [];
+      for (const pid of ids) if (!world.projects.some((p: any) => Number(p.id) === pid)) throw bad("Project not found.");
+      to.access = { pepm: !!raw.access.pepm, attendance: !!raw.access.attendance, team: !!raw.access.team, extra_project_ids: ids };
+    }
     const gross = num(raw.gross_salary);
     if (gross !== null) {
       if (gross <= 0) throw bad("Gross salary must be more than zero.");
@@ -2209,12 +2283,22 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
 
   app.get("/api/hr-ops/letters", ...gate, async (_req: any, res: any) => {
     try {
-      const [letters, employees, users] = await Promise.all([
-        queryDB("SELECT * FROM hr_letters"),
+      const [letters, employees, users, joiners] = await Promise.all([
+        // A joiner's Appointment Letter issued at Hire has no Employee yet:
+        // listed by this company's onboarding applications.
+        Promise.all([
+          queryDB("SELECT * FROM hr_letters"),
+          queryDB(
+            "/*unscoped*/ SELECT l.* FROM hr_letters l JOIN onboarding_applications a ON a.id = l.onboarding_id WHERE l.employee_id IS NULL AND a.company_id = ?",
+            [activeCompanyId()]
+          ).catch(() => [])
+        ]).then(([a, b]) => [...(a || []), ...(b || [])]),
         queryDB("SELECT * FROM all_employees"),
-        queryDB("SELECT * FROM users")
+        queryDB("SELECT * FROM users"),
+        queryDB("/*unscoped*/ SELECT id, name, onb_code FROM onboarding_applications WHERE company_id = ?", [activeCompanyId()]).catch(() => [])
       ]);
       const empMap = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
+      const joinerMap = new Map<number, any>((joiners || []).map((j: any) => [Number(j.id), j]));
       res.json(
         letters
           .sort((a: any, b: any) => Number(b.id) - Number(a.id))
@@ -2223,8 +2307,8 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
             id: Number(l.id),
             letter_date: toDate(l.letter_date),
             letter_label: LETTER_LABEL.get(l.letter_type) || l.letter_type,
-            employee_name: empMap.get(Number(l.employee_id))?.name || "(removed)",
-            employee_code: empMap.get(Number(l.employee_id))?.employee_id || null,
+            employee_name: empMap.get(Number(l.employee_id))?.name || (l.onboarding_id && joinerMap.get(Number(l.onboarding_id)) ? `${joinerMap.get(Number(l.onboarding_id)).name} (joiner)` : "(removed)"),
+            employee_code: empMap.get(Number(l.employee_id))?.employee_id || (l.onboarding_id ? joinerMap.get(Number(l.onboarding_id))?.onb_code || null : null),
             designation: empMap.get(Number(l.employee_id))?.designation || null,
             employee_user_id: empMap.get(Number(l.employee_id))?.user_id ? Number(empMap.get(Number(l.employee_id)).user_id) : null,
             issued_by_name: users.find((u: any) => Number(u.id) === Number(l.issued_by))?.name || null
@@ -2494,6 +2578,26 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
     }
   });
 
+  // The first-day facts: the login's PEPM projects, whether the Mobile App is
+  // on for it, and the department team the Employee is in.
+  async function firstDayState(employeeId: number, userId: number | null) {
+    const [projects, users, team]: any[][] = await Promise.all([
+      userId
+        ? queryDB("SELECT p.project_name FROM user_project_permissions upp JOIN projects p ON p.id = upp.project_id WHERE upp.user_id = ? ORDER BY p.project_name", [userId]).catch(() => [])
+        : Promise.resolve([]),
+      userId ? queryDB("/*unscoped*/ SELECT can_use_app FROM users WHERE id = ?", [userId]).catch(() => []) : Promise.resolve([]),
+      queryDB(
+        "/*unscoped*/ SELECT t.name FROM department_team_members m JOIN department_teams t ON t.id = m.team_id WHERE m.employee_id = ? LIMIT 1",
+        [employeeId]
+      ).catch(() => [])
+    ]);
+    return {
+      projects: (projects || []).map((r: any) => String(r.project_name)),
+      app_on: Number(users?.[0]?.can_use_app || 0) === 1,
+      team: team?.[0]?.name ? String(team[0].name) : null
+    };
+  }
+
   // Ticks items whose fact already exists elsewhere in the app.
   async function autoDetect(employeeId: number, items: any[]) {
     const [emps, supervisors, letters, accounts, services, assignments, sims] = await Promise.all([
@@ -2508,11 +2612,18 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
     const sim = (sims || []).find((x: any) => Number(x.employee_id) === employeeId && String(x.status || "active") === "active");
     const e = emps.find((x: any) => Number(x.id) === employeeId);
     if (!e) return;
+    const first = await firstDayState(employeeId, e.user_id ? Number(e.user_id) : null);
     const svc = services.find((s: any) => Number(s.employee_id) === employeeId);
     const hasLetter = (type: string) => letters.some((l: any) => Number(l.employee_id) === employeeId && l.letter_type === type && l.status === "issued");
     const bank = accounts.find((a: any) => Number(a.employee_id) === employeeId && a.account_type === "bank" && Number(a.is_active) !== 0);
     const detect: Record<string, string | null> = {
       appointment_letter: hasLetter("appointment") ? "Appointment letter issued" : null,
+      // Signed at onboarding (the signed copy uploaded, OnboardingSelfServiceRoutes.ts) or acknowledged later.
+      appointment_signed: letters.some(
+        (l: any) => Number(l.employee_id) === employeeId && l.letter_type === "appointment" && l.status === "issued" && l.acknowledged_at
+      )
+        ? "Signed copy received"
+        : null,
       bank_letter: hasLetter("bank_account") ? "Bank letter issued" : null,
       bank_account: bank ? `${bank.bank_name || "Bank"} — ${bank.account_number}` : null,
       login_account: e.user_id ? "Login exists" : null,
@@ -2520,7 +2631,10 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       supervisor: supervisors.some((s: any) => Number(s.employee_id) === employeeId && Number(s.is_direct) === 1) ? "Direct supervisor set" : null,
       probation_set: svc?.probation_end_date ? `Until ${toDate(svc.probation_end_date)}` : null,
       sim: sim ? `${sim.operator || "SIM"} ${sim.phone_number}` : null,
-      asset_handover: e.user_id && assignments.some((a: any) => Number(a.user_id ?? a.assigned_to) === Number(e.user_id)) ? "Asset assigned" : null
+      asset_handover: e.user_id && assignments.some((a: any) => Number(a.user_id ?? a.assigned_to) === Number(e.user_id)) ? "Asset assigned" : null,
+      pepm_projects: first.projects.length ? first.projects.join(", ").slice(0, 250) : null,
+      mobile_app: first.app_on ? "Mobile App on" : null,
+      dept_team: first.team ? `Team: ${first.team}` : null
     };
     for (const it of items) {
       const found = detect[it.task_key];
@@ -2600,6 +2714,37 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
           has_attachment: !!i.attachment_name
         }))
       );
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // The checklist's first-day steps: what is set, and which of them this
+  // account may do right from the checklist (the page shows only those —
+  // each one still goes through its own module's API and permission).
+  app.get("/api/hr-ops/onboarding/:employeeId/first-day", ...gate, async (req: any, res: any) => {
+    try {
+      const empId = Number(req.params.employeeId);
+      const emps: any[] = await queryDB("SELECT id, name, user_id, department FROM all_employees WHERE id = ?", [empId]);
+      const e = emps[0];
+      if (!e) throw bad("Employee not found.", 404);
+      const isSuper = req.user.role === "superadmin";
+      const mods = isSuper ? null : new Set(await getAdminModules(Number(req.user.id)));
+      const has = (m: string) => isSuper || !!mods?.has(m);
+      const me: any[] = (await queryDB("SELECT can_grant_module_access FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
+      res.json({
+        employee_id: empId,
+        user_id: e.user_id ? Number(e.user_id) : null,
+        name: e.name,
+        ...(await firstDayState(empId, e.user_id ? Number(e.user_id) : null)),
+        can: {
+          projects: has("users"),
+          mobile_app: isSuper || Number(me[0]?.can_grant_module_access || 0) === 1,
+          sim: has("mobile_bill"),
+          id_card: has("hr_operations"),
+          team: has("departments")
+        }
+      });
     } catch (err) {
       fail(res, err);
     }
@@ -2990,4 +3135,262 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       fail(res, err);
     }
   });
+}
+
+
+// ---------------- a new joiner's Appointment Letter ----------------
+// Issued at Hire from HR Operations -> New Joiner Onboarding, before the
+// joiner is an Employee: the placeholders come from the onboarding
+// application and what HR types in (salary, probation). The joiner reads
+// it in My Onboarding, signs it and uploads the signed copy; on approval
+// the letter moves onto the new Employee (hr_letters.employee_id).
+export interface JoinerLetterInput {
+  letter_date?: string;
+  gross_salary?: any;
+  basic_salary?: any;
+  probation_months?: any;
+  subject?: string;
+  body?: string;
+}
+
+export async function renderJoinerAppointmentLetter(
+  queryDB: QueryDB,
+  app: any,
+  input: JoinerLetterInput
+): Promise<{ template_id: number; letter_date: string; subject: string; body: string; ref_no: string }> {
+  const settings = await loadSettings(queryDB);
+  const templates: any[] = (await queryDB("SELECT * FROM hr_letter_templates")) || [];
+  const list = templates.filter((t: any) => t.letter_type === "appointment" && Number(t.is_active) !== 0);
+  const template = list.find((t: any) => Number(t.is_default)) || list[0];
+  if (!template) throw Object.assign(new Error("No Appointment Letter template yet — add one under HR Operations → Settings → Letter Templates."), { statusCode: 400 });
+  const letterDate = toDate(input.letter_date) || new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+  const [depts, branches]: any[][] = await Promise.all([
+    queryDB("/*unscoped*/ SELECT id, name FROM departments WHERE id = ?", [Number(app.department_id) || 0]).catch(() => []),
+    queryDB("/*unscoped*/ SELECT id, branch_name FROM branches WHERE id = ?", [Number(app.branch_id) || 0]).catch(() => [])
+  ]);
+  const data = parseJson(app.data_json, {});
+  const personal = data?.personal || {};
+  const gender = String(personal.gender || "").toLowerCase();
+  const female = gender.startsWith("f");
+  const male = gender.startsWith("m");
+  const nameParts = String(app.name || "").trim().split(/\s+/);
+  const joining = toDate(app.joining_date);
+  const gross = num(input.gross_salary);
+  const basic = num(input.basic_salary);
+  const probation = num(input.probation_months) ?? Number(settings.default_probation_months || 6);
+  const map: Record<string, string> = {
+    company_name: settings.company_name,
+    company_address: settings.company_address,
+    signatory_name: settings.signatory_name,
+    signatory_designation: settings.signatory_designation,
+    today: longDate(letterDate),
+    letter_date: longDate(letterDate),
+    employee_name: app.name || "",
+    employee_last_name: nameParts[nameParts.length - 1] || app.name || "",
+    employee_code: "",
+    salutation: female ? "Ms." : male ? "Mr." : "Mr./Ms.",
+    he_she: female ? "she" : male ? "he" : "he/she",
+    him_her: female ? "her" : male ? "him" : "him/her",
+    his_her: female ? "her" : male ? "his" : "his/her",
+    his_her_cap: female ? "Her" : male ? "His" : "His/Her",
+    designation: app.designation || "",
+    department: depts[0]?.name || "concerned",
+    branch: branches[0]?.branch_name || "our Head Office",
+    grade: "",
+    project: "",
+    supervisor: "",
+    joining_date: longDate(joining),
+    present_address: [personal.present_address, personal.present_city].filter(Boolean).join(", "),
+    probation_months: String(probation),
+    probation_end_date: longDate(joining ? addMonths(joining, probation) : null),
+    confirmation_date: "",
+    contract_end_date: "",
+    basic_salary: money(basic),
+    house_rent: "",
+    medical_allowance: "",
+    conveyance_allowance: "",
+    gross_salary: money(gross),
+    gross_salary_words: gross !== null ? takaInWords(gross) : "",
+    effective_date: longDate(joining || letterDate)
+  };
+  const subject = String(input.subject ?? renderTemplate(template.subject, map)).trim().slice(0, 255);
+  const body = String(input.body ?? renderTemplate(template.body, map)).trim();
+  return { template_id: Number(template.id), letter_date: letterDate, subject, body, ref_no: await nextRefNo(queryDB, settings, "appointment", letterDate) };
+}
+
+export async function issueJoinerAppointmentLetter(queryDB: QueryDB, app: any, input: JoinerLetterInput, actorId: number): Promise<{ id: number; ref_no: string }> {
+  const existing: any[] =
+    (await queryDB("/*unscoped*/ SELECT id FROM hr_letters WHERE onboarding_id = ? AND letter_type = 'appointment' AND status = 'issued'", [Number(app.id)])) || [];
+  if (existing.length) throw Object.assign(new Error("An Appointment Letter is already issued for this joiner — cancel it first to issue a new one."), { statusCode: 409 });
+  const r = await renderJoinerAppointmentLetter(queryDB, app, input);
+  if (!r.subject || !r.body) throw Object.assign(new Error("Subject and body can't be empty."), { statusCode: 400 });
+  const ins: any = await queryDB(
+    `/*unscoped*/ INSERT INTO hr_letters (ref_no, employee_id, onboarding_id, letter_type, template_id, subject, body, letter_date, issued_by, status, requires_ack)
+     VALUES (?, NULL, ?, 'appointment', ?, ?, ?, ?, ?, 'issued', 1)`,
+    [r.ref_no, Number(app.id), r.template_id, r.subject, r.body, r.letter_date, actorId]
+  );
+  return { id: Number(ins.insertId), ref_no: r.ref_no };
+}
+
+// ---------------- a transfer moves the person's access with them ----------------
+// A Transfer to another Branch (HR Operations -> Personnel Actions) can also,
+// on its effective date, move what is tied to the place of work:
+//   PEPM projects     the old Branch's linked Project off, the new one's on
+//                     (Admin Panel -> Branches -> linked Project). Projects
+//                     not tied to the old Branch (Central Inventory…) stay.
+//                     A Branch with no Project (Head Office) gives none; HR
+//                     may pick projects to give (extra_project_ids).
+//   Remote Attendance the old Project's check-in ends the day before, the new
+//                     one starts on the day (user_attendance_projects). An
+//                     account on "Their Branch" follows the Branch already.
+//   Department team   the team whose auto rule (Departments -> Teams) covers
+//                     the new Branch (and department).
+// HR ticks which of these to do (to_json.access). The plan is worked out
+// again on the day, so a change made meanwhile is respected.
+export interface TransferAccessChoice {
+  pepm?: boolean;
+  attendance?: boolean;
+  team?: boolean;
+  extra_project_ids?: number[];
+}
+
+type Named = { id: number; name: string };
+
+export async function transferAccessPlan(queryDB: QueryDB, empId: number, toBranchId: number | null, toDepartmentId: number | null, eff: string) {
+  const emp: any = ((await queryDB("SELECT id, name, user_id, branch_id, branch, department_id FROM all_employees WHERE id = ?", [empId])) || [])[0];
+  if (!emp) throw Object.assign(new Error("Employee not found."), { statusCode: 404 });
+  const branchOf = async (id: any): Promise<{ id: number; name: string; project: Named | null } | null> => {
+    if (!id) return null;
+    const b: any = ((await queryDB("SELECT b.id, b.branch_name, b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE b.id = ?", [Number(id)]).catch(() => [])) || [])[0];
+    if (!b) return null;
+    return { id: Number(b.id), name: String(b.branch_name), project: b.project_id && b.project_name ? { id: Number(b.project_id), name: String(b.project_name) } : null };
+  };
+  const fromB = await branchOf(emp.branch_id);
+  const toB = await branchOf(toBranchId);
+  const userId = emp.user_id ? Number(emp.user_id) : null;
+  const fromP = fromB?.project || null;
+  const toP = toB?.project || null;
+
+  const mine: Named[] = userId
+    ? (((await queryDB("SELECT p.id, p.project_name FROM user_project_permissions u JOIN projects p ON p.id = u.project_id WHERE u.user_id = ? ORDER BY p.project_name", [userId]).catch(() => [])) || []) as any[]).map((r) => ({
+        id: Number(r.id),
+        name: String(r.project_name)
+      }))
+    : [];
+  const pepm = {
+    remove: fromP && (!toP || toP.id !== fromP.id) ? mine.filter((p) => p.id === fromP.id) : [],
+    add: toP && !mine.some((p) => p.id === toP.id) ? [toP] : [],
+    keep: mine.filter((p) => !(fromP && (!toP || toP.id !== fromP.id) && p.id === fromP.id))
+  };
+
+  const byBranch = userId ? Number((((await queryDB("SELECT attendance_projects_by_branch AS v FROM users WHERE id = ?", [userId]).catch(() => [])) || [])[0] || {}).v || 0) === 1 : false;
+  const att: any[] = userId
+    ? ((await queryDB("SELECT a.project_id, a.valid_from, a.valid_to, p.project_name FROM user_attendance_projects a JOIN projects p ON p.id = a.project_id WHERE a.user_id = ?", [userId]).catch(() => [])) as any[]) || []
+    : [];
+  const activeOn = (r: any) => (!r.valid_from || toDate(r.valid_from)! <= eff) && (!r.valid_to || toDate(r.valid_to)! >= eff);
+  const dayBefore = addDays(eff, -1);
+  const attendance = {
+    by_branch: byBranch,
+    end: byBranch || !fromP || (toP && toP.id === fromP.id) ? [] : att.filter((r) => Number(r.project_id) === fromP.id && activeOn(r)).map((r) => ({ id: Number(r.project_id), name: String(r.project_name), valid_to: dayBefore })),
+    start: byBranch || !toP || att.some((r) => Number(r.project_id) === toP.id && activeOn(r)) ? [] : [{ id: toP.id, name: toP.name, valid_from: eff }]
+  };
+
+  const curTeam: any = ((await queryDB("/*unscoped*/ SELECT t.id, t.name FROM department_team_members m JOIN department_teams t ON t.id = m.team_id WHERE m.employee_id = ? LIMIT 1", [empId]).catch(() => [])) || [])[0];
+  let newTeam: any = null;
+  if (toB) {
+    const dept = toDepartmentId ?? (emp.department_id ? Number(emp.department_id) : null);
+    const rules: any[] =
+      ((await queryDB(
+        "/*unscoped*/ SELECT r.team_id, r.department_id, t.name FROM department_team_auto r JOIN department_teams t ON t.id = r.team_id WHERE t.is_active = 1 AND LOWER(TRIM(r.branch)) = LOWER(TRIM(?))",
+        [toB.name]
+      ).catch(() => [])) as any[]) || [];
+    newTeam = rules.find((r) => r.department_id && Number(r.department_id) === dept) || rules.find((r) => !r.department_id) || null;
+  }
+  const team = {
+    from: curTeam ? { id: Number(curTeam.id), name: String(curTeam.name) } : null,
+    to: newTeam && (!curTeam || Number(curTeam.id) !== Number(newTeam.team_id)) ? { id: Number(newTeam.team_id), name: String(newTeam.name) } : null
+  };
+  return {
+    employee: { id: empId, name: emp.name, user_id: userId },
+    from_branch: fromB ? { id: fromB.id, name: fromB.name } : null,
+    to_branch: toB ? { id: toB.id, name: toB.name } : null,
+    from_project: fromP,
+    to_project: toP,
+    pepm,
+    attendance,
+    team
+  };
+}
+
+// On the effective date: does what HR ticked. Returns what was done, for the action's history.
+export async function applyTransferAccess(queryDB: QueryDB, action: any, to: any): Promise<string[]> {
+  const choice: TransferAccessChoice = to?.access || {};
+  if (!choice.pepm && !choice.attendance && !choice.team && !(choice.extra_project_ids || []).length) return [];
+  const eff = toDate(action.effective_date)!;
+  const empId = Number(action.employee_id);
+  // The Branch has already moved by now (applyServicePart), so plan from the old one.
+  const from = parseJson(action.from_json, {});
+  const plan = await transferAccessPlan(queryDB, empId, to.branch_id ?? null, to.department_id ?? null, eff);
+  if (from.branch_id && (!plan.from_branch || plan.from_branch.id !== Number(from.branch_id))) {
+    const old: any = ((await queryDB("SELECT b.project_id, p.project_name FROM branches b LEFT JOIN projects p ON p.id = b.project_id WHERE b.id = ?", [Number(from.branch_id)]).catch(() => [])) || [])[0];
+    const oldP = old?.project_id ? { id: Number(old.project_id), name: String(old.project_name || "") } : null;
+    const userId = plan.employee.user_id;
+    if (oldP && (!plan.to_project || plan.to_project.id !== oldP.id) && userId) {
+      const has: any[] = (await queryDB("SELECT id FROM user_project_permissions WHERE user_id = ? AND project_id = ?", [userId, oldP.id]).catch(() => [])) || [];
+      plan.pepm.remove = has.length ? [oldP] : [];
+      if (!plan.attendance.by_branch) {
+        const att: any[] = (await queryDB("SELECT project_id FROM user_attendance_projects WHERE user_id = ? AND project_id = ? AND (valid_to IS NULL OR valid_to >= ?)", [userId, oldP.id, eff]).catch(() => [])) || [];
+        plan.attendance.end = att.length ? [{ id: oldP.id, name: oldP.name, valid_to: addDays(eff, -1) }] : [];
+      }
+    }
+  }
+  const done: string[] = [];
+  const userId = plan.employee.user_id;
+  if (choice.pepm && userId) {
+    for (const p of plan.pepm.remove) {
+      await queryDB("DELETE FROM user_project_permissions WHERE user_id = ? AND project_id = ?", [userId, p.id]);
+      done.push(`PEPM: ${p.name} removed`);
+    }
+    for (const p of plan.pepm.add) {
+      await queryDB("INSERT IGNORE INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [userId, p.id]);
+      done.push(`PEPM: ${p.name} given`);
+    }
+  }
+  if (userId) {
+    for (const pid of choice.extra_project_ids || []) {
+      const p: any = ((await queryDB("SELECT id, project_name FROM projects WHERE id = ?", [Number(pid)]).catch(() => [])) || [])[0];
+      if (!p) continue;
+      await queryDB("INSERT IGNORE INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [userId, Number(p.id)]);
+      done.push(`PEPM: ${p.project_name} given`);
+    }
+  }
+  if (choice.attendance && userId && !plan.attendance.by_branch) {
+    for (const a of plan.attendance.end) {
+      await queryDB("UPDATE user_attendance_projects SET valid_to = ? WHERE user_id = ? AND project_id = ?", [a.valid_to, userId, a.id]);
+      done.push(`Check-in at ${a.name} ended ${a.valid_to}`);
+    }
+    for (const a of plan.attendance.start) {
+      await queryDB(
+        "INSERT INTO user_attendance_projects (user_id, project_id, valid_from, valid_to) VALUES (?, ?, ?, NULL) ON DUPLICATE KEY UPDATE valid_from = VALUES(valid_from), valid_to = NULL",
+        [userId, a.id, a.valid_from]
+      );
+      done.push(`Check-in at ${a.name} from ${a.valid_from}`);
+    }
+  }
+  if (choice.team && plan.team.to) {
+    await queryDB("/*unscoped*/ DELETE FROM department_team_members WHERE employee_id = ?", [empId]);
+    await queryDB("/*unscoped*/ INSERT IGNORE INTO department_team_members (team_id, employee_id) VALUES (?, ?)", [plan.team.to.id, empId]);
+    done.push(`Team: ${plan.team.to.name}`);
+  }
+  // Service Book -> Login & Access: the Transfer did this, not a person on the Users page.
+  if (userId && done.length) {
+    const given = done.filter((d) => d.startsWith("PEPM: ") && d.endsWith(" given")).map((d) => d.slice(6, -6));
+    const removed = done.filter((d) => d.startsWith("PEPM: ") && d.endsWith(" removed")).map((d) => d.slice(6, -8));
+    const changes: AccessChange[] = [];
+    if (given.length || removed.length) changes.push({ what: "PEPM projects", added: given, removed });
+    for (const d of done.filter((x) => x.startsWith("Check-in at "))) changes.push({ what: "Check-in places", to: d });
+    for (const d of done.filter((x) => x.startsWith("Team: "))) changes.push({ what: "Department team", to: d.slice(6) });
+    await logUserAccess(queryDB, { userId, actorName: "Transfer (HR Action)", source: "transfer", action: `Transfer effective ${eff}`, changes });
+  }
+  return done;
 }

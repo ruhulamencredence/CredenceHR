@@ -43,6 +43,7 @@ import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPol
 import { SearchSelect } from './Combobox';
 import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
 import { ProjectAccessPopup } from './ProjectAccessPopup';
+import { ProjectMatchPopup, type UnknownProject } from './ProjectMatchPopup';
 import { DepartmentTeamsEditor, type DepartmentTeamsEditorHandle } from './DepartmentTeamsEditor';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
@@ -1589,6 +1590,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   // Entry sharing of the Project being added / edited (ProjectEntrySharing.tsx).
   const [projectEntryScope, setProjectEntryScope] = useState<EntryScope>('team');
+  // Budget import: project names to match first (ProjectMatchPopup.tsx).
+  const [projectMatch, setProjectMatch] = useState<{ budgetId: number; body: any; unknown: UnknownProject[] } | null>(null);
+  const [projectMatchBusy, setProjectMatchBusy] = useState(false);
   const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
@@ -1698,6 +1702,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Add-user form state
   const [newUserName, setNewUserName] = useState('');
+  // Add New User: a login is an Employee's (picked here) or, for someone who
+  // isn't one, comes with a reason. New joiners: HR Operations -> Onboarding.
+  const [newUserFor, setNewUserFor] = useState<'employee' | 'other'>('employee');
+  const [newUserEmployeeId, setNewUserEmployeeId] = useState('');
+  const [newUserReason, setNewUserReason] = useState('');
+  const [employeesNoLogin, setEmployeesNoLogin] = useState<{ id: number; name: string; employee_id: string | null; designation: string | null; department: string | null; email: string | null }[] | null>(null);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
@@ -2549,25 +2559,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       longTask.step(28, 'Uploading…');
       longTask.creep(65);
+      const body = {
+        rows,
+        file_base64: fileBase64,
+        file_name: file.name,
+        file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      };
       const res = await xhrJson(`/api/budgets/${budgetId}/import`, {
         method: 'POST',
         token,
-        body: {
-          rows,
-          file_base64: fileBase64,
-          file_name: file.name,
-          file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        },
+        body,
         onUpload: (f) => {
           longTask.step(28 + f * 37, f < 1 ? `Uploading… ${Math.round(f * 100)}%` : undefined);
           if (f >= 1) longTask.creep(96, `Saving ${rows.length.toLocaleString()} rows on the server…`, rows.length * 4);
         }
       });
       const data = res.data;
+      // Project names not in Projects: nothing saved yet — the Admin matches
+      // them (ProjectMatchPopup.tsx) and the import runs again.
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ budgetId, body, unknown: data.needs_project_match });
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Import failed');
       await longTask.finish();
       taskDone = true;
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      if (!taskDone) longTask.close();
+      setImportingBudgetId(null);
+      pendingImportBudgetId.current = null;
+    }
+  };
 
+  // The same import again, with the Admin's project for each unknown name.
+  const finishProjectMatch = async (map: Record<string, number | 'new'>) => {
+    if (!projectMatch) return;
+    setProjectMatchBusy(true);
+    try {
+      const res = await xhrJson(`/api/budgets/${projectMatch.budgetId}/import`, { method: 'POST', token, body: { ...projectMatch.body, project_map: map } });
+      const data = res.data;
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ ...projectMatch, unknown: data.needs_project_match });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+      setProjectMatch(null);
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setProjectMatch(null);
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      setProjectMatchBusy(false);
+    }
+  };
+
+  const afterBudgetImport = (data: any) => {
+    {
       setMessage({
         type: 'success',
         text: `Imported ${data.items_inserted} new row(s)${
@@ -2579,12 +2629,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // "<Budget> - MPR Updated up to <date>": check and publish it now.
       if (data.notice_draft && canSee('notices')) setBudgetNotice(data.notice_draft);
       fetchAllData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
-    } finally {
-      if (!taskDone) longTask.close();
-      setImportingBudgetId(null);
-      pendingImportBudgetId.current = null;
     }
   };
 
@@ -2856,7 +2900,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // --- User Management Handlers ---
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    if (newUserFor === 'employee' ? !newUserEmployeeId || !newUserPassword.trim() : !newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
 
     setCreatingUser(true);
     setMessage(null);
@@ -2868,12 +2912,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           name: newUserName.trim(),
           email: newUserEmail.trim(),
           password: newUserPassword,
-          role: newUserRole
+          role: newUserRole,
+          ...(newUserFor === 'employee' ? { employee_id: Number(newUserEmployeeId) } : { non_employee_reason: newUserReason.trim() })
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user');
 
+      setNewUserEmployeeId('');
+      setNewUserReason('');
+      setEmployeesNoLogin(null);
       setNewUserName('');
       setNewUserEmail('');
       setNewUserPassword('');
@@ -3148,7 +3196,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       fetchAllData();
       setMessage({ type: 'success', text: 'User deleted.' });
     } catch (err: any) {
-      alert(err.message);
+      // A login with records (attendance, claims…) is refused: say why and what to do instead.
+      setMessage({ type: 'error', text: err.message });
     }
   };
 
@@ -6474,14 +6523,82 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               Create an account for a User or Admin. There is no public sign-up — accounts are only created here.
             </p>
             <form onSubmit={handleCreateUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+              <div className="sm:col-span-2 lg:col-span-5 space-y-2">
+                <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600">Login for</span>
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="radiogroup" aria-label="Login for">
+                  {(
+                    [
+                      ['employee', 'An employee'],
+                      ['other', 'Not an employee']
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={newUserFor === k}
+                      onClick={() => setNewUserFor(k)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-md ${newUserFor === k ? 'bg-white shadow-sm text-blue-700' : 'text-slate-600'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  A <b>new joiner</b> doesn&rsquo;t start here — open their onboarding in HR Operations → Onboarding → New Joiners; it makes the Employee and the login together.
+                </p>
+                {newUserFor === 'employee' ? (
+                  <div className="max-w-xl">
+                    <SearchSelect
+                      value={newUserEmployeeId}
+                      onFocus={() => {
+                        if (employeesNoLogin) return;
+                        fetch(apiUrl('/api/users/employees-without-login'), { headers: { Authorization: `Bearer ${token}` } })
+                          .then((r) => (r.ok ? r.json() : []))
+                          .then(setEmployeesNoLogin)
+                          .catch(() => setEmployeesNoLogin([]));
+                      }}
+                      onChange={(e) => {
+                        setNewUserEmployeeId(e.target.value);
+                        const emp = (employeesNoLogin || []).find((x) => String(x.id) === e.target.value);
+                        if (emp) {
+                          setNewUserName(emp.name);
+                          setNewUserEmail(emp.email || '');
+                        }
+                      }}
+                      aria-label="Employee"
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm"
+                    >
+                      <option value="">— Select an employee with no login —</option>
+                      {(employeesNoLogin || []).map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {[x.name, x.employee_id, x.designation, x.department].filter(Boolean).join(' · ')}
+                        </option>
+                      ))}
+                    </SearchSelect>
+                    <p className="text-[11px] text-slate-500 mt-1">They sign in with their Employee ID.</p>
+                  </div>
+                ) : (
+                  <div className="max-w-xl">
+                    <input
+                      value={newUserReason}
+                      onChange={(e) => setNewUserReason(e.target.value)}
+                      placeholder="Who is this? e.g. External auditor, IT vendor, system account"
+                      aria-label="Who is this login for"
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                    />
+                  </div>
+                )}
+              </div>
               <div className="lg:col-span-1">
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Full Name</label>
                 <input
                   type="text"
-                  required
+                  required={newUserFor === 'other'}
+                  readOnly={newUserFor === 'employee'}
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="John Doe"
+                  placeholder={newUserFor === 'employee' ? 'From the employee' : 'John Doe'}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
                 />
               </div>
@@ -6489,7 +6606,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Email</label>
                 <input
                   type="email"
-                  required
+                  required={newUserFor === 'other'}
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="user@company.com"
@@ -7837,6 +7954,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           templates={accessTemplates}
           onChanged={loadAccessTemplates}
           onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
+
+      {projectMatch && (
+        <ProjectMatchPopup
+          unknown={projectMatch.unknown}
+          projects={projects}
+          busy={projectMatchBusy}
+          onCancel={() => {
+            setProjectMatch(null);
+            setMessage({ type: 'error', text: 'Import cancelled — nothing was saved.' });
+          }}
+          onConfirm={finishProjectMatch}
         />
       )}
 

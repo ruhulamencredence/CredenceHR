@@ -93,6 +93,7 @@
 | কে কী করেছে তার প্রমাণ থাকে? | লগইন চেষ্টা, পাসওয়ার্ড রিসেট, অ্যাক্সেস বদল, payroll-এ প্রতিটি লেখা, কর্মীর তথ্য বদল (আগে/পরে), বেতনের ব্যাংক অ্যাকাউন্ট বদল (কর্মীকে alert সহ), ই-স্বাক্ষর ঘটনা, MPR সম্পাদনা, Mail অ্যাডমিন কাজ। `04-security.md` §৮। | ✅ |
 | অনুমোদনের মাঝখানে কেউ নিজের ইচ্ছামতো অন্য কাউকে approver বানাতে পারে? | শুধু সেই মুহূর্তে যে Layer-এর approver, এবং যাঁর Module Access-এ **Approvals — add an ad-hoc approver** (`users.can_add_adhoc_approver`, শুরুতে বন্ধ) চালু; Superadmin সবসময়। আবেদনকারী নিজে বা নিজেকে বাছা যায় না, একসাথে একজনই, কারণ লেখা বাধ্যতামূলক; server-এ যাচাই হয় (`POST /api/my-approvals/:id/adhoc`) এবং পুরো ঘটনা approval trail-এ থাকে। | ✅ |
 | কোনো মডিউলের অনুমতি থাকলেই কি Excel দিয়ে একসাথে অনেক ডাটা ঢোকানো যায়? | না। HR Data Import আলাদা মডিউল (`data_import`), আর প্রতিটি ধরন (Employee, Leave, Check In/Out, Conveyance, Remote/Office Attendance) আলাদা টিক — সব শুরুতে বন্ধ। মডিউল + সেই টিক দুটোই না থাকলে সার্ভার 403 দেয় (`DataImportRoutes.ts`)। Superadmin সবসময় পারেন। | ✅ |
+| কারো login-এ কে কবে কী অনুমতি দিল বা সরাল, দেখা যায়? | হ্যাঁ। HR Operations → Service Book → **Login & Access**: প্রতিটি বদল আগে → পরে, কে করল, কখন (`user_access_log`); তার আগের বদল Users → Activity-র পুরনো রেকর্ড থেকে। দেখতে আলাদা layer `p360_access` লাগে (শুরুতে কারও নেই); password-এর মান বা hash কখনো লেখা হয় না। ব্যর্থ অনুরোধ লেখা হয় না। | ✅ |
 | সব ডাটা-পড়ার লগ আছে? | না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)। | ⚠️ |
 | লগ কেন্দ্রীয়/অপরিবর্তনীয়? | আলাদা SIEM/অপরিবর্তনীয় লগ **নেই**। অ্যাপ লগ PM2-তে। | ❌ |
 | লগ কতদিন রাখা? | `login_attempts` ৩০ দিন; বাকিগুলো মোছার স্বয়ংক্রিয় ব্যবস্থা দেখিনি (জমে থাকে)। নীতি ঠিক করা দরকার। | ⚠️ |
@@ -183,6 +184,18 @@
 
 **প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
 উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
+
+**প্রশ্ন: কোনো user বা employee মুছে দিলে কি তার হাজিরা, claim, বেতনের রেকর্ড মুছে যায়?**
+উত্তর: না। Employee-র বেতন ও চাকরির রেকর্ড (payroll, salary, advance, HR action, letter, transfer) থাকলে Employee মোছা যায় না (`EmployeeRecordsGuard.ts`)। Login-এর কাজের রেকর্ড (attendance, claim, leave, exit / final settlement, task, target, ডকুমেন্ট, chat ইত্যাদি) থাকলে login মোছা যায় না (`UserRecordsGuard.ts`) — দুটোতেই app বলে কী আছে আর Resigned / Block login করতে বলে, আর database নিজেও আটকায়। শুধু ভুল করে বানানো রেকর্ড-ছাড়া account মোছা যায়। টেস্ট: `docs/test-logs/2026-11-19/scripts/user-delete-guard-api.mjs` (৭টা)।
+
+**প্রশ্ন: বদলির পর কর্মী কি পুরনো প্রজেক্টের PEPM এন্ট্রি দেখতে বা সেখানে Check In করতে পারে?**
+উত্তর: Transfer-এ "Also changes"-এর টিক থাকলে effective date-এ পুরনো branch-এর প্রজেক্ট তাঁর PEPM অনুমতি থেকে সরে যায়, আর সেখানে Check In আগের দিনেই শেষ হয় — তাই পারেন না (নিজের দেওয়া এন্ট্রি আর By home project-এ For-এর নিয়ম আলাদা)। টিক তুলে দিলে বা branch কোনো প্রজেক্টের সাথে জোড়া না থাকলে HR-কে হাতে বদলাতে হয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/transfer-access-api.mjs` (১৮টা)।
+
+**প্রশ্ন: কর্মী রেকর্ড ছাড়া কি কেউ login বানাতে পারে?**
+উত্তর: Users → Add New User থেকে login হয় একজন কর্মীর (Employees-এ আছেন, login নেই; Login ID = Employee ID), নয়তো non-employee কারণ লিখে (auditor, vendor ইত্যাদি) — কারণ account-এ লেখা থাকে। নতুন joiner-এর login আসে Onboarding থেকে, কর্মী রেকর্ডের সাথে। কারণ ছাড়া কর্মীহীন login server ফিরিয়ে দেয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/add-user-rule-api.mjs` (১০টা)।
+
+**প্রশ্ন: নতুন joiner-এর Appointment Letter (বেতনসহ) কে দেখতে পারে?**
+উত্তর: যে joiner-এর চিঠি তিনি নিজে (My Onboarding), আর HR Operations-এর onboarding অনুমতি থাকা HR — শুধু নিজের company-র joiner-দের। issue বা cancel করতে `onboarding_create` লাগে। অন্য joiner বা সাধারণ কর্মী পান না (403)। টেস্ট: `docs/test-logs/2026-11-19/scripts/joiner-letter-api.mjs` (২৪টা)।
 
 **প্রশ্ন: সবাইকে দেওয়া একটা প্রজেক্টে (যেমন Central Inventory) কি সবাই সবার entry দেখে?**
 উত্তর: প্রজেক্টের Entry sharing-এর ওপর নির্ভর করে (Admin Panel → Projects → Edit)। "Team" হলে হ্যাঁ (আগের মতো)। "Own entries only" হলে প্রত্যেকে শুধু নিজেরটা। "By home project" হলে প্রতিটা entry-তে লেখা থাকে কোন প্রজেক্টের জন্য (For), আর শুধু সেই প্রজেক্টের team ও যে দিয়েছে সে দেখে ও বদলায় — অন্য team তালিকায় পায় না, id দিয়ে খুললেও server 403 দেয়। For শুধু নিজের প্রজেক্টের একটা হতে পারে, server যাচাই করে। এক team-এর Final Submit শুধু তাদের অংশ আটকায়। Reports-এর অনুমতি থাকলে (আর Superadmin) সব দেখা যায়। টেস্ট: `docs/test-logs/2026-11-19/scripts/entry-sharing-api.mjs` (৩৮টা), `entry-sharing-ui.cjs` (২০টা)।

@@ -14,6 +14,10 @@ import React, { useEffect, useState } from 'react';
 import { UserPlus, X, Copy, Check, KeyRound, Clock, Eye, FileText, AlertTriangle, CheckCircle2, XCircle, Ban, ShieldAlert, FileSignature } from 'lucide-react';
 import { useHrApi, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
 import { LetterComposer } from './HrOpsLetters';
+import { JoinerLetterPopup } from './JoinerLetterPopup';
+import { companyFromSettings, letterPdfBytes, saveLetterPdf } from './HrOpsShared';
+import { PdfPreviewModal } from './PdfPreviewModal';
+import { letterFileName } from '../lib/hrLetterPdf';
 import { confirmDialog } from '../lib/confirmDialog';
 import { OnboardingSummary, openOnboardingFile, type OnboardingFormState } from './OnboardingForm';
 
@@ -392,6 +396,7 @@ interface ReviewDetail extends Omit<Application, 'documents'>, OnboardingFormSta
   duplicates: { field: string; value: string; match: string }[];
   approve_blocked: string | null;
   employee_code: string | null;
+  signed_letter_doc_type?: string;
 }
 
 const DrawerSkeleton: React.FC = () => (
@@ -419,9 +424,33 @@ const ReviewDrawer: React.FC<{
   onClose: () => void;
   onChanged: () => void;
   onIssueLetter: (employeeId: number, name: string) => void;
-}> = ({ token, id, access, onClose, onChanged, onIssueLetter }) => {
+  onIssueJoinerLetter: (applicationId: number, name: string) => void;
+  company: ReturnType<typeof companyFromSettings>;
+}> = ({ token, id, access, onClose, onChanged, onIssueLetter, onIssueJoinerLetter, company }) => {
   const api = useHrApi(token);
   const [d, setD] = useState<ReviewDetail | null>(null);
+  const [letterPdf, setLetterPdf] = useState<{ bytes: Uint8Array; name: string; letter: any } | null>(null);
+  // The Appointment Letter issued at Hire: view it, or take it back.
+  const viewJoinerLetter = async () => {
+    try {
+      const r = await api.get<{ letter: any }>(`/api/hr-ops/joiner-onboarding/${id}/appointment-letter`);
+      if (!r.letter) return;
+      setLetterPdf({ bytes: await letterPdfBytes(r.letter.company || company, { ...r.letter, employee_name: d?.name }), name: letterFileName(r.letter.ref_no, d?.name), letter: r.letter });
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
+  const cancelJoinerLetter = async () => {
+    if (!(await confirmDialog('Cancel this Appointment Letter? The joiner will no longer see it; you can issue a new one.', { tone: 'danger' }))) return;
+    try {
+      await api.post(`/api/hr-ops/joiner-onboarding/${id}/appointment-letter/cancel`, {});
+      setMsg({ type: 'success', text: 'Appointment Letter cancelled.' });
+      load();
+      onChanged();
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
   const [error, setError] = useState('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [rejecting, setRejecting] = useState(false);
@@ -501,6 +530,46 @@ const ReviewDrawer: React.FC<{
                   {d.submitted_at && <span className="text-[11px] text-slate-500">Submitted {String(d.submitted_at).slice(0, 16)}</span>}
                   {d.created_by_name && <span className="text-[11px] text-slate-500">· Opened by {d.created_by_name}</span>}
                 </div>
+                {['draft', 'submitted', 'rejected'].includes(d.status) && (
+                  <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs space-y-2">
+                    {d.appointment_letter ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2 text-slate-700">
+                          <FileSignature className="w-4 h-4 text-emerald-600" /> Appointment Letter <b className="font-mono">{d.appointment_letter.ref_no}</b> issued.
+                          <button type="button" onClick={viewJoinerLetter} className="font-semibold text-blue-700 hover:underline">
+                            View
+                          </button>
+                          {access.onboarding_create && (
+                            <button type="button" onClick={cancelJoinerLetter} className="font-semibold text-rose-600 hover:underline">
+                              Cancel letter
+                            </button>
+                          )}
+                        </div>
+                        {(d.documents || []).some((x) => x.doc_type === d.signed_letter_doc_type) ? (
+                          <div className="text-emerald-700 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Signed copy uploaded by the joiner.
+                          </div>
+                        ) : (
+                          <div className="text-amber-700">Signed copy not uploaded yet.</div>
+                        )}
+                      </>
+                    ) : d.appointment_template ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-slate-600">Appointment Letter not issued yet — the joiner needs it to sign and upload.</span>
+                        {access.onboarding_create && (
+                          <button type="button" className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold inline-flex items-center gap-1.5" onClick={() => onIssueJoinerLetter(d.id, d.name)}>
+                            <FileSignature className="w-3.5 h-3.5" /> Issue Appointment Letter
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-amber-700">No active Appointment Letter template — add one in Settings → Letter Templates.</div>
+                    )}
+                  </div>
+                )}
+                {letterPdf && (
+                  <PdfPreviewModal isOpen pdfBytes={letterPdf.bytes} filename={letterPdf.name} onClose={() => setLetterPdf(null)} onDownload={() => saveLetterPdf(letterPdf.letter.company || company, { ...letterPdf.letter, employee_name: d?.name })} />
+                )}
                 {d.status === 'approved' && d.employee_code && (
                   <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs space-y-2.5">
                     <div className="text-emerald-800 flex items-center gap-2">
@@ -677,6 +746,8 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
       });
   };
   const canReview = access.onboarding_review || access.onboarding_approve;
+  // Appointment Letter at Hire (JoinerLetterPopup.tsx).
+  const [joinerLetter, setJoinerLetter] = useState<{ id: number; name: string } | null>(null);
 
   const load = () =>
     api
@@ -751,6 +822,21 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[a.status].cls}`}>{STATUS[a.status].label}</span>
+                      {['draft', 'submitted', 'rejected'].includes(a.status) &&
+                        (a.appointment_letter ? (
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 whitespace-nowrap">
+                            <FileSignature className="w-3 h-3" /> {a.appointment_letter.ref_no}
+                          </div>
+                        ) : access.onboarding_create && a.appointment_template ? (
+                          <button
+                            type="button"
+                            onClick={() => setJoinerLetter({ id: a.id, name: a.name })}
+                            className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-800 whitespace-nowrap"
+                            title="Issue the Appointment Letter now — the joiner signs it and uploads it with their form"
+                          >
+                            <FileSignature className="w-3 h-3" /> Issue appointment letter
+                          </button>
+                        ) : null)}
                       {a.status === 'approved' &&
                         a.employee_id &&
                         (a.appointment_letter ? (
@@ -809,6 +895,20 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
         />
       )}
       {creds && <CredentialsCard token={token} creds={creds} onClose={() => setCreds(null)} />}
+      {joinerLetter && (
+        <JoinerLetterPopup
+          token={token}
+          applicationId={joinerLetter.id}
+          joinerName={joinerLetter.name}
+          company={companyFromSettings(meta.settings)}
+          onClose={() => setJoinerLetter(null)}
+          onIssued={(ref) => {
+            setMsg({ type: 'success', text: `Appointment Letter ${ref} sent to ${joinerLetter.name} — they'll find it in My Onboarding.` });
+            setJoinerLetter(null);
+            load();
+          }}
+        />
+      )}
       {letterFor && employees && (
         <LetterComposer
           token={token}
@@ -823,7 +923,21 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
           }}
         />
       )}
-      {reviewing && <ReviewDrawer token={token} id={reviewing} access={access} onClose={() => setReviewing(null)} onChanged={load} onIssueLetter={issueLetter} />}
+      {reviewing && (
+        <ReviewDrawer
+          token={token}
+          id={reviewing}
+          access={access}
+          company={companyFromSettings(meta.settings)}
+          onClose={() => setReviewing(null)}
+          onChanged={load}
+          onIssueLetter={issueLetter}
+          onIssueJoinerLetter={(id, name) => {
+            setReviewing(null);
+            setJoinerLetter({ id, name });
+          }}
+        />
+      )}
     </div>
   );
 };

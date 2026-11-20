@@ -1906,6 +1906,20 @@ Unique: `token_hash`(token_hash)
 | `detail` | text | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
+### `user_access_log`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না | MUL | logical → `users` |
+| `employee_id` | int(11) | হ্যাঁ | MUL | logical → `all_employees` |
+| `actor_id` | int(11) | হ্যাঁ |  | logical → `users` |
+| `actor_name` | varchar(150) | হ্যাঁ |  | |
+| `source` | varchar(40) | না | default 'users' | |
+| `action` | varchar(120) | না |  | |
+| `changes_json` | text | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `user_app_access`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
