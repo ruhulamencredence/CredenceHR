@@ -157,6 +157,15 @@ erDiagram
     varchar action
     text detail
   }
+  user_access_log {
+    int id PK
+    int user_id FK
+    int employee_id FK
+    int actor_id
+    varchar actor_name
+    varchar source
+    varchar action
+  }
   user_app_access {
     int user_id PK,FK
     varchar item_key PK
@@ -251,6 +260,9 @@ erDiagram
     datetime reset_at
     tinyint tutorials_enabled
   }
+  all_employees {
+    int id PK
+  }
   approval_templates {
     int id PK
   }
@@ -271,6 +283,8 @@ erDiagram
   users ||--o{ profile_photo_requests : "user_id"
   users ||..o{ sso_login_logs : "user_id"
   users ||..o{ sso_login_requests : "user_id"
+  users ||..o{ user_access_log : "user_id"
+  all_employees ||..o{ user_access_log : "employee_id"
   users ||..o{ user_app_access : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_device_requests : "user_id"

@@ -131,6 +131,7 @@
   "sso_login_requests",
   "startup_migrations",
   "user_access_audit",
+  "user_access_log",
   "user_app_access",
   "user_company_access",
   "user_device_requests",
