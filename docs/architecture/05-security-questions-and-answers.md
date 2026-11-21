@@ -277,3 +277,6 @@
 
 **প্রশ্ন: Bill Claim Policy দেখতে পারেন এমন সবাই কি "Who has read the rules" (কে নিয়ম পড়েছেন) তালিকাও দেখতে পারেন?**
 না, আলাদা অনুমতি লাগে: Bill Claim module-এর layer "Who has read the rules" (`rules_readers`)। যে account-এ Bill Claim-এর layer আলাদা করে save করা নেই, তাতে এটা চালু থাকে; layer save করা থাকলে টিক না দিলে তালিকা ও reminder দুটোই server-এ 403, বোতামও দেখায় না। Superadmin সবসময় পান।
+
+**প্রশ্ন: তৈরি থাকা "Accounts" বা "Audit" template দিলে কি তাঁরা বেতন বদলাতে পারবেন?**
+না। দুটোতেই Payroll-এর শুধু "View only" (`payroll_view`) — সব পাতা দেখা যায়, কিছু বদলানো যায় না (`requirePayroll`: বদলাতে `read` লাগে, যেটা এ দুই template-এ নেই)। Accounts পান "Accounts Pay" (টাকা দেওয়া), Audit পান "Audit (after payment)" ও Activity Log। HR template-এ উল্টো — বানানো ও চালানো আছে, কিন্তু HR Director review / Accounts Pay / Audit নেই। মনে রাখবেন: Module Access-এ Payroll হাতে চালু করলে "Payroll" আর "View only" দুটোই নিজে থেকে টিক হয় — Accounts / Audit-কে হাতে দিলে "Payroll" তুলে দিতে হয়; template ব্যবহার করলে এটা ঠিক থাকে।

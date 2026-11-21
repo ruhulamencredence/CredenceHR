@@ -1500,6 +1500,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (!uc || uc.status !== "pending") continue;
         const people = await getCurrentStepApprovers(r).catch(() => [] as { user_id: number; user_name: string | null }[]);
         const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        // When it came to the payer: the Layer before approved it (its last
+        // Approve in the request's trail), and who that was.
+        let lastApprove: any = null;
+        try {
+          const trail = JSON.parse(r.actions_json || "[]");
+          if (Array.isArray(trail)) for (const a of trail) if (a?.action === "approved") lastApprove = a;
+        } catch {
+          lastApprove = null;
+        }
         out.push({
           approval_id: Number(r.id),
           bill_claim_id: Number(uc.id),
@@ -1515,7 +1524,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           approved_amount: uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount),
           waiting_on: people.map((p) => p.user_name).filter(Boolean),
           can_disburse: req.user.role === "superadmin" || people.some((p) => Number(p.user_id) === Number(req.user.id)),
-          since: r.updated_at || r.created_at || null
+          since: r.updated_at || r.created_at || null,
+          arrived_at: lastApprove?.acted_at || r.updated_at || r.created_at || null,
+          arrived_from: lastApprove?.approver_name || null
         });
       }
       out.sort((a, b) => a.approval_id - b.approval_id);

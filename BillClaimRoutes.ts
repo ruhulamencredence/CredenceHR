@@ -242,6 +242,10 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
         const TOTAL = "(SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id)";
         const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+        // When the Bill came to Disbursement: the last approval of its Bill
+        // Claim(s) (the Layer before the one who pays it), else when the Bill
+        // was made (Check In/Out and typed-in Bills). afrom/ato filter on it.
+        const APPROVED = `COALESCE((SELECT MAX(ar.updated_at) FROM conveyance_bill_items ai JOIN approval_requests ar ON ar.source_type = 'bill_claim' AND ar.source_id = ai.bill_claim_id AND ar.status = 'approved' WHERE ai.bill_id = b.id), b.created_at)`;
         if (req.query.user_id) {
           where.push("b.user_id = ?");
           params.push(Number(req.query.user_id));
@@ -255,6 +259,14 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         if (isDate(qs("to"))) {
           where.push("b.bill_date <= ?");
           params.push(qs("to"));
+        }
+        if (isDate(qs("afrom"))) {
+          where.push(`DATE(${APPROVED}) >= ?`);
+          params.push(qs("afrom"));
+        }
+        if (isDate(qs("ato"))) {
+          where.push(`DATE(${APPROVED}) <= ?`);
+          params.push(qs("ato"));
         }
         if (isDate(qs("dfrom"))) {
           where.push("b.is_disbursed = 1 AND DATE(b.disbursed_at) >= ?");
@@ -319,7 +331,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
                 ${EMP("employee_id")} AS employee_code, ${EMP("designation")} AS designation,
                 ${EMP("department")} AS department, ${EMP("branch")} AS branch,
                 (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
-                ${TOTAL} AS total_amount
+                ${TOTAL} AS total_amount, ${APPROVED} AS approved_at
              ${FROM}
              LEFT JOIN users du ON du.id = b.disbursed_by
              ${w}

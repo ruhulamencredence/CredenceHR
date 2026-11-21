@@ -102,17 +102,27 @@ const LBL = 'block text-[10px] font-semibold text-slate-500 mb-1';
 const INPUT = 'w-full text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:outline-none';
 const money = (n: number) => Number(n || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type PeriodKey = 'any' | 'this_month' | 'last_month' | 'this_year' | 'custom';
-const PERIOD_LABEL: Record<PeriodKey, string> = { any: 'Any time', this_month: 'This month', last_month: 'Last month', this_year: 'This year', custom: 'Pick dates…' };
+type PeriodKey = 'any' | 'today' | 'yesterday' | 'this_month' | 'last_month' | 'this_year' | 'custom';
+const PERIOD_LABEL: Record<PeriodKey, string> = { any: 'Any time', today: 'Today', yesterday: 'Yesterday', this_month: 'This month', last_month: 'Last month', this_year: 'This year', custom: 'Pick dates…' };
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function periodRange(p: PeriodKey, custom: { from: string; to: string }): { from: string; to: string } {
   const now = new Date();
+  if (p === 'today') return { from: ymd(now), to: ymd(now) };
+  if (p === 'yesterday') {
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return { from: ymd(y), to: ymd(y) };
+  }
   if (p === 'this_month') return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
   if (p === 'last_month') return { from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)) };
   if (p === 'this_year') return { from: `${now.getFullYear()}-01-01`, to: `${now.getFullYear()}-12-31` };
   if (p === 'custom') return custom;
   return { from: '', to: '' };
 }
+// A timestamp as this device's calendar day (YYYY-MM-DD).
+const localDay = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso).slice(0, 10) : ymd(d);
+};
 const periodText = (p: PeriodKey, r: { from: string; to: string }) =>
   p === 'custom' ? `${r.from ? formatDate(r.from) : '…'} – ${r.to ? formatDate(r.to) : '…'}` : PERIOD_LABEL[p];
 
@@ -188,6 +198,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     approved_amount: number;
     waiting_on: string[];
     can_disburse: boolean;
+    // When the Layer before approved it (came to the payer), and who.
+    arrived_at?: string | null;
+    arrived_from?: string | null;
   }
   const [awaiting, setAwaiting] = useState<AwaitingClaim[]>([]);
   const [awaitVoucher, setAwaitVoucher] = useState<Record<number, string>>({});
@@ -242,6 +255,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   const [branch, setBranch] = useState('');
   const [billPeriod, setBillPeriod] = useState<PeriodKey>('any');
   const [billRange, setBillRange] = useState({ from: '', to: '' });
+  // Approved date: when a bill came to Disbursement from the Layer before
+  // (not the bill's own date) — the payer's day-by-day queue.
+  const [apprPeriod, setApprPeriod] = useState<PeriodKey>('any');
+  const [apprRange, setApprRange] = useState({ from: '', to: '' });
   const [paidPeriod, setPaidPeriod] = useState<PeriodKey>('any');
   const [paidRange, setPaidRange] = useState({ from: '', to: '' });
   const [disbursedBy, setDisbursedBy] = useState('');
@@ -264,6 +281,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   }, [token]);
   const billDates = periodRange(billPeriod, billRange);
   const paidDates = periodRange(paidPeriod, paidRange);
+  const apprDates = periodRange(apprPeriod, apprRange);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // One page of bills at a time; every filter is applied on the server.
   const [page, setPage] = useState(1);
@@ -280,6 +298,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (branch) p.set('branch', branch);
     if (billDates.from) p.set('from', billDates.from);
     if (billDates.to) p.set('to', billDates.to);
+    if (apprDates.from) p.set('afrom', apprDates.from);
+    if (apprDates.to) p.set('ato', apprDates.to);
     if (paidDates.from) p.set('dfrom', paidDates.from);
     if (paidDates.to) p.set('dto', paidDates.to);
     if (disbursedBy) p.set('disbursed_by', disbursedBy);
@@ -288,7 +308,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (minAmt !== '') p.set('min', minAmt);
     if (maxAmt !== '') p.set('max', maxAmt);
     return p.toString();
-  }, [userFilter, statusFilter, q, department, designation, branch, billDates.from, billDates.to, paidDates.from, paidDates.to, disbursedBy, category, source, minAmt, maxAmt]);
+  }, [userFilter, statusFilter, q, department, designation, branch, billDates.from, billDates.to, apprDates.from, apprDates.to, paidDates.from, paidDates.to, disbursedBy, category, source, minAmt, maxAmt]);
 
   const fetchBills = async () => {
     const req = ++listReq.current;
@@ -355,6 +375,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     ...(designation ? [{ label: `Designation: ${designation}`, clear: () => setDesignation('') }] : []),
     ...(branch ? [{ label: `Branch: ${branch}`, clear: () => setBranch('') }] : []),
     ...(billPeriod !== 'any' && (billDates.from || billDates.to) ? [{ label: `Bill date: ${periodText(billPeriod, billDates)}`, clear: () => setBillPeriod('any') }] : []),
+    ...(apprPeriod !== 'any' && (apprDates.from || apprDates.to) ? [{ label: `Approved: ${periodText(apprPeriod, apprDates)}`, clear: () => setApprPeriod('any') }] : []),
     ...(paidPeriod !== 'any' && (paidDates.from || paidDates.to) ? [{ label: `Disbursed: ${periodText(paidPeriod, paidDates)}`, clear: () => setPaidPeriod('any') }] : []),
     ...(disbursedBy ? [{ label: `Disbursed by: ${options.disbursers.find((d) => String(d.id) === disbursedBy)?.name || disbursedBy}`, clear: () => setDisbursedBy('') }] : []),
     ...(category ? [{ label: `Category: ${category}`, clear: () => setCategory('') }] : []),
@@ -369,6 +390,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     setDesignation('');
     setBranch('');
     setBillPeriod('any');
+    setApprPeriod('any');
     setPaidPeriod('any');
     setDisbursedBy('');
     setCategory('');
@@ -392,6 +414,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     const d = String(c.claim_date || '').slice(0, 10);
     if (billDates.from && d < billDates.from) return false;
     if (billDates.to && d > billDates.to) return false;
+    const a = c.arrived_at ? localDay(c.arrived_at) : '';
+    if (apprDates.from && (!a || a < apprDates.from)) return false;
+    if (apprDates.to && (!a || a > apprDates.to)) return false;
     if (category && c.category !== category) return false;
     if (minAmt !== '' && c.approved_amount < Number(minAmt)) return false;
     if (maxAmt !== '' && c.approved_amount > Number(maxAmt)) return false;
@@ -735,6 +760,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   </SearchSelect>
                 </div>
                 <PeriodField id="disb-bill" label="Bill date" value={billPeriod} onChange={setBillPeriod} range={billRange} onRange={setBillRange} />
+                <PeriodField id="disb-appr" label="Approved date" value={apprPeriod} onChange={setApprPeriod} range={apprRange} onRange={setApprRange} />
                 <PeriodField id="disb-paid" label="Disbursed date" value={paidPeriod} onChange={setPaidPeriod} range={paidRange} onRange={setPaidRange} />
                 <div className="min-w-0">
                   <span className={LBL}>Disbursed by</span>
@@ -838,7 +864,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                           Claim #{c.bill_claim_id} · {formatDate(c.claim_date)} · {c.category}
                           {c.description ? ` — ${c.description}` : ''}
                         </div>
-                        <div className="text-[11px] text-slate-400">Waiting on: {c.waiting_on.join(', ') || '—'}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {c.arrived_at ? `Approved ${formatDate(localDay(c.arrived_at))}${c.arrived_from ? ` by ${c.arrived_from}` : ''} · ` : ''}Waiting on: {c.waiting_on.join(', ') || '—'}
+                        </div>
                       </div>
                       <div className="text-sm font-bold text-slate-900 whitespace-nowrap">৳{c.approved_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</div>
                       {c.can_disburse ? (
@@ -904,7 +932,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>{formatDate(b.bill_date)} · {b.item_count ?? 0} item{(b.item_count ?? 0) === 1 ? '' : 's'}</span>
+                    <span>
+                      {formatDate(b.bill_date)} · {b.item_count ?? 0} item{(b.item_count ?? 0) === 1 ? '' : 's'}
+                      {b.approved_at ? ` · Approved ${formatDate(localDay(b.approved_at))}` : ''}
+                    </span>
                     {b.is_disbursed ? (
                       <span className="px-2 py-0.5 rounded-full font-semibold border text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
                         Disbursed{b.voucher_no ? ` · ${b.voucher_no}` : ''}
@@ -973,6 +1004,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                     <th className="px-4 py-2.5 text-left">Employee</th>
                     <th className="px-4 py-2.5 text-left">Department</th>
                     <th className="px-4 py-2.5 text-left">Bill Date</th>
+                    <th className="px-4 py-2.5 text-left" title="When it came to Disbursement — the last approval before payment">Approved</th>
                     <th className="px-4 py-2.5 text-left">Items</th>
                     <th className="px-4 py-2.5 text-left">Total Amount</th>
                     <th className="px-4 py-2.5 text-left">Status</th>
@@ -998,6 +1030,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{b.department || '—'}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{formatDate(b.bill_date)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{b.approved_at ? formatDate(localDay(b.approved_at)) : '—'}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{b.item_count ?? 0}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-900 font-semibold text-xs">{Number(b.total_amount || 0).toFixed(2)}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs">

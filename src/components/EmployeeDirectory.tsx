@@ -5,6 +5,7 @@
 
 import { useElementHeight } from '../lib/useElementHeight';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { onDirectorySearch, takeDirectorySearch } from '../lib/directorySearch';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -609,6 +610,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
   }, [isMobile, filtered.length, pageSize, mobileVisibleCount]);
 
   const activeCount = employees.filter((e) => e.is_active).length;
+
+  // Opened from the Dashboard search with a person picked: search for them,
+  // with the other filters cleared so they show (lib/directorySearch.ts).
+  useEffect(() => {
+    const show = (text: string) => {
+      setSearch(text);
+      setDepartmentFilter('');
+      setDesignationFilter('');
+      setCompanyFilter('');
+    };
+    const waiting = takeDirectorySearch();
+    if (waiting) show(waiting);
+    return onDirectorySearch(show);
+  }, []);
 
   const clearFilters = () => {
     setSearch('');

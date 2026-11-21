@@ -2211,6 +2211,9 @@ export interface ConveyanceBill {
   // voucher_no. See POST /api/conveyance-bills/:id/disburse and .../undisburse.
   is_disbursed?: boolean;
   voucher_no?: string | null;
+  // When it came to Disbursement (its Bill Claim's last approval, else when
+  // the Bill was made) — Admin list only.
+  approved_at?: string | null;
   disbursed_at?: string | null;
   disbursed_by?: number | null;
   disbursed_by_name?: string | null;
