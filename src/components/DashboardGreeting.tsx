@@ -6,6 +6,7 @@
 // requests are this account's own Approve Application queue.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { searchDirectoryFor } from '../lib/directorySearch';
 import { Search, Plus, X, Clock3 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { getNavEntries, NavEntry } from '../lib/navRegistry';
@@ -140,7 +141,11 @@ export const DashboardGreeting: React.FC<{ token: string; user: User; onCheckIn?
       .slice(0, 4);
     const out: { title: string; items: { key: string; label: string; sub: string; tile: string; tone: string; pick: () => void }[] }[] = [];
     if (pages.length) out.push({ title: 'Pages', items: pages.map((p) => ({ key: `p-${p.key}`, label: p.label, sub: 'Open page', tile: p.label.slice(0, 2).toUpperCase(), tone: 'bg-violet-100 text-violet-800', pick: go(p.onClick) })) });
-    if (ppl.length && dir) out.push({ title: 'People', items: ppl.map((p) => ({ key: `e-${p.id}`, label: p.name, sub: [p.employee_id, p.designation, p.department].filter(Boolean).join(' · '), tile: p.name.split(' ').map((w) => w[0]).slice(0, 2).join(''), tone: 'bg-sky-100 text-sky-800', pick: go(dir.onClick) })) });
+    if (ppl.length && dir) out.push({ title: 'People', items: ppl.map((p) => ({ key: `e-${p.id}`, label: p.name, sub: [p.employee_id, p.designation, p.department].filter(Boolean).join(' · '), tile: p.name.split(' ').map((w) => w[0]).slice(0, 2).join(''), tone: 'bg-sky-100 text-sky-800', pick: go(() => {
+      // Open the Directory already searched for that person (Employee ID when there is one).
+      searchDirectoryFor(String(p.employee_id || p.name || ''));
+      dir.onClick?.();
+    }) })) });
     if (reqs.length && approve) out.push({ title: 'Waiting for you', items: reqs.map((w) => ({ key: `r-${w.source_type}-${w.id}`, label: `${SOURCE[w.source_type] || w.source_type} — ${w.requested_by_name || 'someone'}`, sub: w.source_label || '', tile: '•', tone: 'bg-amber-100 text-amber-800', pick: go(approve.onClick) })) });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
