@@ -442,7 +442,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // A Bill with no line items yet can't be disbursed (the server refuses it),
   // so it gets no checkbox or Disburse button until items are added.
   const canDisburse = (b: ConveyanceBill) => !b.is_disbursed && Number(b.item_count || 0) > 0;
-  const selectableIds = useMemo(() => visibleBills.filter(canDisburse).map((b) => b.id), [visibleBills]);
+  // Ticked to disburse (Pending) or to print their vouchers together (Disbursed).
+  const canSelect = (b: ConveyanceBill) => Number(b.item_count || 0) > 0;
+  const selectableIds = useMemo(() => visibleBills.filter(canSelect).map((b) => b.id), [visibleBills]);
   const allSelectableChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
   const toggleOne = (id: number) => {
@@ -468,13 +470,44 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // /api/conveyance-bills) only returns item_count/total_amount, not the
   // actual line items, so this always does its own GET .../:id fetch first
   // rather than trusting whatever's already sitting in `bills` state.
-  const buildAndSaveVoucherPdf = async (billId: number, mode: 'save' | 'email' = 'save') => {
+  const loadVoucherBill = async (billId: number): Promise<ConveyanceBill> => {
     const res = await fetch(apiUrl(`/api/conveyance-bills/${billId}`), { headers: authHeaders });
     if (!res.ok) throw new Error(`Failed to load Bill CB-${billId} for its voucher.`);
-    const bill: ConveyanceBill = await res.json();
-
+    return res.json();
+  };
+  const buildAndSaveVoucherPdf = async (billId: number, mode: 'save' | 'email' = 'save') => {
+    const bill = await loadVoucherBill(billId);
     const co = await loadPdfCompany(token);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    await drawVoucher(doc, bill, co);
+    finalizePdfPageNumbers(doc);
+    const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: 'Bill Payment Voucher' });
+      return;
+    }
+    await savePdfCrossPlatform(doc, filename);
+  };
+  // Several Bills' vouchers in one PDF, each starting on its own page — the
+  // same voucher as printing them one by one.
+  const printVouchersTogether = async (billIds: number[]) => {
+    const co = await loadPdfCompany(token);
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    let first = true;
+    let firstBill: ConveyanceBill | null = null;
+    for (const id of billIds) {
+      const bill = await loadVoucherBill(id);
+      if (!first) doc.addPage();
+      first = false;
+      firstBill = firstBill || bill;
+      await drawVoucher(doc, bill, co);
+    }
+    finalizePdfPageNumbers(doc);
+    const stamp = todayDateOnlyString();
+    await savePdfCrossPlatform(doc, billIds.length === 1 && firstBill ? `Payment_Voucher_${firstBill.voucher_no || firstBill.id}.pdf` : `Payment_Vouchers_${billIds.length}_${stamp}.pdf`);
+  };
+  // Draws one Bill's Payment Voucher, starting on the doc's current page.
+  const drawVoucher = async (doc: any, bill: ConveyanceBill, co: Awaited<ReturnType<typeof loadPdfCompany>>) => {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const sections = voucherSections(bill.items || []);
@@ -578,14 +611,6 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     doc.text('Prepared By', 35, sigY + 4, { align: 'center' });
     if (!approvers.length) doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
     doc.text('Received By (Claimant)', pageWidth - 35, sigY + 4, { align: 'center' });
-
-    finalizePdfPageNumbers(doc);
-    const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
-    if (mode === 'email') {
-      await emailReport(doc, { fileName: filename, title: 'Bill Payment Voucher' });
-      return;
-    }
-    await savePdfCrossPlatform(doc, filename);
   };
 
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -681,9 +706,22 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     }
   };
 
-  const selectedTotal = bills
-    .filter((b) => selected.has(b.id))
-    .reduce((s, b) => s + Number(b.total_amount || 0), 0);
+  const selectedPending = bills.filter((b) => selected.has(b.id) && canDisburse(b));
+  const selectedPaid = bills.filter((b) => selected.has(b.id) && b.is_disbursed);
+  const selectedTotal = selectedPending.reduce((s, b) => s + Number(b.total_amount || 0), 0);
+  const [printingMany, setPrintingMany] = useState(false);
+  const printSelected = async () => {
+    if (!selectedPaid.length) return;
+    setPrintingMany(true);
+    try {
+      await printVouchersTogether(selectedPaid.map((b) => b.id));
+    } catch (err: any) {
+      console.error('Failed to print vouchers', err);
+      alert(err?.message || 'Could not make the vouchers PDF. Please try again.');
+    } finally {
+      setPrintingMany(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -841,14 +879,29 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   </button>
                 )}
                 {selected.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => openDisburseConfirm(Array.from(selected))}
-                    className="sm:ml-auto flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold whitespace-nowrap transition-colors"
-                  >
-                    <Banknote className="w-3.5 h-3.5" />
-                    Disburse Selected ({selected.size}) — {selectedTotal.toFixed(2)}
-                  </button>
+                  <div className="sm:ml-auto flex flex-wrap items-center gap-1.5">
+                    {selectedPaid.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => void printSelected()}
+                        disabled={printingMany}
+                        className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 font-semibold whitespace-nowrap transition-colors disabled:opacity-50"
+                      >
+                        {printingMany ? <Spinner size={14} /> : <Printer className="w-3.5 h-3.5" />}
+                        Print vouchers ({selectedPaid.length}) — one PDF
+                      </button>
+                    )}
+                    {selectedPending.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openDisburseConfirm(selectedPending.map((b) => b.id))}
+                        className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold whitespace-nowrap transition-colors"
+                      >
+                        <Banknote className="w-3.5 h-3.5" />
+                        Disburse Selected ({selectedPending.length}) — {selectedTotal.toFixed(2)}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -947,7 +1000,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 <div key={b.id} className="p-4 flex flex-col gap-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5 min-w-0">
-                      {canDisburse(b) && (
+                      {canSelect(b) && (
                         <button type="button" onClick={() => toggleOne(b.id)} className="mt-0.5 text-slate-400 hover:text-emerald-600 shrink-0">
                           {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                         </button>
@@ -1028,7 +1081,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 <thead className="sticky z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
                   <tr>
                     <th className="px-4 py-2.5 text-left w-8">
-                      <button type="button" onClick={toggleAll} className="text-slate-400 hover:text-emerald-600" title="Select all pending">
+                      <button type="button" onClick={toggleAll} className="text-slate-400 hover:text-emerald-600" title="Select all shown — Pending to disburse, Disbursed to print together">
                         {allSelectableChecked ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                       </button>
                     </th>
@@ -1047,7 +1100,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   {visibleBills.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {canDisburse(b) && (
+                        {canSelect(b) && (
                           <button type="button" onClick={() => toggleOne(b.id)} className="text-slate-400 hover:text-emerald-600">
                             {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                           </button>
