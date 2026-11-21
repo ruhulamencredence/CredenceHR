@@ -65,7 +65,7 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
       }
       const load = () => queryDB(
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
-                e.email, e.phone, e.telephone, e.branch, e.division, e.unit,
+                e.email, e.phone, e.telephone, COALESCE(NULLIF(TRIM(e.branch), ''), br.branch_name) AS branch, e.division, e.unit,
                 e.is_active, e.user_id, e.company_id,
                 sup.name AS supervisor_name
          FROM all_employees e
@@ -84,6 +84,9 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
            ) latest ON latest.employee_id = es1.employee_id AND latest.max_id = es1.id
          ) cur ON cur.employee_id = e.id
          LEFT JOIN all_employees sup ON sup.id = cur.supervisor_id
+         -- The Branch / Project by name when only its id was saved, so the
+         -- Directory can be searched by it.
+         LEFT JOIN branches br ON br.id = e.branch_id
          ORDER BY e.name ASC`
       );
       // "Reports to" the way a request actually goes: the Direct Supervisor

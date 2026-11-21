@@ -1432,6 +1432,8 @@ export interface PendingJobEdit {
   job_id: number | null;
   job_no?: string | null;
   job_name?: string | null;
+  // The Job's Project (GET /api/job-edits); a New Job has it in payload.project_name.
+  project_name?: string | null;
   // Which existing MPR row this request is against — set for 'delete_entry', null
   // for a still-pending 'add_item'/'add_job' (there's no real entries row yet).
   entry_id: number | null;
@@ -2211,6 +2213,9 @@ export interface ConveyanceBill {
   // voucher_no. See POST /api/conveyance-bills/:id/disburse and .../undisburse.
   is_disbursed?: boolean;
   voucher_no?: string | null;
+  // When it came to Disbursement (its Bill Claim's last approval, else when
+  // the Bill was made) — Admin list only.
+  approved_at?: string | null;
   disbursed_at?: string | null;
   disbursed_by?: number | null;
   disbursed_by_name?: string | null;

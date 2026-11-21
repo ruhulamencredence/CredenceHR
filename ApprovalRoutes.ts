@@ -34,6 +34,7 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
 import { activeCompanyId } from "./companyContext";
+import { loadBranchIndex, placeOf } from "./EmployeeFilters";
 
 interface ApprovalRouteDeps {
   authenticateToken: any;
@@ -1494,12 +1495,24 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     try {
       const requests: any[] = (await queryDB("SELECT * FROM approval_requests WHERE source_type = 'bill_claim' AND status = 'pending'")) || [];
       const out: any[] = [];
+      const branchIdx = await loadBranchIndex(queryDB);
       for (const r of requests) {
         if (!(await isConveyanceDisburserStep(r).catch(() => false))) continue;
         const uc: any = ((await queryDB("SELECT * FROM bill_claims WHERE id = ?", [Number(r.source_id)])) || [])[0];
         if (!uc || uc.status !== "pending") continue;
         const people = await getCurrentStepApprovers(r).catch(() => [] as { user_id: number; user_name: string | null }[]);
-        const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department, e.branch, e.branch_id, e.division FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        // Head Office / Project of the claimant (Branch type), for the filter.
+        const where = placeOf(owner, branchIdx);
+        // When it came to the payer: the Layer before approved it (its last
+        // Approve in the request's trail), and who that was.
+        let lastApprove: any = null;
+        try {
+          const trail = JSON.parse(r.actions_json || "[]");
+          if (Array.isArray(trail)) for (const a of trail) if (a?.action === "approved") lastApprove = a;
+        } catch {
+          lastApprove = null;
+        }
         out.push({
           approval_id: Number(r.id),
           bill_claim_id: Number(uc.id),
@@ -1515,7 +1528,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           approved_amount: uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount),
           waiting_on: people.map((p) => p.user_name).filter(Boolean),
           can_disburse: req.user.role === "superadmin" || people.some((p) => Number(p.user_id) === Number(req.user.id)),
-          since: r.updated_at || r.created_at || null
+          since: r.updated_at || r.created_at || null,
+          arrived_at: lastApprove?.acted_at || r.updated_at || r.created_at || null,
+          arrived_from: lastApprove?.approver_name || null,
+          branch: where.branch || "",
+          place: where.kind === "Project" ? "project" : where.kind === "Head Office" ? "head_office" : "none"
         });
       }
       out.sort((a, b) => a.approval_id - b.approval_id);

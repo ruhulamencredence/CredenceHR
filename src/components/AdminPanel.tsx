@@ -5488,6 +5488,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         {r.action === 'add_item' ? 'Add MPR' : r.action === 'add_job' ? 'New Job' : 'Delete MPR'}
                       </span>
                     </div>
+                    {(r.project_name || (r.payload as any)?.project_name) && (
+                      <p className="text-xs font-semibold text-slate-600 mt-0.5 break-words">Project: {r.project_name || (r.payload as any)?.project_name}</p>
+                    )}
                     <p className="text-sm text-slate-800 mt-1 break-words">{describeJobEditRequest(r)}</p>
                     {jobEditRequestReason(r) && (
                       <p className="text-xs text-slate-500 mt-1 italic break-words">Reason: {jobEditRequestReason(r)}</p>
