@@ -22,7 +22,7 @@ import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
 import { appOn } from "./AppAccess";
-import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
+import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate, ensureRoleAccessTemplates } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
 import { employeeIdConflict } from "./EmployeeLoginId";
@@ -258,6 +258,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), async (_req: any, res) => {
     try {
       await ensureDefaultAccessTemplate(queryDB);
+      await ensureRoleAccessTemplates(queryDB, activeCompanyId());
       const rows: any = await queryDB("SELECT * FROM access_templates");
       res.json((rows as any[]).map(serializeTemplate).sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err: any) {
