@@ -40,8 +40,19 @@ export function registerErp360SsoRoutes(app: Express, deps: Erp360SsoRouteDeps) 
         });
       }
 
-      const empRows = await queryDB("SELECT employee_id FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+      const empRows = await queryDB("SELECT employee_id, email FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
       const employeeId = empRows[0]?.employee_id || null;
+      // The email 360 ERP knows the person by: the login's own email, read
+      // fresh (the sign-in token keeps the one from sign-in time), else the
+      // office email on their Employee record — most people sign in with
+      // their Employee ID, so their login often has no email of its own.
+      const userRows: any[] = (await queryDB("SELECT email FROM users WHERE id = ? LIMIT 1", [req.user.id]).catch(() => [])) || [];
+      const email = String(userRows[0]?.email || "").trim() || String(empRows[0]?.email || "").trim();
+      if (!email) {
+        return res.status(400).json({
+          error: "Your account has no email address, so 360 ERP can't sign you in. Ask HR to add your office email to your Employee record (Employees → Contact), then try again."
+        });
+      }
 
       // The real end user's IP, not this server's own — same reasoning the
       // flow doc gives (a load balancer/proxy sits in front of us the same
@@ -61,7 +72,7 @@ export function registerErp360SsoRoutes(app: Express, deps: Erp360SsoRouteDeps) 
             Accept: "application/json"
           },
           body: JSON.stringify({
-            email: req.user.email || "",
+            email,
             employee_id: employeeId,
             name: req.user.name || "",
             request_ip: requestIp,

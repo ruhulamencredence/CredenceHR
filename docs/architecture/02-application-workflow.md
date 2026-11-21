@@ -1271,3 +1271,7 @@ Attendance Reports module-এর নতুন layer **"Edit attendance (give In 
 - **Pickers:** `GET /api/vehicles/available` এখন সব ব্যবহারযোগ্য গাড়ি দেয়, প্রতিটার বুকিং আর gap সহ; `GET /api/vehicles/driver-picker`-এও প্রত্যেক driver-এর বুকিং। Approve Application, Dashboard-এর Pending Approvals, Book a Ride → Transport (assign, Direct Book, existing request), Vehicle Management → Ride Requests আর Pick-up popup-এ গাড়ি ও driver-এর পাশে "Free at this time" বা "Busy 10:00–13:00 · Rahim"; Busy-টা বাছা যায় না, Free আগে (`src/lib/vehicleSlots.ts`, `driverPicker.ts`)।
 - **Day board:** Vehicle Management → Ride Requests-এ দিনের ছক — প্রতিটা গাড়ি এক সারি, সেদিনের বুকিং (Booked / On the road / Done) আর gap, Maintenance গাড়ি দাগানো; আগের/পরের দিন বা তারিখ বেছে দেখা (`GET /api/vehicles/day-board?date=`, Vehicle Management module; `VehicleDayBoard.tsx`)।
 
+## CredenceHR → 360 ERP: কোন email যায় (২১ নভেম্বর)
+
+Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email পাঠায় (`Erp360SsoRoutes.ts`): login-এর নিজের email, ডাটাবেস থেকে তখনই পড়া (sign-in-এর token-এ থাকা পুরনো email নয়); না থাকলে কর্মীর Employee record-এর অফিসিয়াল email (`all_employees.email`)। বেশিরভাগ কর্মী Employee ID দিয়ে login করেন, তাঁদের login-এ email থাকে না — আগে তাই ফাঁকা email যেত আর 360 ERP বলত "The email field is required."। কোথাও email না থাকলে 360 ERP-কে ডাকা হয় না, বার্তা আসে: HR যেন Employees → Contact-এ অফিসিয়াল email দেন।
+
