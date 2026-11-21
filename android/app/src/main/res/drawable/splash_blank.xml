@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ launch splash: no icon. Android draws the launcher icon in a
+     circle, scaled up and soft, before the app's own sharp logo
+     (index.html #mpr-boot-spinner) and the open animation — so the opening
+     showed the logo twice. With this see-through icon the first moment is the
+     plain orange (windowSplashScreenBackground), then the sharp logo. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+    <size android:width="1dp" android:height="1dp" />
+</shape>

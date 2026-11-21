@@ -22,3 +22,12 @@ least 240px of the screen stays for the popup; turning the phone measures again.
   in-area line, Remarks and Confirm all on screen (screenshot checked). The Android keyboard itself can't be driven here —
   to be checked on a phone after the APK / live update.
 
+## APK opening: one logo, not two
+
+Android 12+ draws its own launch splash with the launcher icon cropped to a circle and scaled up (soft), before the
+app's own sharp logo (`index.html` `#mpr-boot-spinner`) and the open animation — the logo showed twice. `styles.xml`
+(`AppTheme.NoActionBarLaunch`): `windowSplashScreenAnimatedIcon` (and the `android:` one, API 31+) is now
+`drawable/splash_blank.xml`, a see-through 1dp shape, on the same orange `#F47920`. Older Android keeps
+`@drawable/splash` (the same sharp logo). Checked by the Android build workflow (no Android SDK in this container);
+to see on a phone, install the new APK.
+

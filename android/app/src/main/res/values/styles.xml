@@ -38,6 +38,11 @@
              and the in-app open animation (BootIntroAnimation.tsx), so the
              hand-off never flashes white. -->
         <item name="windowSplashScreenBackground">#F47920</item>
+        <!-- No icon on that Android 12+ splash (see drawable/splash_blank.xml):
+             only the orange, then the app's own sharp logo and animation. -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F47920</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/splash_blank</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
     </style>
 </resources>
