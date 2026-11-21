@@ -56,7 +56,8 @@ interface Form {
   lottie_url: string;
 }
 
-const emptyAudience = (): NoticeAudience => ({ departments: [], branches: [], include: [], exclude: [] });
+const emptyAudience = (): NoticeAudience => ({ departments: [], branches: [], places: [], include: [], exclude: [] });
+const PLACE_NAME: Record<'head_office' | 'project', string> = { head_office: 'All Head Office', project: 'All Projects' };
 const blank = (): Form => ({
   title: '',
   content_html: '',
@@ -294,7 +295,8 @@ export const NoticeComposer: React.FC<{
     else {
       const d = new Set(form.audience.departments);
       const b = new Set(form.audience.branches);
-      ids = people.filter((p) => (p.department_id && d.has(p.department_id)) || (p.branch_id && b.has(p.branch_id))).map((p) => p.id);
+      const pl = new Set<string>(form.audience.places || []);
+      ids = people.filter((p) => (p.department_id && d.has(p.department_id)) || (p.branch_id && b.has(p.branch_id)) || (p.place && pl.has(p.place))).map((p) => p.id);
       ids = Array.from(new Set([...ids, ...form.audience.include]));
     }
     return ids.filter((id) => !ex.has(id) && id !== Number(notice?.created_by ?? user.id)).length;
@@ -342,7 +344,7 @@ export const NoticeComposer: React.FC<{
   const problems = (): string | null => {
     if (!form.title.trim()) return 'Give the notice a title.';
     if (contentIsEmpty) return 'Write the notice.';
-    if (form.target_type === 'groups' && !form.audience.departments.length && !form.audience.branches.length && !form.audience.include.length) return 'Pick at least one department, branch or person.';
+    if (form.target_type === 'groups' && !form.audience.departments.length && !form.audience.branches.length && !(form.audience.places || []).length && !form.audience.include.length) return 'Pick at least one department, branch, Head Office / Project or person.';
     if (form.target_type === 'specific' && !form.target_user_ids.length) return 'Pick at least one person.';
     if (form.publish_mode === 'later' && !form.publish_at) return 'Pick when to publish it.';
     if (form.expire_mode === 'at' && !form.expire_at) return 'Pick when to take it down.';
@@ -415,6 +417,7 @@ export const NoticeComposer: React.FC<{
         ? `${form.target_user_ids.length} specific ${form.target_user_ids.length === 1 ? 'person' : 'people'}`
         : [
             ...form.audience.departments.map((id) => opts?.departments.find((d) => d.id === id)?.name).filter(Boolean),
+            ...(form.audience.places || []).map((k) => PLACE_NAME[k]),
             ...form.audience.branches.map((id) => opts?.branches.find((b) => b.id === id)?.name).filter(Boolean),
             ...form.audience.include.map((id) => personById.get(id)?.name).filter(Boolean)
           ].join(', ') || 'No group picked';
@@ -715,6 +718,27 @@ export const NoticeComposer: React.FC<{
                         </div>
                       </div>
                       <div>
+                        <SectionLabel>Head Office / Project</SectionLabel>
+                        {/* Everyone whose Branch is a Head Office / a Project (Admin Panel -> Branches). */}
+                        <div className="flex flex-wrap gap-2">
+                          {(['head_office', 'project'] as const).map((k) => {
+                            const on = (form.audience.places || []).includes(k);
+                            const n = people.filter((p) => p.place === k).length;
+                            return (
+                              <button
+                                key={k}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() => setAud('places', on ? (form.audience.places || []).filter((x) => x !== k) : [...(form.audience.places || []), k])}
+                                className={`px-3.5 py-2 rounded-full text-xs font-semibold border transition-colors ${on ? 'bg-violet-600 text-white border-violet-600' : 'bg-white/80 text-slate-700 border-slate-200 hover:bg-white'}`}
+                              >
+                                {PLACE_NAME[k]} · {n}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div>
                         <SectionLabel>Also these people</SectionLabel>
                         {personPicker('— Type to add a person —', form.audience.include, (id) => setAud('include', [...form.audience.include, id]))}
                       </div>
@@ -729,6 +753,8 @@ export const NoticeComposer: React.FC<{
                   <div className="flex flex-wrap gap-1.5 empty:hidden">
                     {form.target_type === 'groups' &&
                       form.audience.departments.map((id) => chip(opts?.departments.find((d) => d.id === id)?.name || `Department ${id}`, () => setAud('departments', form.audience.departments.filter((x) => x !== id))))}
+                    {form.target_type === 'groups' &&
+                      (form.audience.places || []).map((k) => chip(PLACE_NAME[k], () => setAud('places', (form.audience.places || []).filter((x) => x !== k))))}
                     {form.target_type === 'groups' &&
                       form.audience.branches.map((id) => chip(opts?.branches.find((b) => b.id === id)?.name || `Branch ${id}`, () => setAud('branches', form.audience.branches.filter((x) => x !== id))))}
                     {form.target_type === 'groups' && form.audience.include.map((id) => chip(`+ ${personById.get(id)?.name || id}`, () => setAud('include', form.audience.include.filter((x) => x !== id))))}
