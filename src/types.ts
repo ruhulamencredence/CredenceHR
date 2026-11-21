@@ -1432,6 +1432,8 @@ export interface PendingJobEdit {
   job_id: number | null;
   job_no?: string | null;
   job_name?: string | null;
+  // The Job's Project (GET /api/job-edits); a New Job has it in payload.project_name.
+  project_name?: string | null;
   // Which existing MPR row this request is against — set for 'delete_entry', null
   // for a still-pending 'add_item'/'add_job' (there's no real entries row yet).
   entry_id: number | null;
