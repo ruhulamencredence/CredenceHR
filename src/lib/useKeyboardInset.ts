@@ -45,25 +45,39 @@ export function useKeyboardGap(): { gap: number; open: boolean } {
   useEffect(() => {
     const vv = window.visualViewport;
     const on = () => redraw((n) => n + 1);
+    // Turning the phone: the full height changes, so measure it again.
+    const turned = () => window.setTimeout(() => { base.current = window.innerHeight; redraw((n) => n + 1); }, 400);
     window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', turned);
     vv?.addEventListener('resize', on);
     vv?.addEventListener('scroll', on);
     return () => {
       window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', turned);
       vv?.removeEventListener('resize', on);
       vv?.removeEventListener('scroll', on);
     };
   }, []);
+  // Never take so much that a popup has no room left: at least 240px of the
+  // screen stays for it (a wrong measure must not squeeze it to one line).
+  const room = (g: number) => Math.min(g, Math.max(0, window.innerHeight - 240));
   if (Capacitor.isNativePlatform()) {
     if (!kb) {
-      base.current = window.innerHeight;
+      // The full height with the keyboard closed. The largest seen, so a
+      // WebView that already shrank before the keyboard event arrived can't
+      // lower it (that made the gap count the keyboard twice — the popup
+      // was squeezed to a single line while typing Remarks).
+      base.current = Math.max(base.current, window.innerHeight);
       return { gap: 0, open: false };
     }
-    return { gap: Math.max(0, kb - Math.max(0, base.current - window.innerHeight)), open: kb > 80 };
+    const shrunk = Math.max(0, base.current - window.innerHeight);
+    // The WebView made (most of the) room by itself: nothing more to add.
+    const gap = shrunk > kb * 0.5 ? 0 : Math.max(0, kb - shrunk);
+    return { gap: room(gap), open: kb > 80 };
   }
   const vv = window.visualViewport;
   const gap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
-  return { gap, open: gap > 80 };
+  return { gap: room(gap), open: gap > 80 };
 }
 
 // Brings a just-focused field into the middle of its scroll area once the

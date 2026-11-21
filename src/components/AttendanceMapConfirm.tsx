@@ -366,7 +366,7 @@ export default function AttendanceMapConfirm({
       }}
     >
       <div
-        className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col"
+        className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-clip shadow-2xl flex flex-col"
         style={{ maxHeight: '100%' }}
       >
         <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
