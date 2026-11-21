@@ -1432,6 +1432,8 @@ export interface PendingJobEdit {
   job_id: number | null;
   job_no?: string | null;
   job_name?: string | null;
+  // The Job's Project (GET /api/job-edits); a New Job has it in payload.project_name.
+  project_name?: string | null;
   // Which existing MPR row this request is against — set for 'delete_entry', null
   // for a still-pending 'add_item'/'add_job' (there's no real entries row yet).
   entry_id: number | null;
@@ -1982,6 +1984,8 @@ export type NoticePriority = 'normal' | 'important' | 'urgent';
 export interface NoticeAudience {
   departments: number[];
   branches: number[];
+  // Every Head Office / every Project at once (by each person's Branch type).
+  places?: ('head_office' | 'project')[];
   include: number[];
   exclude: number[];
 }
@@ -2003,6 +2007,7 @@ export interface NoticeAudiencePerson {
   department: string | null;
   department_id: number | null;
   branch_id: number | null;
+  place?: 'head_office' | 'project' | null;
 }
 
 // Personal Alerts (bell icon, web + mobile) — a small per-account inbox.

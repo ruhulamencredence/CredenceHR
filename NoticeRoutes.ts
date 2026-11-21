@@ -35,6 +35,7 @@ import {
 } from "./noticeFiles";
 import { sendMail } from "./mailer";
 import { sendPushToUserIds } from "./PushNotificationService";
+import { loadBranchIndex, norm as normText, placeOf } from "./EmployeeFilters";
 
 type Query = (sql: string, params?: any[]) => Promise<any>;
 
@@ -125,6 +126,10 @@ export async function ensureNoticeV2Schema(dbPool: any): Promise<void> {
 interface AudienceSpec {
   departments: number[];
   branches: number[];
+  // Every Head Office / every Project at once — by the type of each
+  // person's Branch (Admin Panel -> Branches), the same reading as
+  // Employees -> Office / Project (EmployeeFilters.ts placeOf).
+  places: ("head_office" | "project")[];
   include: number[];
   exclude: number[];
 }
@@ -139,7 +144,8 @@ const parseAudience = (v: any): AudienceSpec => {
     }
   }
   o = o || {};
-  return { departments: ids(o.departments), branches: ids(o.branches), include: ids(o.include), exclude: ids(o.exclude) };
+  const places = (Array.isArray(o.places) ? o.places : []).filter((x: any) => x === "head_office" || x === "project");
+  return { departments: ids(o.departments), branches: ids(o.branches), places: Array.from(new Set(places)) as AudienceSpec["places"], include: ids(o.include), exclude: ids(o.exclude) };
 };
 
 // Dhaka wall time "YYYY-MM-DD HH:MM" — publish_at / expire_at are entered in it.
@@ -172,15 +178,27 @@ interface AudienceCtx {
   targetsByNotice: Map<number, Set<number>>;
 }
 async function loadAudienceCtx(queryDB: Query): Promise<AudienceCtx> {
-  const [users, emps, targets] = await Promise.all([
+  const [users, emps, targets, branchIdx] = await Promise.all([
     queryDB("SELECT id, name, email, role, is_blocked, is_onboarding, created_at FROM users"),
     queryDB(
-      "SELECT e.user_id, e.employee_id, e.designation, e.department_id, e.branch_id, e.joining_date, COALESCE(d.name, e.department) AS department_name FROM all_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.user_id IS NOT NULL"
+      "SELECT e.user_id, e.employee_id, e.designation, e.department_id, e.branch_id, e.branch, e.division, e.joining_date, COALESCE(d.name, e.department) AS department_name FROM all_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.user_id IS NOT NULL"
     ),
-    queryDB("SELECT notice_id, user_id FROM notice_targets")
+    queryDB("SELECT notice_id, user_id FROM notice_targets"),
+    loadBranchIndex(queryDB)
   ]);
   const empByUser = new Map<number, any>();
-  for (const e of emps || []) if (!empByUser.has(Number(e.user_id))) empByUser.set(Number(e.user_id), e);
+  for (const e of emps || []) {
+    if (empByUser.has(Number(e.user_id))) continue;
+    // A Branch saved only by its name still counts as that Branch, and each
+    // person is Head Office / Project by their Branch's type.
+    if (!e.branch_id && e.branch) {
+      const b = branchIdx.byName.get(normText(e.branch));
+      if (b) e.branch_id = Number(b.id);
+    }
+    const kind = placeOf(e, branchIdx).kind;
+    e.place = kind === "Project" ? "project" : kind === "Head Office" ? "head_office" : null;
+    empByUser.set(Number(e.user_id), e);
+  }
   const targetsByNotice = new Map<number, Set<number>>();
   for (const t of targets || []) {
     const k = Number(t.notice_id);
@@ -213,9 +231,10 @@ function recipientsOf(n: any, ctx: AudienceCtx): number[] {
   else {
     const deps = new Set(a.departments);
     const brs = new Set(a.branches);
+    const places = new Set<string>(a.places);
     for (const u of ctx.users) {
       const e = ctx.empByUser.get(Number(u.id));
-      if (e && ((e.department_id && deps.has(Number(e.department_id))) || (e.branch_id && brs.has(Number(e.branch_id))))) out.add(Number(u.id));
+      if (e && ((e.department_id && deps.has(Number(e.department_id))) || (e.branch_id && brs.has(Number(e.branch_id))) || (e.place && places.has(e.place)))) out.add(Number(u.id));
     }
     for (const id of a.include) out.add(id);
   }
@@ -352,7 +371,8 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
               designation: e?.designation || null,
               department: e?.department_name || null,
               department_id: e?.department_id ? Number(e.department_id) : null,
-              branch_id: e?.branch_id ? Number(e.branch_id) : null
+              branch_id: e?.branch_id ? Number(e.branch_id) : null,
+              place: e?.place || null
             };
           })
           .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
@@ -586,8 +606,8 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
     if (!safeHtml.replace(/<[^>]*>/g, "").trim() && !/<img/i.test(safeHtml)) return void res.status(400).json({ error: "Notice content is required" });
     const target_type = b.target_type === "specific" ? "specific" : b.target_type === "groups" ? "groups" : "all";
     const audience = parseAudience(b.audience);
-    if (target_type === "groups" && !audience.departments.length && !audience.branches.length && !audience.include.length) {
-      return void res.status(400).json({ error: "Pick at least one department, branch or person." });
+    if (target_type === "groups" && !audience.departments.length && !audience.branches.length && !audience.places.length && !audience.include.length) {
+      return void res.status(400).json({ error: "Pick at least one department, branch, Head Office / Project or person." });
     }
     const userIds = ids(b.target_user_ids);
     if (target_type === "specific" && !userIds.length) return void res.status(400).json({ error: "Pick at least one person." });

@@ -474,7 +474,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
     registerHeaderSearch({
       value: search,
       onChange: setSearch,
-      placeholder: 'Search by name or Employee ID…'
+      placeholder: 'Search by name, ID or branch / project…'
     });
     return () => unregisterHeaderSearch();
   }, [isActive, search]);
@@ -539,7 +539,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
   const matching = useMemo(() => {
     return employees.filter((e) => {
       if (companyFilter && e.company_code !== companyFilter) return false;
-      if (searchQ && !e.name.toLowerCase().includes(searchQ) && !(e.employee_id || '').toLowerCase().includes(searchQ)) return false;
+      // Name, Employee ID, or the Branch / Project (and Division / Unit) they
+      // work at — typing a project's name lists its people.
+      if (searchQ && ![e.name, e.employee_id, e.branch, e.division, e.unit].some((v) => String(v || '').toLowerCase().includes(searchQ))) return false;
       if (designationFilter && e.designation !== designationFilter) return false;
       return true;
     });
@@ -694,7 +696,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name or Employee ID…"
+                placeholder="Search by name, Employee ID or branch / project…"
                 className="w-full pl-10 sm:pl-9 pr-9 py-3 sm:py-2.5 bg-white sm:bg-slate-50 border-0 sm:border sm:border-slate-200 rounded-full sm:rounded-xl text-sm text-slate-900 shadow-[0_8px_24px_-10px_rgba(15,23,42,0.25)] sm:shadow-none focus:ring-2 focus:ring-[color:var(--g-accent)] sm:focus:ring-blue-600 focus:outline-none"
               />
               {search && (
@@ -1000,6 +1002,12 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                         </a>
                       )}
                       {!emp.email && !emp.phone && <p className="text-slate-400">No contact info on file</p>}
+                      {/* Where they work — the Branch / Project the search also looks at. */}
+                      {emp.branch && (
+                        <p className="flex items-center gap-1.5 truncate" title={officeLocationOf(emp) || emp.branch}>
+                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> <span className="truncate">{emp.branch}</span>
+                        </p>
+                      )}
                     </div>
                   </button>
                 ))}

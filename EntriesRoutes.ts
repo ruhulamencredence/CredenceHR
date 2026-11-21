@@ -2080,7 +2080,13 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       r.requested_by, ru.name AS requested_by_name,
       r.reviewed_by, rv.name AS reviewed_by_name, r.reviewed_at, r.review_note, r.created_at,
       m.mpr_no AS entry_mpr_no, e.item_name AS entry_item_name,
-      e.requisitioned_qty AS entry_requisitioned_qty, e.delivery_date AS entry_delivery_date
+      e.requisitioned_qty AS entry_requisitioned_qty, e.delivery_date AS entry_delivery_date,
+      -- The Project: the MPR row's own, else the Job's (from its rows). A New
+      -- Job request has none yet — its payload carries project_name.
+      COALESCE(
+        (SELECT pp.project_name FROM projects pp WHERE pp.id = e.project_id),
+        (SELECT pj.project_name FROM entries ej JOIN projects pj ON pj.id = ej.project_id WHERE ej.job_id = r.job_id ORDER BY ej.id LIMIT 1)
+      ) AS project_name
     FROM job_edit_requests r
     LEFT JOIN jobs j ON r.job_id = j.id
     JOIN users ru ON r.requested_by = ru.id
