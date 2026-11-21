@@ -86,9 +86,12 @@ interface FilterOptions {
   departments: string[];
   designations: string[];
   branches: string[];
+  // Branch name -> its type (Admin Panel -> Branches).
+  branch_place?: Record<string, 'head_office' | 'project'>;
   disbursers: { id: number; name: string }[];
   categories: string[];
 }
+const PLACE_LABEL: Record<string, string> = { head_office: 'Head Office', project: 'Project' };
 interface BillSummary {
   bills: number;
   total: number;
@@ -201,6 +204,9 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     // When the Layer before approved it (came to the payer), and who.
     arrived_at?: string | null;
     arrived_from?: string | null;
+    // The claimant's Branch and whether it is Head Office or a Project.
+    branch?: string;
+    place?: 'head_office' | 'project' | 'none';
   }
   const [awaiting, setAwaiting] = useState<AwaitingClaim[]>([]);
   const [awaitVoucher, setAwaitVoucher] = useState<Record<number, string>>({});
@@ -253,6 +259,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   const [department, setDepartment] = useState('');
   const [designation, setDesignation] = useState('');
   const [branch, setBranch] = useState('');
+  // Head Office / Project — the type of the employee's Branch.
+  const [place, setPlace] = useState<'' | 'head_office' | 'project'>('');
   const [billPeriod, setBillPeriod] = useState<PeriodKey>('any');
   const [billRange, setBillRange] = useState({ from: '', to: '' });
   // Approved date: when a bill came to Disbursement from the Layer before
@@ -296,6 +304,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (department) p.set('department', department);
     if (designation) p.set('designation', designation);
     if (branch) p.set('branch', branch);
+    if (place) p.set('place', place);
     if (billDates.from) p.set('from', billDates.from);
     if (billDates.to) p.set('to', billDates.to);
     if (apprDates.from) p.set('afrom', apprDates.from);
@@ -308,7 +317,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (minAmt !== '') p.set('min', minAmt);
     if (maxAmt !== '') p.set('max', maxAmt);
     return p.toString();
-  }, [userFilter, statusFilter, q, department, designation, branch, billDates.from, billDates.to, apprDates.from, apprDates.to, paidDates.from, paidDates.to, disbursedBy, category, source, minAmt, maxAmt]);
+  }, [userFilter, statusFilter, q, department, designation, branch, place, billDates.from, billDates.to, apprDates.from, apprDates.to, paidDates.from, paidDates.to, disbursedBy, category, source, minAmt, maxAmt]);
 
   const fetchBills = async () => {
     const req = ++listReq.current;
@@ -373,6 +382,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     ...(department ? [{ label: `Department: ${department}`, clear: () => setDepartment('') }] : []),
     ...(userFilter ? [{ label: `Employee: ${userName || userFilter}`, clear: () => setUserFilter('') }] : []),
     ...(designation ? [{ label: `Designation: ${designation}`, clear: () => setDesignation('') }] : []),
+    ...(place ? [{ label: PLACE_LABEL[place], clear: () => setPlace('') }] : []),
     ...(branch ? [{ label: `Branch: ${branch}`, clear: () => setBranch('') }] : []),
     ...(billPeriod !== 'any' && (billDates.from || billDates.to) ? [{ label: `Bill date: ${periodText(billPeriod, billDates)}`, clear: () => setBillPeriod('any') }] : []),
     ...(apprPeriod !== 'any' && (apprDates.from || apprDates.to) ? [{ label: `Approved: ${periodText(apprPeriod, apprDates)}`, clear: () => setApprPeriod('any') }] : []),
@@ -389,6 +399,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     setUserFilter('');
     setDesignation('');
     setBranch('');
+    setPlace('');
     setBillPeriod('any');
     setApprPeriod('any');
     setPaidPeriod('any');
@@ -407,6 +418,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (userFilter && String(c.user_id) !== userFilter) return false;
     if (department && c.department !== department) return false;
     if (designation && c.designation !== designation) return false;
+    if (place && c.place !== place) return false;
     if (branch) {
       const u: any = plainUsers.find((x) => x.id === c.user_id);
       if (!u || u.branch !== branch) return false;
@@ -753,10 +765,30 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   </SearchSelect>
                 </div>
                 <div className="min-w-0">
+                  <span className={LBL}>Head Office / Project</span>
+                  <select
+                    value={place}
+                    onChange={(e) => {
+                      const v = e.target.value as '' | 'head_office' | 'project';
+                      setPlace(v);
+                      // A Branch of the other kind is let go.
+                      if (v && branch && options.branch_place?.[branch] && options.branch_place[branch] !== v) setBranch('');
+                    }}
+                    aria-label="Head Office / Project"
+                    className={INPUT}
+                  >
+                    <option value="">Both</option>
+                    <option value="head_office">Head Office</option>
+                    <option value="project">Project</option>
+                  </select>
+                </div>
+                <div className="min-w-0">
                   <span className={LBL}>Branch</span>
                   <SearchSelect value={branch} onChange={(e) => setBranch(e.target.value)} aria-label="Branch" className={INPUT}>
-                    <option value="">All branches</option>
-                    {options.branches.map((d) => <option key={d} value={d}>{d}</option>)}
+                    <option value="">{place ? `All ${PLACE_LABEL[place]} branches` : 'All branches'}</option>
+                    {options.branches
+                      .filter((d) => !place || !options.branch_place?.[d] || options.branch_place[d] === place)
+                      .map((d) => <option key={d} value={d}>{d}</option>)}
                   </SearchSelect>
                 </div>
                 <PeriodField id="disb-bill" label="Bill date" value={billPeriod} onChange={setBillPeriod} range={billRange} onRange={setBillRange} />

@@ -242,6 +242,20 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
         const TOTAL = "(SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id)";
         const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+        // The Branch by name — from Branches when only its id was saved.
+        const BRANCH = `(SELECT COALESCE(NULLIF(TRIM(e.branch), ''), (SELECT bb.branch_name FROM branches bb WHERE bb.id = e.branch_id)) FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+        // Head Office / Project: the type of the employee's Branch (Admin Panel
+        // -> Branches; by id, else by name), else their Division text — the
+        // same reading as Employees -> Office / Project (EmployeeFilters.ts).
+        const PLACE = `(SELECT CASE
+            WHEN br.branch_type = 'project_site' THEN 'project'
+            WHEN br.id IS NOT NULL THEN 'head_office'
+            WHEN LOWER(COALESCE(pe.division, '')) REGEXP 'project|site' THEN 'project'
+            WHEN LOWER(COALESCE(pe.division, '')) REGEXP 'head|corporate|office' THEN 'head_office'
+            ELSE 'none' END
+          FROM all_employees pe
+          LEFT JOIN branches br ON br.id = pe.branch_id OR (pe.branch_id IS NULL AND LOWER(TRIM(br.branch_name)) = LOWER(TRIM(pe.branch)))
+          WHERE pe.user_id = b.user_id ORDER BY pe.id, (br.id = pe.branch_id) DESC LIMIT 1)`;
         // When the Bill came to Disbursement: the last approval of its Bill
         // Claim(s) (the Layer before the one who pays it), else when the Bill
         // was made (Check In/Out and typed-in Bills). afrom/ato filter on it.
@@ -280,9 +294,13 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           where.push("b.disbursed_by = ?");
           params.push(Number(req.query.disbursed_by));
         }
+        if (qs("place") === "head_office" || qs("place") === "project") {
+          where.push(`${PLACE} = ?`);
+          params.push(qs("place"));
+        }
         for (const col of ["department", "designation", "branch"]) {
           if (qs(col)) {
-            where.push(`${EMP(col)} = ?`);
+            where.push(`${col === "branch" ? BRANCH : EMP(col)} = ?`);
             params.push(qs(col));
           }
         }
@@ -329,7 +347,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           queryDB(
             `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
                 ${EMP("employee_id")} AS employee_code, ${EMP("designation")} AS designation,
-                ${EMP("department")} AS department, ${EMP("branch")} AS branch,
+                ${EMP("department")} AS department, ${BRANCH} AS branch,
                 (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
                 ${TOTAL} AS total_amount, ${APPROVED} AS approved_at
              ${FROM}
@@ -400,8 +418,9 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
   app.get("/api/conveyance-bills/filter-options", authenticateToken, requireAdmin, requireAnyModule(["bill_claim", "disbursement"]), async (_req: any, res) => {
     try {
       const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+      const BRANCH = `(SELECT COALESCE(NULLIF(TRIM(e.branch), ''), (SELECT bb.branch_name FROM branches bb WHERE bb.id = e.branch_id)) FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
       const [emp, disb, cats, plain]: any[] = await Promise.all([
-        queryDB(`SELECT DISTINCT ${EMP("department")} AS department, ${EMP("designation")} AS designation, ${EMP("branch")} AS branch FROM conveyance_bills b`),
+        queryDB(`SELECT DISTINCT ${EMP("department")} AS department, ${EMP("designation")} AS designation, ${BRANCH} AS branch FROM conveyance_bills b`),
         queryDB("SELECT DISTINCT u.id, u.name FROM conveyance_bills b JOIN users u ON u.id = b.disbursed_by ORDER BY u.name"),
         queryDB(
           `SELECT DISTINCT COALESCE(ci.category_name, bc.category) AS category
@@ -412,11 +431,16 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         ),
         queryDB("SELECT COUNT(*) AS n FROM conveyance_bill_items WHERE source <> 'bill_claim'")
       ]);
+      // Each Branch's type, so the Branch list can follow Head Office / Project.
+      const brs: any[] = (await queryDB("SELECT branch_name, branch_type FROM branches").catch(() => [])) || [];
+      const branchPlace: Record<string, string> = {};
+      for (const b of brs) if (b.branch_name) branchPlace[String(b.branch_name).trim()] = b.branch_type === "project_site" ? "project" : "head_office";
       const uniq = (xs: any[]) => [...new Set(xs.map((x) => (x == null ? "" : String(x).trim())).filter(Boolean))].sort((a, b) => a.localeCompare(b));
       res.json({
         departments: uniq(emp.map((r: any) => r.department)),
         designations: uniq(emp.map((r: any) => r.designation)),
         branches: uniq(emp.map((r: any) => r.branch)),
+        branch_place: branchPlace,
         disbursers: disb.map((r: any) => ({ id: Number(r.id), name: r.name })),
         categories: uniq([...(Number(plain[0]?.n) > 0 ? ["Conveyance"] : []), ...cats.map((r: any) => r.category)])
       });
