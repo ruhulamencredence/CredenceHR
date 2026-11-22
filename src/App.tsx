@@ -107,7 +107,6 @@ const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendanc
 const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
-import bootIconUrl from './assets/boot/app-icon-336.webp';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
@@ -118,6 +117,7 @@ import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
+import { ThemedInfinity } from './components/ThemedInfinity';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
@@ -1063,21 +1063,20 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
   // reload fires, so the manual-reload gesture ends the same smooth way
   // every other loading state in the app does.
   const pullToRefreshFullscreenLoader = triggering && (
-    // The same orange screen with the app icon that the app opens on
-    // (index.html's #mpr-boot-spinner), so the reload runs straight into
-    // the normal start-up instead of flashing a grey placeholder page.
+    // The app behind it blurred and veiled in the theme's own background, the
+    // Infinity loader (painted in the theme colour) in the middle.
     <div
-      className="fixed inset-0 z-[110]"
+      className="fixed inset-0 z-[110] flex items-center justify-center"
       role="progressbar"
       aria-label="Reloading CredenceHR"
-      style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
+      style={{
+        background: 'color-mix(in srgb, var(--g-bg, #f1f5f9) 72%, transparent)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        animation: 'pullToRefreshFadeIn 220ms ease-out both'
+      }}
     >
-      <img
-        src={bootIconUrl}
-        alt=""
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-        style={{ width: 'clamp(95.2px, 31.111vw, 140px)', height: 'clamp(95.2px, 31.111vw, 140px)' }}
-      />
+      <ThemedInfinity size={115} />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
