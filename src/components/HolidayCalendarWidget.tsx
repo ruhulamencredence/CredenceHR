@@ -270,22 +270,22 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     return m ? markStyle(m).cell : '';
   };
 
-  // The viewer's own mark as a word, everyone else's Leave as faces.
+  // The viewer's own mark as a colour dot, everyone else's Leave as faces.
   const renderMarks = (dateStr: string, isToday: boolean) => {
     const all = marksFor(dateStr);
     if (all.length === 0) return null;
     const mine = all.find((m) => m.user_id === me);
     const marks = all.filter((m) => m.user_id !== me);
     const mineStyle = mine ? markStyle(mine) : null;
+    // Colour only — the legend under the calendar says what each colour is, so
+    // the day's own square carries no word (the name stays for screen readers).
     const word = mineStyle && (
       <span
-        className={`inline-flex items-center gap-1 font-bold uppercase tracking-wide ${large ? 'text-[10px]' : 'text-[7px]'} ${
-          (isToday && large) || (mineStyle.solid && !isToday) ? 'text-white' : mineStyle.text
-        }`}
-      >
-        {large && <span className={`w-1.5 h-1.5 rounded-full ${mineStyle.solid && !isToday ? 'bg-white' : mineStyle.dot}`} />}
-        {mineStyle.label}
-      </span>
+        role="img"
+        aria-label={mineStyle.detail}
+        title={mineStyle.detail}
+        className={`inline-block rounded-full ${large ? 'w-2 h-2' : 'w-1.5 h-1.5'} ${mineStyle.solid && !isToday ? 'bg-white' : mineStyle.dot}`}
+      />
     );
     if (marks.length === 0) return word;
     const max = large ? (word ? 2 : 3) : word ? 1 : 2;
