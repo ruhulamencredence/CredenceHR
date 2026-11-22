@@ -117,7 +117,7 @@ import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
-import { ThemedInfinity } from './components/ThemedInfinity';
+import { InfinityLoader } from './components/InfinityLoader';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
@@ -1070,13 +1070,13 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
       role="progressbar"
       aria-label="Reloading CredenceHR"
       style={{
-        background: 'color-mix(in srgb, var(--g-bg, #f1f5f9) 72%, transparent)',
+        background: 'color-mix(in srgb, var(--g-bg, #f1f5f9) 80%, transparent)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
         animation: 'pullToRefreshFadeIn 220ms ease-out both'
       }}
     >
-      <ThemedInfinity size={115} />
+      <InfinityLoader />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
