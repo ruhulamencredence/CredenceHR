@@ -1794,3 +1794,10 @@ html[data-lite-glass] .backdrop-blur-\[20px\] {
 html[data-lite-glass] .backdrop-blur-\[8px\] {
   --tw-backdrop-blur: blur(calc(8px * var(--glass-k)));
 }
+
+/* While the app's open animation (BootIntroAnimation.tsx) covers the screen,
+   the app under it draws nothing, so its moving parts don't take the frames
+   the animation needs. Removed as the animation starts fading out. */
+html[data-boot-intro] body * { visibility: hidden; }
+html[data-boot-intro] .boot-intro,
+html[data-boot-intro] .boot-intro * { visibility: visible; }
