@@ -13,6 +13,7 @@ import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
 import { installChunkReload, retryImport } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
 import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
+import { markBootIntroPlaying } from './lib/bootIntro';
 
 // The whole app (App.tsx: sidebar, chat, calls…) is its own download. A
 // visitor who isn't signed in on the website gets only the sign-in screen
@@ -176,6 +177,8 @@ const bootIntroDue = () => {
       // storage unavailable — play it
     }
   }
+  // Hide the app under it from the very first render (lib/bootIntro.ts).
+  if (bootIntroDecided) markBootIntroPlaying();
   return bootIntroDecided;
 };
 function Root() {

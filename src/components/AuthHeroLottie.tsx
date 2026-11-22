@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Lottie, useLottieJson } from './LazyLottie';
 // Fetched by itself when the login screen shows (not with the app's code),
 // and kept on the device after the first time (lib/authHeroAsset.ts).
@@ -11,15 +11,39 @@ import { loadAuthHero } from '../lib/authHeroAsset';
 // Purely decorative, so a brief blank box while this chunk loads (see the
 // Suspense fallback in AuthScreen.tsx) is not a problem.
 // onReady: the animation is drawn — AuthScreen then hides its still picture.
+// The outer span keeps the className (absolute inset-0 …) from AuthScreen.
 const AuthHeroLottie: React.FC<{ className?: string; onReady?: () => void }> = ({ className, onReady }) => {
   const authHeroAnimation = useLottieJson(loadAuthHero);
-  // Two frames after the data arrives the player has drawn its first frame.
+  const box = useRef<HTMLSpanElement>(null);
+  // Ready once the player has put its picture in the page (the player itself
+  // loads lazily, after the data), then two frames to draw it. Not sooner:
+  // AuthScreen hides its still on this, and there must be no blank moment.
   useEffect(() => {
-    if (!authHeroAnimation || !onReady) return;
-    let id = requestAnimationFrame(() => (id = requestAnimationFrame(() => onReady())));
-    return () => cancelAnimationFrame(id);
+    const el = box.current;
+    if (!authHeroAnimation || !onReady || !el) return;
+    let id = 0;
+    const done = () => (id = requestAnimationFrame(() => (id = requestAnimationFrame(() => onReady()))));
+    const drawn = () => !!el.querySelector('svg g');
+    if (drawn()) {
+      done();
+      return () => cancelAnimationFrame(id);
+    }
+    const watch = new MutationObserver(() => {
+      if (!drawn()) return;
+      watch.disconnect();
+      done();
+    });
+    watch.observe(el, { childList: true, subtree: true });
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(id);
+    };
   }, [authHeroAnimation, onReady]);
-  return authHeroAnimation ? <Lottie src={authHeroAnimation} autoplay loop className={className} /> : <span className={className} />;
+  return (
+    <span ref={box} className={className}>
+      {authHeroAnimation && <Lottie src={authHeroAnimation} autoplay loop className="block w-full h-full" />}
+    </span>
+  );
 };
 
 export default AuthHeroLottie;

@@ -2,6 +2,7 @@ import { signInDeviceFields } from '../lib/deviceKind';
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { BOOT_INTRO_DONE_EVENT, bootIntroPlaying } from '../lib/bootIntro';
 import credenceLogo from '../assets/credence-logo.png';
 import googlePlayIcon from '../assets/google-play-icon.png';
 // The illustration's first frame as a small picture (34 KB): shown at once;
@@ -81,8 +82,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       // no matchMedia
     }
     if (Capacitor.isNativePlatform()) {
-      setHeroAnimate(true);
-      return;
+      // The app's open animation is still on top: start after it, so the two
+      // don't fight over frames (lib/bootIntro.ts). The still shows meanwhile.
+      if (!bootIntroPlaying()) {
+        setHeroAnimate(true);
+        return;
+      }
+      const start = () => setHeroAnimate(true);
+      window.addEventListener(BOOT_INTRO_DONE_EVENT, start, { once: true });
+      return () => window.removeEventListener(BOOT_INTRO_DONE_EVENT, start);
     }
     const start = () => setHeroAnimate(true);
     const evs = ['pointerdown', 'pointermove', 'keydown', 'focusin', 'touchstart', 'scroll'] as const;
