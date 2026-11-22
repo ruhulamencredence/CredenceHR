@@ -1801,13 +1801,3 @@ html[data-lite-glass] .backdrop-blur-\[8px\] {
 html[data-boot-intro] body * { visibility: hidden; }
 html[data-boot-intro] .boot-intro,
 html[data-boot-intro] .boot-intro * { visibility: visible; }
-
-/* The Infinity loader (components/InfinityLoader.tsx; index.html has a copy
-   for the start screen): a faint track and one bright stretch running round
-   it, in the theme colour. pathLength 100 keeps the loop seamless. */
-.chr-infinity { display: block; color: var(--g-accent, #ff6700); }
-.chr-infinity path { fill: none; stroke: currentColor; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
-.chr-infinity-track { opacity: 0.16; }
-.chr-infinity-run { stroke-dasharray: 26 74; animation: chrInfinityRun 1.3s linear infinite; }
-@keyframes chrInfinityRun { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
-@media (prefers-reduced-motion: reduce) { .chr-infinity-run { animation-duration: 3s; } }

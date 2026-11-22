@@ -117,7 +117,7 @@ import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
-import { InfinityLoader } from './components/InfinityLoader';
+import { ThemedInfinity } from './components/ThemedInfinity';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
@@ -1076,7 +1076,7 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
         animation: 'pullToRefreshFadeIn 220ms ease-out both'
       }}
     >
-      <InfinityLoader />
+      <ThemedInfinity size={115} />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }

@@ -12,7 +12,7 @@ import { installCompanyHeader } from './lib/company.ts';
 import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
 import { installChunkReload, retryImport } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
-import { BootVeil } from './components/InfinityLoader.tsx';
+import { BootVeil } from './components/BootVeil.tsx';
 import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
 import { markBootIntroPlaying } from './lib/bootIntro';
 
