@@ -769,10 +769,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     },
     // SIM & ID Card: the company SIM given to you (limit, bills) and asking HR for a SIM / ID card.
     { key: 'g_sim_self', label: 'SIM & ID Card', icon: Smartphone, entries: pick('myMobileSim', 'myRequisitions') },
-    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
   const managementDashboardItem = itemByKey.get('management_dashboard') || null;
+  // Credence Mail and Chat sit on their own at the top of Self Service,
+  // not inside a group.
+  const selfTopItems: NavItem[] = ['credenceMail', 'chat'].map((k) => itemByKey.get(k)).filter((i): i is NavItem => !!i);
   const adminTopItems: NavItem[] = [adminDashboardItem, managementDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
   const adminGroups = makeGroups([
     {
@@ -820,6 +823,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Which group an item lives in (search shows it beside the name).
   const groupLabelOf = new Map<string, string>();
   for (const g of allGroups) for (const e of g.entries) if (isItem(e)) groupLabelOf.set(e.key, g.label);
+  for (const i of selfTopItems) groupLabelOf.set(i.key, 'Self Service');
   for (const i of adminTopItems) groupLabelOf.set(i.key, 'Admin Panel');
 
   // The group holding the page on screen opens by itself, so its highlight
@@ -869,7 +873,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // input there, same as every other label in that mode.
   const [sidebarSearch, setSidebarSearch] = useState('');
   const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
-  const allSearchableItems: NavItem[] = [dashboardSearchItem, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
+  const allSearchableItems: NavItem[] = [dashboardSearchItem, ...selfTopItems, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
   const searchQuery = sidebarSearch.trim().toLowerCase();
   const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
   // The search box's results (the full column's dropdown and the minimized
@@ -1312,7 +1316,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {editingFavs ? (
                 <div className="rounded-xl bg-black/15 p-1.5 max-h-64 overflow-y-auto">
                   <p className="px-2 pb-1 text-[10.5px] text-white/55">Pick up to 4 ({favItems.length}/4)</p>
-                  {[...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))]
+                  {[...selfTopItems, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))]
                     .filter((i, idx, arr) => arr.findIndex((x) => x.key === i.key) === idx)
                     .map((i) => {
                       const on = favItems.some((f) => f.key === i.key);
@@ -1348,13 +1352,18 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             </>
           )}
 
-          {selfGroups.length > 0 &&
+          {(selfGroups.length > 0 || selfTopItems.length > 0) &&
             (collapsed ? (
               <div className="h-px mx-2 my-2 bg-white/15" />
             ) : (
               sectionHeading('self', 'Self Service')
             ))}
-          {(collapsed || !hiddenSections.includes('self')) && selfGroups.map(renderMenuGroup)}
+          {(collapsed || !hiddenSections.includes('self')) && (
+            <>
+              {selfTopItems.map(renderItem)}
+              {selfGroups.map(renderMenuGroup)}
+            </>
+          )}
 
           {(adminTopItems.length > 0 || adminGroups.length > 0) && (
             <>
