@@ -354,6 +354,10 @@ export default function AttendanceMapConfirm({
   // full-screen modal on every Android version.
   return createPortal(
     <div
+      // Keeps itself above the keyboard (paddingBottom below) — so the app-wide
+      // html.kb-open rule (index.css) must not lift it a second time: both at
+      // once squeezed the popup to a sliver at the top while typing Remarks.
+      data-kb-self
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',

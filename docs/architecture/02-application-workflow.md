@@ -1285,3 +1285,15 @@ Attendance Reports module-এর নতুন layer **"Edit attendance (give In 
 
 Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email পাঠায় (`Erp360SsoRoutes.ts`): login-এর নিজের email, ডাটাবেস থেকে তখনই পড়া (sign-in-এর token-এ থাকা পুরনো email নয়); না থাকলে কর্মীর Employee record-এর অফিসিয়াল email (`all_employees.email`)। বেশিরভাগ কর্মী Employee ID দিয়ে login করেন, তাঁদের login-এ email থাকে না — আগে তাই ফাঁকা email যেত আর 360 ERP বলত "The email field is required."। কোথাও email না থাকলে 360 ERP-কে ডাকা হয় না, বার্তা আসে: HR যেন Employees → Contact-এ অফিসিয়াল email দেন।
 
+
+## System → Data cleanup: ভুল রেকর্ড মোছা ও ফেরত আনা (২২ নভেম্বর)
+
+শুধু system owner (`/system` দিয়ে login, `users.is_platform_admin = 1`) Admin Panel → Companies → **Data cleanup** ট্যাব দেখেন। পাঁচ ধরন: Leave applications, Bill Claims, Check In/Out (movement `claims`), Remote Attendance, Employee change history। শুধু active company-র রেকর্ড আসে।
+
+1. Filter (Employee, Department, Head Office / Project, তারিখ, Status, ধরন অনুযায়ী আরও) → এক এক করে বাছাই বা **Select all that match** (৫,০০০ পর্যন্ত)। Excel-এ তালিকা নামানো যায়।
+2. **Remove** → liquid-glass কার্ডে কারণ লিখে `DELETE n` টাইপ → ৫০টা করে মোছে, বার দেখায়, Stop করা যায়।
+3. প্রতিটা রেকর্ড এক transaction-এ, সাথে যা ঝুলে ছিল: approval request ও স্বাক্ষর; Leave-এ Pending/Approved হলে দিন balance-এ ফেরত; Bill Claim-এ লাইন, receipt, history, reference ও Pending Bill-এর লাইন (খালি Bill-ও); Check In/Out-এ Pending Bill-এর লাইন; Remote Attendance-এ (পুরো দিন) সেই দিনের Correct Attendance ও admin edit, বা (Out only) শুধু Out-এর ঘর খালি ও check-out approval।
+4. **Lock (মোছা যায় না):** বেতন Processed / Paid মাসের Approved leave ও attendance; Disbursed Bill-এর Bill Claim / Check In/Out; কোনো Bill Claim-এ ব্যবহৃত Check In/Out (আগে সেই Bill Claim মুছতে হবে)। Server আবার যাচাই করে।
+5. **Removal log & put back:** প্রতিটা মোছা একটা batch (কে, কখন, কারণ, filter)। ৩০ দিন পর্যন্ত মুছে যাওয়া সারিগুলো (`data_cleanup_trash`) থেকে **Put back** — একই id-তে ফেরত, leave balance আবার কাটে। এর মধ্যে মাসের বেতন হয়ে গেলে, বা একই দিনে নতুন রেকর্ড / নতুন Out থাকলে সেটা ফেরত আসে না (কারণ দেখায়)। Disbursed হয়ে যাওয়া Bill-এ লাইন আর যোগ হয় না।
+
+(`DataCleanupRoutes.ts`, `src/components/DataCleanup.tsx`)
