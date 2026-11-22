@@ -1801,3 +1801,16 @@ html[data-lite-glass] .backdrop-blur-\[8px\] {
 html[data-boot-intro] body * { visibility: hidden; }
 html[data-boot-intro] .boot-intro,
 html[data-boot-intro] .boot-intro * { visibility: visible; }
+
+/* The Infinity loader (components/ThemedInfinity.tsx, index.html): its seven
+   stroke colours, darkest to lightest, made from the theme accent. */
+.chr-il {
+  --il-a: var(--g-accent, #ff6700);
+  --il-1: color-mix(in srgb, var(--il-a), #000 55%);
+  --il-2: color-mix(in srgb, var(--il-a), #000 35%);
+  --il-3: color-mix(in srgb, var(--il-a), #000 15%);
+  --il-4: var(--il-a);
+  --il-5: color-mix(in srgb, var(--il-a), #fff 30%);
+  --il-6: color-mix(in srgb, var(--il-a), #fff 55%);
+  --il-7: color-mix(in srgb, var(--il-a), #fff 75%);
+}
