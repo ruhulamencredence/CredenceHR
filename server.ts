@@ -115,6 +115,7 @@ import { payrollAmountGuard } from "./payrollAmountMask";
 import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
+import { registerDataCleanupRoutes } from "./DataCleanupRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
 import { recordClaimHistory } from "./BillClaimHistory";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
@@ -3818,6 +3819,7 @@ async function startServer() {
 
   // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
   registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka });
+  registerDataCleanupRoutes(app, { authenticateToken, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined, adjustLeaveTypeBalance, closedPayMonthFor });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template

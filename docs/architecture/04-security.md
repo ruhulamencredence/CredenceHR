@@ -291,7 +291,10 @@
 | সবাইকে বের করা | `JWT_SECRET` বদলান (সবাই লগআউট) |
 | কে কী করেছে | উপরের ৮ নম্বর অংশের লগ |
 | কাউকে ডাটা দেখা বন্ধ | Module Access থেকে অনুমতি তুলুন (সঙ্গে সঙ্গে কার্যকর) |
+| ভুল / test রেকর্ড মোছা | System → Data cleanup (শুধু system owner; কারণ + `DELETE n`, log, ৩০ দিন Put back) |
 
 - **Notification পরীক্ষা (`POST /api/web-push/test`):** login করা account শুধু নিজের phone/browser-এ test message পাঠাতে পারে (অন্যের নয়)। উত্তরে push service-এর (Apple/Google) host ও status code আসে, কোনো key বা token নয়। Profile → Notifications থেকে চালানো হয়।
 
 ১৮ নভেম্বর — **Remote Attendance, "Any project":** Users → Module Access-এ check-in-এর জন্য "Any project" থাকলে সাধারণ User এখন কোম্পানির যেকোনো project-এ check in / out করতে পারেন (আগে শুধু যে project-এ তাঁর Budget / MPR access ছিল)। যাঁকে সীমিত রাখতে হবে তাঁর জন্য "Only these projects" বা "Their Branch" — সেগুলো আগের মতোই কড়া। প্রতিটা check-in তখনও project-এর location ও radius-এর ভেতরে হতে হয় (server যাচাই করে), আর Remote Attendance নিজেই আলাদা অনুমতি (`can_use_attendance`)। (`AttendanceRoutes.ts` `getAllowedProjectIds`)
+
+২২ নভেম্বর — **System Data cleanup:** Leave, Bill Claim, Check In/Out, Remote Attendance ও Employee change history মোছার API (`/api/system/cleanup/*`) শুধু `users.is_platform_admin = 1` account-এর জন্য — কোম্পানির Superadmin বা কোনো module অনুমতিতে খোলে না; UI ট্যাবও শুধু তাঁকে দেখায়। তালিকা company-scope মেনে চলে, মোছার আগে server প্রতিটা id আবার সেই তালিকায় ও lock আছে কিনা যাচাই করে। প্রতিটা মোছার কারণ, কে, কখন `data_cleanup_batches`-এ থাকে; মুছে যাওয়া সারি (receipt/স্বাক্ষরসহ) ৩০ দিন `data_cleanup_trash`-এ থাকে, তারপর নিজে থেকে মুছে যায়। বেতন হয়ে যাওয়া মাস ও Disbursed Bill-এর রেকর্ড lock। (`DataCleanupRoutes.ts`)
