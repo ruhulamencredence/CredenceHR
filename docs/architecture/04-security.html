@@ -758,9 +758,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>কাউকে ডাটা দেখা বন্ধ</td>
 <td>Module Access থেকে অনুমতি তুলুন (সঙ্গে সঙ্গে কার্যকর)</td>
 </tr>
+<tr>
+<td>ভুল / test রেকর্ড মোছা</td>
+<td>System → Data cleanup (শুধু system owner; কারণ + <code>DELETE n</code>, log, ৩০ দিন Put back)</td>
+</tr>
 </tbody>
 </table>
 <ul>
 <li><strong>Notification পরীক্ষা (<code>POST /api/web-push/test</code>):</strong> login করা account শুধু নিজের phone/browser-এ test message পাঠাতে পারে (অন্যের নয়)। উত্তরে push service-এর (Apple/Google) host ও status code আসে, কোনো key বা token নয়। Profile → Notifications থেকে চালানো হয়।</li>
 </ul>
-<p>১৮ নভেম্বর — <strong>Remote Attendance, "Any project":</strong> Users → Module Access-এ check-in-এর জন্য "Any project" থাকলে সাধারণ User এখন কোম্পানির যেকোনো project-এ check in / out করতে পারেন (আগে শুধু যে project-এ তাঁর Budget / MPR access ছিল)। যাঁকে সীমিত রাখতে হবে তাঁর জন্য "Only these projects" বা "Their Branch" — সেগুলো আগের মতোই কড়া। প্রতিটা check-in তখনও project-এর location ও radius-এর ভেতরে হতে হয় (server যাচাই করে), আর Remote Attendance নিজেই আলাদা অনুমতি (<code>can_use_attendance</code>)। (<code>AttendanceRoutes.ts</code> <code>getAllowedProjectIds</code>)</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+<p>১৮ নভেম্বর — <strong>Remote Attendance, "Any project":</strong> Users → Module Access-এ check-in-এর জন্য "Any project" থাকলে সাধারণ User এখন কোম্পানির যেকোনো project-এ check in / out করতে পারেন (আগে শুধু যে project-এ তাঁর Budget / MPR access ছিল)। যাঁকে সীমিত রাখতে হবে তাঁর জন্য "Only these projects" বা "Their Branch" — সেগুলো আগের মতোই কড়া। প্রতিটা check-in তখনও project-এর location ও radius-এর ভেতরে হতে হয় (server যাচাই করে), আর Remote Attendance নিজেই আলাদা অনুমতি (<code>can_use_attendance</code>)। (<code>AttendanceRoutes.ts</code> <code>getAllowedProjectIds</code>)</p>
+<p>২২ নভেম্বর — <strong>System Data cleanup:</strong> Leave, Bill Claim, Check In/Out, Remote Attendance ও Employee change history মোছার API (<code>/api/system/cleanup/*</code>) শুধু <code>users.is_platform_admin = 1</code> account-এর জন্য — কোম্পানির Superadmin বা কোনো module অনুমতিতে খোলে না; UI ট্যাবও শুধু তাঁকে দেখায়। তালিকা company-scope মেনে চলে, মোছার আগে server প্রতিটা id আবার সেই তালিকায় ও lock আছে কিনা যাচাই করে। প্রতিটা মোছার কারণ, কে, কখন <code>data_cleanup_batches</code>-এ থাকে; মুছে যাওয়া সারি (receipt/স্বাক্ষরসহ) ৩০ দিন <code>data_cleanup_trash</code>-এ থাকে, তারপর নিজে থেকে মুছে যায়। বেতন হয়ে যাওয়া মাস ও Disbursed Bill-এর রেকর্ড lock। (<code>DataCleanupRoutes.ts</code>)</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

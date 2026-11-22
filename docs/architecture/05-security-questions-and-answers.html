@@ -611,6 +611,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>❌</td>
 </tr>
 <tr>
+<td>ভুল রেকর্ড মুছতে কি server-এ ঢুকতে হয়? কে মুছতে পারে?</td>
+<td>না। System → Data cleanup — শুধু system owner (<code>is_platform_admin</code>)। কারণ ও <code>DELETE n</code> টাইপ বাধ্যতামূলক, প্রতিটা মোছা log-এ থাকে, ৩০ দিন Put back করা যায়; বেতন হয়ে যাওয়া মাস ও Disbursed Bill-এর রেকর্ড মোছা যায় না। <code>04-security.md</code> §১২।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>সম্মতি (compliance) সার্টিফিকেট (ISO 27001, SOC 2)?</td>
 <td>নেই।</td>
 <td>❌</td>
