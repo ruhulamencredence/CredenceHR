@@ -106,15 +106,16 @@ function cellText(v: any, type: FieldType): string {
 
 // Leave History can also come as HR's "Leave Summary Report" sheet: one block
 // per employee ("Employee Id" in column A, the value in E), then a "Leave Year
-// | Leave Type | Is Paid Leave | Leave From | Leave To | Leave Availed |
-// Remarks" table where Leave Type is written only on its first row, and
+// | Leave Type | Is Paid Leave | Leave From (or From Date) | Leave To (or To Date) |
+// Leave Availed | Remarks" table where Leave Type is written only on its first row, and
 // "Total Leave Availed" lines in between. This turns such a sheet into the
 // plain rows the Leave History import reads (every leave Approved). Returns
 // null when the sheet isn't laid out that way.
 function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
   const cell = (line: any[], c: number) => String(line?.[c] ?? '').trim();
   const isBlockSheet =
-    grid.some((l) => norm(cell(l, 0)) === 'employeeid') && grid.some((l) => norm(cell(l, 6)) === 'leavefrom' && norm(cell(l, 2)) === 'leavetype');
+    grid.some((l) => norm(cell(l, 0)) === 'employeeid') &&
+    grid.some((l) => ['leavefrom', 'fromdate'].includes(norm(cell(l, 6))) && norm(cell(l, 2)) === 'leavetype');
   if (!isBlockSheet) return null;
   const out: Record<string, any>[] = [];
   let employeeId = '';
