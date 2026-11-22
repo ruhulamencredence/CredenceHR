@@ -33,11 +33,13 @@
     <script>
       try { var m = localStorage.getItem('mpr_color_mode'); if (m === 'dark' || m === 'glass' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.setAttribute('data-dark', ''); if (m === 'glass') document.documentElement.setAttribute('data-glass', ''); if (m === 'lightglass') document.documentElement.setAttribute('data-lglass', ''); } catch (e) {}
     </script>
-    <!-- A manual pull-down reload (usePullToRefresh.ts) leaves a flag: this one start shows the theme's own pale page and a small Infinity loader instead of the orange logo splash. -->
+    <!-- On the website every load, and in the Android / iOS app a manual pull-down reload (usePullToRefresh.ts leaves a flag), shows the theme's own pale page and a small Infinity loader instead of the orange logo splash. The app's normal start keeps the logo and the launch animation. -->
     <script>
       try {
-        if (sessionStorage.getItem('mpr_pull_reload')) {
-          sessionStorage.removeItem('mpr_pull_reload');
+        var prC = window.Capacitor, prApp = !!(prC && prC.isNativePlatform && prC.isNativePlatform());
+        var prPull = sessionStorage.getItem('mpr_pull_reload');
+        sessionStorage.removeItem('mpr_pull_reload');
+        if (prPull || !prApp) {
           var prT = localStorage.getItem('mpr_bg_theme_v2') || localStorage.getItem('mpr_bg_theme') || 'orange';
           var prDark = document.documentElement.hasAttribute('data-dark');
           var prA = prT === 'mono' ? '#18181b' : prT === 'apple-glow' || prT === 'default' ? '#7F00FF' : '#ff6700';
