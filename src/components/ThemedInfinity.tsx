@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import infinityLoaderSvg from '../assets/infinity-loader.svg?raw';
 
 // The Infinity loader — the app's own loader (assets/infinity-loader.svg, the
@@ -28,12 +28,31 @@ const MARKUP = (() => {
 interface Props {
   size?: number;
   className?: string;
+  // Carry on from where the start screen's loader (index.html) already is, so
+  // swapping one for the other doesn't restart the animation.
+  continueFromStart?: boolean;
 }
 
-export const ThemedInfinity: React.FC<Props> = ({ size = 115, className }) => (
-  <span
-    className={className}
-    style={{ display: 'inline-block', width: size, height: size, lineHeight: 0 }}
-    dangerouslySetInnerHTML={{ __html: MARKUP }}
-  />
-);
+// One round of the animation, in seconds.
+export const INFINITY_CYCLE = 1.667;
+
+export const ThemedInfinity: React.FC<Props> = ({ size = 115, className, continueFromStart }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!continueFromStart) return;
+    const svg = ref.current?.querySelector('svg') as (SVGSVGElement & { setCurrentTime?: (t: number) => void }) | null | undefined;
+    try {
+      svg?.setCurrentTime?.((performance.now() / 1000) % INFINITY_CYCLE);
+    } catch {
+      // not supported — it just starts from the beginning
+    }
+  }, [continueFromStart]);
+  return (
+    <span
+      ref={ref}
+      className={className}
+      style={{ display: 'inline-block', width: size, height: size, lineHeight: 0 }}
+      dangerouslySetInnerHTML={{ __html: MARKUP }}
+    />
+  );
+};
