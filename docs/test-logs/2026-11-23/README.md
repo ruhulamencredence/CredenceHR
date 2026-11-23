@@ -73,3 +73,19 @@ list. The old code's `|| 1` would have turned a 0 back into 1 — removed.
   late-days list agree; a waived day drops out; back to 1 = the old rule).
 - `late-extreme-zero-ui.txt` — 10/10; screenshots `late-policy-zero.png`,
   `late-zero-employee-card.png`.
+
+# Chat: photo viewer
+
+Tapping a photo in Chat used to `window.open` its blob — in the Android /
+iPhone app that showed nothing useful and there was no way to the next photo.
+Now chat/ChatImageViewer.tsx opens in the app with every photo of the
+conversation (or of the Photos grid in the profile): swipe (phone), arrows /
+← → (computer) or the thumbnail strip to move; "2 / 3", sender and time;
+double-tap / pinch to zoom and drag while zoomed; Download (Share sheet on
+the apps); ✕, Esc or the phone's Back closes. Photos are fetched once and
+shared between the bubbles and the viewer.
+- `chat-photo-viewer-ui.txt` — 18/18 (phone swipe both ways, thumbnail jump,
+  computer arrows and keys, no new tab, no page errors); screenshots
+  `chat-viewer-phone.png`, `chat-viewer-desktop.png`.
+- Found while testing: a quick swipe that ended before React re-rendered was
+  lost — the swipe distance is now kept in a ref.

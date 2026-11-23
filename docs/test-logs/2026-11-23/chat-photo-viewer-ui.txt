@@ -1,0 +1,19 @@
+PASS phone: three photos in the conversation
+PASS tap a photo: the viewer opens in the app
+PASS starts at the tapped photo: 2 / 3
+PASS shows the green (2nd) photo
+PASS swipe left: next photo (3 / 3, blue)
+PASS swipe right twice: back to the first (1 / 3, red)
+PASS thumbnail: jumps to that photo
+PASS Download button
+PASS ✕ closes the viewer, the chat stays
+PASS nothing opened in a new tab
+PASS phone: no page errors []
+PASS computer: opens at 1 / 3
+PASS no "previous" on the first photo
+PASS next arrow: 2 / 3
+PASS → key: 3 / 3
+PASS ← key: 2 / 3
+PASS Esc closes
+PASS computer: no new tab, no page errors []
+ALL PASS
