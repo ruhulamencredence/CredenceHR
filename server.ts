@@ -3486,7 +3486,7 @@ async function startServer() {
   registerFingerprintRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
 
   // Projects routes live in ProjectRoutes.ts.
-  registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer });
+  registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer });
 
   // Remote Attendance (check-in/check-out, status, mine, corrections,
   // Admin list, and reports) now lives in AttendanceRoutes.ts — registered

@@ -281,3 +281,7 @@
 
 **প্রশ্ন: তৈরি থাকা "Accounts" বা "Audit" template দিলে কি তাঁরা বেতন বদলাতে পারবেন?**
 না। দুটোতেই Payroll-এর শুধু "View only" (`payroll_view`) — সব পাতা দেখা যায়, কিছু বদলানো যায় না (`requirePayroll`: বদলাতে `read` লাগে, যেটা এ দুই template-এ নেই)। Accounts পান "Accounts Pay" (টাকা দেওয়া), Audit পান "Audit (after payment)" ও Activity Log। HR template-এ উল্টো — বানানো ও চালানো আছে, কিন্তু HR Director review / Accounts Pay / Audit নেই। মনে রাখবেন: Module Access-এ Payroll হাতে চালু করলে "Payroll" আর "View only" দুটোই নিজে থেকে টিক হয় — Accounts / Audit-কে হাতে দিলে "Payroll" তুলে দিতে হয়; template ব্যবহার করলে এটা ঠিক থাকে।
+
+**প্রশ্ন: প্রজেক্টের Branch Type বদলানোর অনুমতি কার?**
+উত্তর: যাঁর Projects (Edit/Add) ও Branches দুটো সেকশনই আছে। Branches না থাকলে UI-তে ঘর দেখা যায় না, আর সরাসরি API-তে `branch_type` / `branch_link` পাঠালেও 403 আসে। ধরন বদলের আগে কত জন কর্মীর ক্যালেন্ডার বদলাবে তা দেখিয়ে নিশ্চিতকরণ চাওয়া হয়।
+

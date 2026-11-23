@@ -1596,6 +1596,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  // Projects -> Edit: the Branch this Project belongs to and its type
+  // (Head Office / Project Side). Only sent when changed (docs/branch-project-rules.md).
+  const [projectBranchType, setProjectBranchType] = useState<'head_office' | 'project_site'>('project_site');
+  const [projectBranchLink, setProjectBranchLink] = useState<string>('none');
+  const [projectBranchFilter, setProjectBranchFilter] = useState<'all' | 'head_office' | 'project_site' | 'none'>('all');
   // Site location pin for the project being added/edited (free OpenStreetMap/
   // Leaflet picker — see LocationMapPicker). Null lat/lng = no pin set yet.
   const [projectLocation, setProjectLocation] = useState<{ lat: number | null; lng: number | null; label: string | null; radius: number | null }>({
@@ -2129,6 +2134,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const url = editingProject ? `/api/projects/${editingProject.id}` : '/api/projects';
       const method = editingProject ? 'PUT' : 'POST';
 
+      // The Branch part goes along only when it was changed, and only for an
+      // account that has the Branches section (the server refuses otherwise).
+      const branchBody: Record<string, string> = {};
+      if (editingProject && canSee('branches')) {
+        const wasLink = editingProject.linked_branch_id ? String(editingProject.linked_branch_id) : 'none';
+        const wasType = editingProject.linked_branch_type || 'project_site';
+        const linkChanged = projectBranchLink !== wasLink;
+        const typeChanged = projectBranchLink !== 'none' && projectBranchType !== wasType;
+        if (linkChanged) branchBody.branch_link = projectBranchLink;
+        if (linkChanged || typeChanged) {
+          if (projectBranchLink !== 'none') branchBody.branch_type = projectBranchType;
+        }
+        // A type change moves people to the other Weekend / Holiday calendar: say how many.
+        const target = projectBranchLink === 'none' ? null : branches.find((b) => String(b.id) === projectBranchLink) || (editingProject.linked_branch_id ? { id: editingProject.linked_branch_id, branch_name: editingProject.linked_branch_name, branch_type: wasType } : null);
+        if (target && branchBody.branch_type && target.branch_type !== projectBranchType) {
+          let people = 0;
+          try {
+            const r = await fetch(apiUrl(`/api/projects/${editingProject.id}/branch-impact?branch_id=${target.id}`), { headers: { Authorization: `Bearer ${token}` } });
+            if (r.ok) people = Number((await r.json()).employees || 0);
+          } catch {
+            // count unavailable — the question is still asked
+          }
+          const label = (t: string) => (t === 'project_site' ? 'Project Side' : 'Head Office');
+          const ok = await confirmDialog(
+            `Change Branch "${target.branch_name}" from ${label(String(target.branch_type))} to ${label(projectBranchType)}? ${people} employee${people === 1 ? '' : 's'} at this Branch will follow the ${label(projectBranchType)} Weekend / Holiday calendar from now on. Payroll already generated is not recalculated.`,
+            { title: 'Change Branch type', confirmLabel: 'Change type' }
+          );
+          if (!ok) return;
+        }
+      }
+
       const res = await fetch(apiUrl(url), {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -2138,7 +2174,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           location_lng: projectLocation.lng,
           location_label: projectLocation.label,
           location_radius: projectLocation.radius,
-          entry_scope: projectEntryScope
+          entry_scope: projectEntryScope,
+          ...branchBody
         })
       });
       const data = await res.json();
@@ -3486,11 +3523,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the full list) instead of always mounting every single row at once.
   const LIST_PAGE_SIZE = 30;
 
+  const projectBranchCounts = React.useMemo(
+    () => ({
+      all: projects.length,
+      head_office: projects.filter((p) => p.linked_branch_type === 'head_office').length,
+      project_site: projects.filter((p) => p.linked_branch_type === 'project_site').length,
+      none: projects.filter((p) => !p.linked_branch_id).length
+    }),
+    [projects]
+  );
   const visibleProjects = React.useMemo(() => {
     const q = projectListSearch.trim().toLowerCase();
-    const filtered = q ? projects.filter((p) => p.project_name.toLowerCase().includes(q)) : projects;
+    const byBranch =
+      projectBranchFilter === 'all'
+        ? projects
+        : projects.filter((p) => (projectBranchFilter === 'none' ? !p.linked_branch_id : p.linked_branch_type === projectBranchFilter));
+    const filtered = q ? byBranch.filter((p) => p.project_name.toLowerCase().includes(q)) : byBranch;
     return showAllProjects || q ? filtered : filtered.slice(0, LIST_PAGE_SIZE);
-  }, [projects, projectListSearch, showAllProjects]);
+  }, [projects, projectListSearch, showAllProjects, projectBranchFilter]);
 
   const visibleBranches = React.useMemo(() => {
     const q = branchListSearch.trim().toLowerCase();
@@ -5634,6 +5684,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">Optional — mark this project's site on a free map.</p>
                 </div>
+                {editingProject && canSee('branches') && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch</label>
+                      <SearchSelect
+                        value={projectBranchLink}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setProjectBranchLink(v);
+                          // Picking an existing Branch shows its own type.
+                          const b = branches.find((x) => String(x.id) === v);
+                          if (b) setProjectBranchType(b.branch_type === 'head_office' ? 'head_office' : 'project_site');
+                        }}
+                        className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="none">{editingProject.linked_branch_id ? 'Not linked (release this Branch)' : '— No Branch —'}</option>
+                        {!editingProject.linked_branch_id && <option value="auto">New Branch with this Project's name (or the one already called that)</option>}
+                        {branches.map((b) => {
+                          const takenBy = b.project_id && b.project_id !== editingProject.id ? b.linked_project_name || 'another Project' : null;
+                          return (
+                            <option key={b.id} value={String(b.id)} disabled={!!takenBy}>
+                              {b.branch_name} · {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              {takenBy ? ` — linked to ${takenBy}` : b.project_id && b.project_id === editingProject.id ? ' — this Project' : ' — free'}
+                            </option>
+                          );
+                        })}
+                      </SearchSelect>
+                      <p className="text-[11px] text-slate-400 mt-1">The Branch this Project belongs to. A Branch can hold one Project; a Branch already linked elsewhere is greyed out.</p>
+                    </div>
+                    {projectBranchLink !== 'none' && (
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch Type</label>
+                        <div className="flex gap-2">
+                          {(['head_office', 'project_site'] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setProjectBranchType(t)}
+                              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                                projectBranchType === t ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t === 'head_office' ? 'Head Office' : 'Project Side'}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Which Weekend / Holiday calendar the people of this Branch follow (Admin Panel &rarr; Holidays). Changing it asks to confirm first.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
                 <ProjectEntrySharing
                   token={token}
                   value={projectEntryScope}
@@ -5685,6 +5788,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     placeholder="Search projects..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filter by Branch type">
+                  {([
+                    ['all', 'All'],
+                    ['head_office', 'Head Office'],
+                    ['project_site', 'Project Side'],
+                    ['none', 'No Branch']
+                  ] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={projectBranchFilter === k}
+                      onClick={() => setProjectBranchFilter(k)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        projectBranchFilter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} ({projectBranchCounts[k]})
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="divide-y divide-slate-200 max-h-[32rem] overflow-y-auto">
@@ -5745,6 +5869,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             setEditingProject(p);
                             setNewProjectName(p.project_name);
                             setProjectEntryScope((p.entry_scope as EntryScope) || 'team');
+                            setProjectBranchLink(p.linked_branch_id ? String(p.linked_branch_id) : 'none');
+                            setProjectBranchType(p.linked_branch_type === 'head_office' ? 'head_office' : 'project_site');
                             setProjectLocation({
                               lat: p.location_lat != null ? Number(p.location_lat) : null,
                               lng: p.location_lng != null ? Number(p.location_lng) : null,
@@ -5810,7 +5936,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                    Holiday Calendar Group
+                    Branch Type (Holiday Calendar)
                   </label>
                   <div className="flex gap-2">
                     <button
@@ -5833,7 +5959,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      Project Site
+                      Project Side
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -5869,7 +5995,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         const takenBy = p.linked_branch_id && p.linked_branch_id !== editingBranch?.id ? p.linked_branch_name : null;
                         return (
                           <option key={p.id} value={String(p.id)} disabled={!!takenBy}>
-                            {p.project_name}{takenBy ? ` — linked to ${takenBy}` : ''}
+                            {p.project_name}
+                            {takenBy ? ` — linked to ${takenBy}${p.linked_branch_type ? ` (${p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'})` : ''}` : p.linked_branch_id && p.linked_branch_id === editingBranch?.id ? ' — this Branch' : ' — free'}
                           </option>
                         );
                       })}
@@ -5990,7 +6117,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                   : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}
                             >
-                              {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                              {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                             </span>
                           </span>
                           {b.linked_project_name && (

@@ -1297,3 +1297,12 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 5. **Removal log & put back:** প্রতিটা মোছা একটা batch (কে, কখন, কারণ, filter)। ৩০ দিন পর্যন্ত মুছে যাওয়া সারিগুলো (`data_cleanup_trash`) থেকে **Put back** — একই id-তে ফেরত, leave balance আবার কাটে। এর মধ্যে মাসের বেতন হয়ে গেলে, বা একই দিনে নতুন রেকর্ড / নতুন Out থাকলে সেটা ফেরত আসে না (কারণ দেখায়)। Disbursed হয়ে যাওয়া Bill-এ লাইন আর যোগ হয় না।
 
 (`DataCleanupRoutes.ts`, `src/components/DataCleanup.tsx`)
+
+## প্রজেক্ট ও Branch: কোনটা Head Office, কোনটা Project Side (২৩ নভেম্বর)
+
+একটা প্রজেক্ট একটা Branch-এর সাথে যুক্ত (`branches.project_id`); Branch-এর ধরন (`head_office` / `project_site`) ঠিক করে ওই Branch-এর কর্মীরা কোন Weekend / Holiday ক্যালেন্ডার মানবেন। আগে ধরন শুধু Branch ফর্মে বাছা যেত। এখন Admin Panel → Projects → প্রজেক্ট এডিটে (`AdminPanel.tsx`) **Branch** (বাছাই: না যুক্ত / প্রজেক্টের নামে নতুন বা একই নামের Branch / কোনো ফাঁকা Branch) আর **Branch Type** (Head Office / Project Side) বাছা যায়; তালিকার ওপরে All / Head Office / Project Side / No Branch ফিল্টার। সব তালিকায় ধরনের নাম একই ("Project Side")।
+- সেভে `PUT /api/projects/:id`-এ ঐচ্ছিক `branch_type` ও `branch_link` (`keep` / `auto` / `none` / Branch id) যায়, শুধু যখন বদলেছে। না পাঠালে সেভ আগের মতোই (`ProjectRoutes.ts`, `planBranchChange`)। আগে সবটা যাচাই, তারপর লেখা; ত্রুটিতে কিছুই বদলায় না।
+- নতুন Branch বানাতে ধরন স্পষ্ট বলতে হয় (API-র ডিফল্ট `head_office`, কলামের ডিফল্ট `project_site`, দুটো মেলে না)। অন্য প্রজেক্টে যুক্ত Branch বাছলে ত্রুটি। নতুন যুক্ত Branch-এর নিজের পিন থাকলে আর প্রজেক্টের না থাকলে পিন Branch-এরটা থাকে।
+- ধরন বদলালে `GET /api/projects/:id/branch-impact` থেকে কত জন কর্মী ওই Branch-এ আছে এনে `confirmDialog` জিজ্ঞেস করে; তৈরি payroll নিজে নতুন করে হিসাব হয় না।
+- নাম ও লোকেশন মেলানো, Branch নাম বদলালে কপি ছড়ানো, Branch ফর্মের লিঙ্ক নিয়ম আগের মতোই। সব নিয়মের তালিকা: `docs/branch-project-rules.md`।
+

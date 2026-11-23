@@ -15,10 +15,13 @@ export interface RegisterProjectRoutesDeps {
   requireAdmin: any;
   requireModule: any;
   requireModuleLayer: any;
+  // Yes/no form of the module gate — the Branch part of a Project save needs
+  // the Branches section as well (docs/branch-project-rules.md).
+  hasModuleLayer?: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
 }
 
 export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesDeps) {
-  const { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer } = deps;
+  const { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer } = deps;
 
   // Each Project carries the Branch it is linked to (Admin Panel -> Branches,
   // branches.project_id) and that Branch's type, so a list can tell a Head
@@ -128,7 +131,103 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
     }
   });
 
-  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
+  // Branch part of a Project save (docs/branch-project-rules.md). Optional
+  // body fields: branch_type ("head_office" | "project_site") and branch_link
+  // ("keep" | "auto" | "none" | a Branch id). Left out, the Project save does
+  // exactly what it always did. Checked in full BEFORE anything is written, so
+  // a refusal changes nothing. Needs the Branches section as well as the
+  // Project's Edit/Add. The Branch rules themselves are the Branch screen's:
+  // one Branch per Project, a Branch never linked to two Projects, the type is
+  // the Holiday Calendar group, and a new Branch always gets its type said out
+  // loud (the API default and the column default disagree).
+  type BranchPlan =
+    | { error: string; status: number }
+    | {
+        action: "none" | "keep" | "link" | "create" | "unlink";
+        target: any | null; // the Branch the Project ends up with (null when none / to be created)
+        unlinkId: number | null; // a different Branch it was linked to, to release
+        type: "head_office" | "project_site" | null; // the type to set (only when it changes / is new)
+        pin: { lat: number | null; lng: number | null; label: string | null; radius: number | null } | null; // a newly linked Branch's own pin, when the Project has none
+      };
+  async function planBranchChange(req: any, projectId: number, projectName: string, location: { lat: number | null }): Promise<BranchPlan> {
+    const rawType = req.body?.branch_type;
+    const rawLink = req.body?.branch_link;
+    const hasType = rawType !== undefined && rawType !== null && rawType !== "";
+    const hasLink = rawLink !== undefined && rawLink !== null && rawLink !== "";
+    if (!hasType && !hasLink) return { action: "none", target: null, unlinkId: null, type: null, pin: null };
+    if (!hasModuleLayer || !(await hasModuleLayer(req.user, "branches", "read"))) {
+      return { error: "Changing a Project's Branch or its type needs the Branches section. Ask your Superadmin to grant it.", status: 403 };
+    }
+    if (hasType && rawType !== "head_office" && rawType !== "project_site") return { error: "Branch type must be Head Office or Project Side.", status: 400 };
+    const type: "head_office" | "project_site" | null = hasType ? rawType : null;
+    const branches: any[] = await queryDB("SELECT * FROM branches");
+    const projects: any[] = await queryDB("SELECT id, project_name FROM projects");
+    const linked = branches.find((b) => Number(b.project_id) === projectId) || null;
+    const projectOf = (b: any) => projects.find((p) => Number(p.id) === Number(b.project_id))?.project_name || "another Project";
+    const same = (a: any, b: any) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+    let mode: "keep" | "auto" | "none" | number = "keep";
+    if (hasLink) {
+      mode = rawLink === "keep" ? "keep" : rawLink === "auto" ? "auto" : rawLink === "none" ? "none" : Number(rawLink);
+      if (typeof mode === "number" && (!Number.isInteger(mode) || mode <= 0)) return { error: "Invalid Branch selected.", status: 400 };
+    } else if (!linked) {
+      mode = "auto"; // a type for a Project with no Branch yet: its own Branch
+    }
+    if (mode === "auto" && linked) mode = "keep";
+
+    if (mode === "none") {
+      return { action: linked ? "unlink" : "none", target: null, unlinkId: linked ? Number(linked.id) : null, type: null, pin: null };
+    }
+    let target: any | null = linked;
+    let action: "keep" | "link" | "create" = "keep";
+    let unlinkId: number | null = null;
+    if (typeof mode === "number") {
+      const b = branches.find((x) => Number(x.id) === mode);
+      if (!b) return { error: "Selected Branch not found.", status: 400 };
+      if (b.project_id && Number(b.project_id) !== projectId) return { error: `That Branch is already linked to Project "${projectOf(b)}".`, status: 400 };
+      if (!linked || Number(linked.id) !== mode) {
+        target = b;
+        action = "link";
+        unlinkId = linked ? Number(linked.id) : null;
+      }
+    } else if (mode === "auto") {
+      const named = branches.find((b) => same(b.branch_name, projectName));
+      if (named && named.project_id && Number(named.project_id) !== projectId) return { error: `Branch "${named.branch_name}" is already linked to Project "${projectOf(named)}".`, status: 400 };
+      if (named) {
+        target = named;
+        action = "link";
+      } else {
+        if (!type) return { error: "Pick Head Office or Project Side for the new Branch.", status: 400 };
+        return { action: "create", target: null, unlinkId: null, type, pin: null };
+      }
+    }
+    // A Branch with its own pin keeps it when it is linked to a Project that has none.
+    let pin: { lat: number | null; lng: number | null; label: string | null; radius: number | null } | null = null;
+    if (action === "link" && target && target.location_lat != null && location.lat == null) {
+      pin = { lat: Number(target.location_lat), lng: Number(target.location_lng), label: target.location_label ?? null, radius: target.location_radius != null ? Number(target.location_radius) : null };
+    }
+    const typeChanges = !!type && !!target && target.branch_type !== type;
+    return { action: action === "keep" && !typeChanges ? "keep" : action, target, unlinkId, type: typeChanges ? type : null, pin };
+  }
+
+  // How many people follow a Branch's calendar: the number the "change type"
+  // confirmation shows.
+  app.get("/api/projects/:id/branch-impact", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req: any, res) => {
+    try {
+      if (!hasModuleLayer || !(await hasModuleLayer(req.user, "branches", "read"))) return res.status(403).json({ error: "This needs the Branches section." });
+      // The Branch the Project has now, or the one about to be picked (?branch_id=).
+      const wanted = Number(req.query.branch_id) || 0;
+      const all: any[] = await queryDB("SELECT * FROM branches");
+      const b = wanted ? all.find((x: any) => Number(x.id) === wanted) : all.find((x: any) => Number(x.project_id) === Number(req.params.id));
+      if (!b) return res.json({ branch_id: null, branch_name: null, branch_type: null, employees: 0 });
+      const rows: any[] = await queryDB("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id = ?", [b.id]);
+      res.json({ branch_id: Number(b.id), branch_name: b.branch_name, branch_type: b.branch_type, employees: Number(rows[0]?.n || 0) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const { project_name } = req.body;
@@ -137,10 +236,27 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
       if ("error" in location) return res.status(400).json({ error: location.error });
 
       const before: any[] = await queryDB("SELECT * FROM projects WHERE id = ?", [id]);
+      // The Branch part (if asked) is checked first: a refusal writes nothing.
+      const branchPlan = await planBranchChange(req, Number(id), project_name.trim(), location);
+      if ("error" in branchPlan) return res.status(branchPlan.status).json({ error: branchPlan.error });
+      const pinned = branchPlan.pin && location.lat == null ? branchPlan.pin : location;
       await queryDB(
         "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
-        [project_name.trim(), location.lat, location.lng, location.label, location.radius, id]
+        [project_name.trim(), pinned.lat, pinned.lng, pinned.label, pinned.radius, id]
       );
+      // Link / create / unlink the Branch and set its type, before the sync
+      // below (which keeps the linked Branch's name and pin in step).
+      if (branchPlan.unlinkId) await queryDB("UPDATE branches SET project_id = NULL WHERE id = ?", [branchPlan.unlinkId]);
+      if (branchPlan.action === "link" && branchPlan.target) await queryDB("UPDATE branches SET project_id = ? WHERE id = ?", [id, branchPlan.target.id]);
+      if (branchPlan.action === "create" && branchPlan.type) {
+        const made = await queryDB(
+          "INSERT INTO branches (branch_name, branch_type, location_lat, location_lng, location_label, location_radius, created_by, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [project_name.trim(), branchPlan.type, pinned.lat, pinned.lng, pinned.label, pinned.radius, req.user.id, id]
+        );
+        void made;
+      } else if (branchPlan.type && branchPlan.target) {
+        await queryDB("UPDATE branches SET branch_type = ? WHERE id = ?", [branchPlan.type, branchPlan.target.id]);
+      }
       // Budget rows name their Project in text (budget_items.project_name,
       // matched by name): a new name reaches them too, so the Project's old
       // Budgets keep working.
@@ -168,7 +284,7 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
         const sync = (name: string) =>
           queryDB(
             "UPDATE branches SET branch_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
-            [name, location.lat, location.lng, location.label, location.radius, linked.id]
+            [name, pinned.lat, pinned.lng, pinned.label, pinned.radius, linked.id]
           );
         try {
           await sync(nameFollows ? project_name.trim() : linked.branch_name);

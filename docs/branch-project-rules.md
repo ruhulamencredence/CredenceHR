@@ -1,5 +1,7 @@
 # প্রজেক্ট ও Branch: যে নিয়মগুলো ভাঙা যাবে না
 
+> **অবস্থা (২৩ নভেম্বর):** বানানো হয়েছে। প্রজেক্ট **এডিটে** Branch ও Branch Type (নতুন প্রজেক্ট যোগ করার সময় নয়, তৈরির পর এডিটে), প্রজেক্ট তালিকায় ফিল্টার ট্যাব, Branch ফর্মের প্রজেক্ট বাছাইয়ে "linked to … (ধরন)" / "free" / "this Branch", সব জায়গায় "Project Side" নাম। API: `PUT /api/projects/:id` (ঐচ্ছিক `branch_type`, `branch_link`), `GET /api/projects/:id/branch-impact`।
+
 > কেন এই ফাইল: Projects পাতায় Branch-এর ধরন (Head Office / Project Side) বাছার সুবিধা আর Branch ফর্মে প্রজেক্ট বাছাই সহজ করার কাজ আসছে (মকআপ অনুমোদনের পর)। সেই কাজ করতে গিয়ে নিচের চলতি নিয়মগুলো যেন নষ্ট না হয়, তাই কোড পড়ে এগুলো লিখে রাখা হলো। কাজটা করার আগে ও পরে এই তালিকা মিলিয়ে দেখতে হবে।
 > ভিত্তি: `DepartmentsAndBranches.ts`, `ProjectRoutes.ts`, `src/components/AdminPanel.tsx`।
 
@@ -42,7 +44,7 @@
 ## ৬. নতুন কাজটা যেভাবে বানাতে হবে
 1. `PUT /api/projects/:id` নতুন ঐচ্ছিক `branch_type` ও `branch_link` নেবে। **না পাঠালে আজকের আচরণ হুবহু একই** (`keep`)।
 2. যুক্তি নতুন করে লেখা চলবে না: `planProjectLink` / `applyProjectLink` ও ধরন-বদলের অংশ এক সাধারণ ফাংশনে এনে Branch রুট আর Project রুট দুটোই সেটা ডাকবে, যাতে নিয়ম এক জায়গায় থাকে।
-3. সব বদল এক transaction-এ: প্রজেক্ট, Branch, নাম-ছড়ানো কপি। মাঝপথে ব্যর্থ হলে কিছুই বদলাবে না।
+3. **আগে পুরোটা যাচাই, তারপর লেখা** (`planBranchChange`): কোনো ত্রুটি থাকলে কিছুই লেখা হয় না। (transaction নয়, কারণ কোম্পানি-ভিত্তিক আলাদা রাখার ফিল্টার `queryDB`-তে বসানো, transaction-এর কাঁচা সংযোগে নেই।)
 4. Branch না থাকা প্রজেক্ট: `branch_link = auto` মানে প্রজেক্টের নামে Branch বানানো (ধরন স্পষ্ট দিয়ে)।
 5. Projects পাতার ট্যাব (All / Head Office / Project Side / No Branch) শুধু ফিল্টার; কোনো ডেটা বদলায় না।
 6. **নামকরণ এক করতে হবে:** Projects তালিকায় ব্যাজ "Project Side", Branches তালিকা ও Employees-এ "Project", Branch ফর্মে "Project Site"। সব জায়গায় একই শব্দ ("Project Side") হবে। ডেটাবেসের মান (`project_site`) বদলাবে না।
