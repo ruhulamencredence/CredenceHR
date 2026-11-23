@@ -42,21 +42,55 @@ export async function ensureAccountBlockSchema(dbPool: any) {
 //   "blocked"  — Admin Panel -> Users -> Block (or a Termination…);
 //   "removed"  — no such account any more (deleted, or the database was
 //                reset while an old sign-in was still open).
-export type AccountState = "ok" | "blocked" | "removed";
+//   "inactive" — the account's Employee record is inactive or its Job Status
+//                says the person has left (Resigned / Terminated / Inactive /
+//                Hold / Regain). Worked out from the Employee record itself, so
+//                it holds however the record was made inactive (Edit Employee,
+//                an import, a personal action) and lifts the moment the
+//                Employee is active again. Never for a Superadmin, the system
+//                owner, a new joiner's temporary login, or an account with no
+//                Employee record.
+export type AccountState = "ok" | "blocked" | "inactive" | "removed";
 const cache = new Map<number, { state: AccountState; at: number }>();
 const TTL_MS = 30_000;
+
+async function readAccountState(queryDB: QueryDB, userId: number): Promise<AccountState | null> {
+  const rows: any[] | null = await queryDB(
+    `/*unscoped*/ SELECT u.id, u.role, u.is_blocked, u.is_onboarding, u.is_platform_admin,
+            (SELECT COUNT(*) FROM all_employees e WHERE e.user_id = u.id) AS emp_rows,
+            (SELECT COUNT(*) FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 1
+                AND (e.job_status IS NULL OR LOWER(TRIM(e.job_status)) NOT IN (${SEPARATED_SQL}))) AS emp_ok
+       FROM users u WHERE u.id = ?`,
+    [userId]
+  ).catch(() => null);
+  // A database hiccup never signs anyone out.
+  if (!rows) return null;
+  const row = rows.find((r: any) => Number(r.id) === userId);
+  if (!row) return "removed";
+  if (Number(row.is_blocked || 0) === 1) return "blocked";
+  const exempt = row.role === "superadmin" || Number(row.is_platform_admin || 0) === 1 || Number(row.is_onboarding || 0) === 1;
+  if (!exempt && Number(row.emp_rows || 0) > 0 && Number(row.emp_ok || 0) === 0) return "inactive";
+  return "ok";
+}
 
 export async function accountState(queryDB: QueryDB, userId: number): Promise<AccountState> {
   const hit = cache.get(userId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.state;
-  const rows: any[] | null = await queryDB("/*unscoped*/ SELECT id, is_blocked FROM users WHERE id = ?", [userId]).catch(() => null);
-  // A database hiccup never signs anyone out.
-  if (!rows) return "ok";
-  const row = rows.find((r: any) => Number(r.id) === userId);
-  const state: AccountState = !row ? "removed" : Number(row.is_blocked || 0) === 1 ? "blocked" : "ok";
+  const state = await readAccountState(queryDB, userId);
+  if (state === null) return "ok";
   cache.set(userId, { state, at: Date.now() });
   return state;
 }
+
+// The same check without the cache — sign-in itself.
+export async function freshAccountState(queryDB: QueryDB, userId: number): Promise<AccountState> {
+  const state = await readAccountState(queryDB, userId);
+  if (state === null) return "ok";
+  cache.set(userId, { state, at: Date.now() });
+  return state;
+}
+
+export const INACTIVE_MESSAGE = "This employee is no longer active, so this account can't sign in. Contact HR.";
 
 // Job Status values that mean the person no longer works here: they are
 // never "active" and never offered in a picker. "Hold" / "Regain" come from
