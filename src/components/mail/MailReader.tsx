@@ -6,11 +6,12 @@
 // Credence Mail -> one conversation: every mail of the thread, oldest first,
 // the last one open. Reply / Reply all / Forward, star, unread, move, delete.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, Reply, ReplyAll, Forward, Star, Trash2, MailOpen, Mail, ShieldAlert, Inbox, Archive, Paperclip, Download, Loader2, Clock, ChevronDown, ChevronUp, AlertCircle,
   MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban, FolderInput } from 'lucide-react';
 import { MailBody } from './MailBody';
+import { AttachmentViewer } from '../AttachmentViewer';
 import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, mailPhotoUrl, saveBlob, shortMailDate } from '../../lib/mailApi';
 
 export type ReaderAction =
@@ -50,10 +51,16 @@ export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | '
   );
 };
 
-const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttachment }> = ({ token, messageId, a }) => {
+// An image or PDF opens right here (AttachmentViewer — a new tab or the Share
+// sheet was the only way before, which is no way to just look at it); the
+// small ⬇ saves it as before. Anything else is downloaded on tap.
+const viewable = (a: MailAttachment) =>
+  /^image\//i.test(a.type) || /pdf/i.test(a.type) || /\.(jpe?g|png|gif|webp|bmp|heic|heif|pdf)$/i.test(a.name);
+
+const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttachment; onView?: () => void }> = ({ token, messageId, a, onView }) => {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const open = async () => {
+  const save = async () => {
     setBusy(true);
     setErr('');
     try {
@@ -65,19 +72,76 @@ const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttach
     }
   };
   return (
-    <button
-      type="button"
-      onClick={() => void open()}
-      title={err || `Download ${a.name}`}
-      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-left max-w-full ${err ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-    >
-      <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
-      <span className="min-w-0">
-        <span className="block text-xs font-medium text-slate-800 truncate max-w-[12rem]">{a.name}</span>
-        <span className="block text-[10px] text-slate-500">{err || formatBytes(a.size)}</span>
-      </span>
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" /> : <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-    </button>
+    <span className={`inline-flex items-stretch rounded-xl border max-w-full overflow-hidden ${err ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+      <button
+        type="button"
+        onClick={() => (onView ? onView() : void save())}
+        title={err || (onView ? `Open ${a.name}` : `Download ${a.name}`)}
+        data-testid="mail-attachment"
+        className="inline-flex items-center gap-2 px-3 py-2 text-left min-w-0 hover:bg-slate-50"
+      >
+        <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium text-slate-800 truncate max-w-[12rem]">{a.name}</span>
+          <span className="block text-[10px] text-slate-500">{err || formatBytes(a.size)}</span>
+        </span>
+        {!onView && (busy ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" /> : <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />)}
+      </button>
+      {onView && (
+        <button
+          type="button"
+          onClick={() => void save()}
+          aria-label={`Download ${a.name}`}
+          title={`Download ${a.name}`}
+          className="px-2.5 border-l border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50 flex items-center"
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        </button>
+      )}
+    </span>
+  );
+};
+
+// One mail's attachments; its images / PDFs open in one viewer with ‹ ›.
+const MailAttachments: React.FC<{ token: string; messageId: string; list: MailAttachment[] }> = ({ token, messageId, list }) => {
+  const shown = list.filter(viewable);
+  const [open, setOpen] = useState<number | null>(null); // index in `shown`
+  const cur = open != null ? shown[open] : null;
+  // Each file is fetched once (the server reads it from the mail server, a
+  // few seconds), and the ones either side load while one is being looked at.
+  const blobs = useRef(new Map<number, Promise<Blob>>());
+  const blobOf = (idx: number) => {
+    let p = blobs.current.get(idx);
+    if (!p) {
+      p = fetchAttachment(token, messageId, idx);
+      p.catch(() => blobs.current.delete(idx));
+      blobs.current.set(idx, p);
+    }
+    return p;
+  };
+  useEffect(() => {
+    if (open == null) return;
+    for (const k of [open + 1, open - 1]) if (shown[k]) void blobOf(shown[k].idx).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  return (
+    <div className="mt-4 flex flex-wrap gap-2">
+      {list.map((a) => (
+        <AttachmentChip key={a.idx} token={token} messageId={messageId} a={a} onView={viewable(a) ? () => setOpen(shown.indexOf(a)) : undefined} />
+      ))}
+      {cur && (
+        <AttachmentViewer
+          key={cur.idx}
+          token={token}
+          src=""
+          name={cur.name}
+          type={cur.type}
+          load={() => blobOf(cur.idx)}
+          nav={{ index: open!, count: shown.length, onPrev: () => setOpen((i) => Math.max(0, (i ?? 0) - 1)), onNext: () => setOpen((i) => Math.min(shown.length - 1, (i ?? 0) + 1)) }}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </div>
   );
 };
 
@@ -137,13 +201,7 @@ const OneMail: React.FC<{
             </div>
           )}
           <MailBody html={m.body || ''} autoShowImages={showPictures} sender={m.from.email} onAlwaysShow={onTrustSender && m.from.email ? () => onTrustSender(m.from.email) : undefined} />
-          {m.attachments.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {m.attachments.map((a) => (
-                <AttachmentChip key={a.idx} token={token} messageId={m.id} a={a} />
-              ))}
-            </div>
-          )}
+          {m.attachments.length > 0 && <MailAttachments token={token} messageId={m.id} list={m.attachments} />}
         </div>
       )}
     </div>

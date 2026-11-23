@@ -89,3 +89,20 @@ shared between the bubbles and the viewer.
   `chat-viewer-phone.png`, `chat-viewer-desktop.png`.
 - Found while testing: a quick swipe that ended before React re-rendered was
   lost — the swipe distance is now kept in a ref.
+
+# Credence Mail: open images / PDFs in the app
+
+A mail attachment could only be downloaded (the Share sheet on the app, a
+download on the web) — no way to just look at it. Now tapping an image or PDF
+opens it in AttachmentViewer (the liquid-glass viewer Bill Claim uses), with
+‹ › / ← → and "2 / 3" through that mail's images and PDFs; PDFs are drawn page
+by page in the app (pdf.js). The ⬇ next to each still downloads; any other file
+(Word, Excel, text…) downloads on tap as before. Each file is fetched once per
+mail and the neighbours load in the background (the server reads it from the
+mail server — a few seconds the first time). AttachmentViewer gained optional
+`load` / `type` / `nav`; its other uses are unchanged.
+- `mail-attachment-viewer-ui.txt` — 23/23 on computer and phone (local
+  Dovecot): open an image, "2 / 3", the picture, › to the PDF with its pages,
+  ← / ‹ back (instant, not fetched again), ✕, ⬇ downloads, notes.txt downloads
+  without a viewer, no new tab, no page errors. Screenshots
+  `mail-viewer-image.png`, `mail-viewer-pdf-phone.png`.
