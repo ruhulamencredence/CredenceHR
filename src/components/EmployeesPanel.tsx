@@ -1496,7 +1496,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                               <span className="block">{label}</span>
                               {b && (
                                 <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
-                                  {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                                  {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                                 </span>
                               )}
                             </span>
@@ -1963,7 +1963,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           <option value="">— None —</option>
                           {branches.map((b) => (
                             <option key={b.id} value={b.id}>
-                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project' : 'Head Office'})
+                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'})
                             </option>
                           ))}
                         </SearchSelect>

@@ -9,7 +9,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, GitMerge, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
+import { Building2, GitMerge, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft, Archive, ArchiveRestore, Link2 } from 'lucide-react';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -1596,6 +1596,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  // Projects -> Edit: the Branch this Project belongs to and its type
+  // (Head Office / Project Side). Only sent when changed (docs/branch-project-rules.md).
+  const [projectBranchType, setProjectBranchType] = useState<'head_office' | 'project_site'>('project_site');
+  const [projectBranchLink, setProjectBranchLink] = useState<string>('none');
+  const [projectBranchFilter, setProjectBranchFilter] = useState<'all' | 'head_office' | 'project_site' | 'none' | 'archived'>('all');
+  // Branches list: which slice to show, the "Link by name" preview and the "Merge" popup.
+  const [branchListFilter, setBranchListFilter] = useState<'active' | 'head_office' | 'project_site' | 'no_project' | 'archived'>('active');
+  const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
+  const [mergeBranch, setMergeBranch] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string; needsConfirm?: boolean }>(null);
   // Site location pin for the project being added/edited (free OpenStreetMap/
   // Leaflet picker — see LocationMapPicker). Null lat/lng = no pin set yet.
   const [projectLocation, setProjectLocation] = useState<{ lat: number | null; lng: number | null; label: string | null; radius: number | null }>({
@@ -1761,8 +1770,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'people' | 'budgets' | 'permissions' | 'departments';
   const loadedShared = useRef<Set<SharedKey>>(new Set());
   const SHARED_URL: Record<SharedKey, string> = {
-    projects: '/api/projects',
-    branches: '/api/branches',
+    projects: '/api/projects?include_archived=1',
+    branches: '/api/branches?include_archived=1',
     mprNumbers: '/api/mpr-numbers',
     entries: '/api/entries?scope=all',
     users: '/api/users',
@@ -2129,6 +2138,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const url = editingProject ? `/api/projects/${editingProject.id}` : '/api/projects';
       const method = editingProject ? 'PUT' : 'POST';
 
+      // The Branch part goes along only when it was changed, and only for an
+      // account that has the Branches section (the server refuses otherwise).
+      const branchBody: Record<string, string> = {};
+      if (editingProject && canSee('branches')) {
+        const wasLink = editingProject.linked_branch_id ? String(editingProject.linked_branch_id) : 'none';
+        const wasType = editingProject.linked_branch_type || 'project_site';
+        const linkChanged = projectBranchLink !== wasLink;
+        const typeChanged = projectBranchLink !== 'none' && projectBranchType !== wasType;
+        if (linkChanged) branchBody.branch_link = projectBranchLink;
+        if (linkChanged || typeChanged) {
+          if (projectBranchLink !== 'none') branchBody.branch_type = projectBranchType;
+        }
+        // A type change moves people to the other Weekend / Holiday calendar: say how many.
+        const target = projectBranchLink === 'none' ? null : branches.find((b) => String(b.id) === projectBranchLink) || (editingProject.linked_branch_id ? { id: editingProject.linked_branch_id, branch_name: editingProject.linked_branch_name, branch_type: wasType } : null);
+        if (target && branchBody.branch_type && target.branch_type !== projectBranchType) {
+          let people = 0;
+          try {
+            const r = await fetch(apiUrl(`/api/projects/${editingProject.id}/branch-impact?branch_id=${target.id}`), { headers: { Authorization: `Bearer ${token}` } });
+            if (r.ok) people = Number((await r.json()).employees || 0);
+          } catch {
+            // count unavailable — the question is still asked
+          }
+          const label = (t: string) => (t === 'project_site' ? 'Project Side' : 'Head Office');
+          const ok = await confirmDialog(
+            `Change Branch "${target.branch_name}" from ${label(String(target.branch_type))} to ${label(projectBranchType)}? ${people} employee${people === 1 ? '' : 's'} at this Branch will follow the ${label(projectBranchType)} Weekend / Holiday calendar from now on. Payroll already generated is not recalculated.`,
+            { title: 'Change Branch type', confirmLabel: 'Change type' }
+          );
+          if (!ok) return;
+        }
+      }
+
       const res = await fetch(apiUrl(url), {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -2138,7 +2178,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           location_lng: projectLocation.lng,
           location_label: projectLocation.label,
           location_radius: projectLocation.radius,
-          entry_scope: projectEntryScope
+          entry_scope: projectEntryScope,
+          ...branchBody
         })
       });
       const data = await res.json();
@@ -2174,6 +2215,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (res.ok) {
         fetchAllData();
         setMessage({ type: 'success', text: 'Project deleted.' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: data.error || 'Could not delete the Project.' });
       }
     } catch (err) {
       console.error(err);
@@ -2243,9 +2287,113 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (res.ok) {
         fetchAllData();
         setMessage({ type: 'success', text: 'Branch deleted.' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: data.error || 'Could not delete the Branch.' });
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // --- Archive, Link by name, Merge (BranchTools.ts) ---
+  const archiveCall = async (kind: 'branches' | 'projects', id: number, archived: boolean) => {
+    const res = await fetch(apiUrl(`/api/${kind}/${id}/archive`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ archived })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not change this.');
+    fetchAllData();
+    setMessage({ type: 'success', text: archived ? 'Archived. It is hidden from lists and pickers; nothing was deleted.' : 'Restored.' });
+  };
+  const handleArchive = async (kind: 'branches' | 'projects', item: any) => {
+    const archiving = !isArchived(item);
+    const name = kind === 'branches' ? item.branch_name : item.project_name;
+    if (archiving) {
+      const ok = await confirmDialog(
+        kind === 'branches'
+          ? `Archive the Branch "${name}"? It is hidden from lists and pickers. Nothing is deleted, and it can be restored.`
+          : `Archive the Project "${name}"? It is hidden from lists, pickers and check-in. Its PEPM entries and attendance stay, and it can be restored.`,
+        { title: 'Archive', confirmLabel: 'Archive' }
+      );
+      if (!ok) return;
+    }
+    try {
+      await archiveCall(kind, item.id, archiving);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const openLinkByName = async () => {
+    setLinkByName({ loading: true, pairs: [], skipped: [], picked: new Set(), busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-preview'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the matches.');
+      setLinkByName({ loading: false, pairs: data.pairs || [], skipped: data.skipped || [], picked: new Set<number>((data.pairs || []).map((p: any) => p.branch_id)), busy: false });
+    } catch (err: any) {
+      setLinkByName({ loading: false, pairs: [], skipped: [], picked: new Set(), busy: false, error: err.message });
+    }
+  };
+  const confirmLinkByName = async () => {
+    if (!linkByName) return;
+    const pairs = linkByName.pairs.filter((p) => linkByName.picked.has(p.branch_id)).map((p) => ({ branch_id: p.branch_id, project_id: p.project_id }));
+    if (!pairs.length) return;
+    setLinkByName({ ...linkByName, busy: true });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-by-name'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ pairs })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not link.');
+      setLinkByName(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `${data.linked} Branch${data.linked === 1 ? '' : 'es'} linked to the Project of the same name.${data.skipped?.length ? ` ${data.skipped.length} skipped.` : ''}` });
+    } catch (err: any) {
+      setLinkByName({ ...linkByName, busy: false, error: err.message });
+    }
+  };
+
+  const loadMergePreview = async (from: any, intoId: string) => {
+    if (!intoId) {
+      setMergeBranch({ from, intoId: '', preview: null, busy: false });
+      return;
+    }
+    setMergeBranch({ from, intoId, preview: null, busy: true });
+    try {
+      const res = await fetch(apiUrl(`/api/branches/${from.id}/merge-preview?into=${intoId}`), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setMergeBranch({ from, intoId, preview: data, busy: false });
+    } catch (err: any) {
+      setMergeBranch({ from, intoId, preview: null, busy: false, error: err.message });
+    }
+  };
+  const confirmMerge = async (acknowledge: boolean) => {
+    if (!mergeBranch) return;
+    setMergeBranch({ ...mergeBranch, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl(`/api/branches/${mergeBranch.from.id}/merge`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ into_id: Number(mergeBranch.intoId), acknowledge_calendar_change: acknowledge })
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.needs_calendar_confirmation) {
+        setMergeBranch({ ...mergeBranch, busy: false, needsConfirm: true, error: data.error });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Could not merge.');
+      setMergeBranch(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `${data.moved} ${data.moved === 1 ? 'person' : 'people'} moved. "${mergeBranch.from.branch_name}" is archived (not deleted).` });
+    } catch (err: any) {
+      setMergeBranch({ ...mergeBranch, busy: false, error: err.message });
     }
   };
 
@@ -3486,17 +3634,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the full list) instead of always mounting every single row at once.
   const LIST_PAGE_SIZE = 30;
 
+  const isArchived = (x: any) => !!Number(x?.is_archived);
+  const activeProjects = React.useMemo(() => projects.filter((p) => !isArchived(p)), [projects]);
+  const projectBranchCounts = React.useMemo(
+    () => ({
+      all: activeProjects.length,
+      head_office: activeProjects.filter((p) => p.linked_branch_type === 'head_office').length,
+      project_site: activeProjects.filter((p) => p.linked_branch_type === 'project_site').length,
+      none: activeProjects.filter((p) => !p.linked_branch_id).length,
+      archived: projects.filter((p) => isArchived(p)).length
+    }),
+    [projects, activeProjects]
+  );
   const visibleProjects = React.useMemo(() => {
     const q = projectListSearch.trim().toLowerCase();
-    const filtered = q ? projects.filter((p) => p.project_name.toLowerCase().includes(q)) : projects;
+    const byBranch =
+      projectBranchFilter === 'archived'
+        ? projects.filter((p) => isArchived(p))
+        : projectBranchFilter === 'all'
+          ? activeProjects
+          : activeProjects.filter((p) => (projectBranchFilter === 'none' ? !p.linked_branch_id : p.linked_branch_type === projectBranchFilter));
+    const filtered = q ? byBranch.filter((p) => p.project_name.toLowerCase().includes(q)) : byBranch;
     return showAllProjects || q ? filtered : filtered.slice(0, LIST_PAGE_SIZE);
-  }, [projects, projectListSearch, showAllProjects]);
+  }, [projects, activeProjects, projectListSearch, showAllProjects, projectBranchFilter]);
 
+  const activeBranches = React.useMemo(() => (branches as any[]).filter((b) => !isArchived(b)), [branches]);
+  const branchCounts = React.useMemo(
+    () => ({
+      active: activeBranches.length,
+      head_office: activeBranches.filter((b) => b.branch_type === 'head_office').length,
+      project_site: activeBranches.filter((b) => b.branch_type !== 'head_office').length,
+      no_project: activeBranches.filter((b) => !b.project_id).length,
+      archived: (branches as any[]).filter((b) => isArchived(b)).length
+    }),
+    [branches, activeBranches]
+  );
   const visibleBranches = React.useMemo(() => {
     const q = branchListSearch.trim().toLowerCase();
-    const filtered = q ? branches.filter((b) => b.branch_name.toLowerCase().includes(q)) : branches;
+    const bySlice =
+      branchListFilter === 'archived'
+        ? (branches as any[]).filter((b) => isArchived(b))
+        : branchListFilter === 'active'
+          ? activeBranches
+          : activeBranches.filter((b) =>
+              branchListFilter === 'no_project' ? !b.project_id : branchListFilter === 'head_office' ? b.branch_type === 'head_office' : b.branch_type !== 'head_office'
+            );
+    const filtered = q ? bySlice.filter((b) => b.branch_name.toLowerCase().includes(q)) : bySlice;
     return showAllBranches || q ? filtered : filtered.slice(0, LIST_PAGE_SIZE);
-  }, [branches, branchListSearch, showAllBranches]);
+  }, [branches, activeBranches, branchListSearch, showAllBranches, branchListFilter]);
 
   const visibleMprNumbers = React.useMemo(() => {
     const q = mprListSearch.trim().toLowerCase();
@@ -5634,6 +5819,59 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">Optional — mark this project's site on a free map.</p>
                 </div>
+                {editingProject && canSee('branches') && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch</label>
+                      <SearchSelect
+                        value={projectBranchLink}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setProjectBranchLink(v);
+                          // Picking an existing Branch shows its own type.
+                          const b = branches.find((x) => String(x.id) === v);
+                          if (b) setProjectBranchType(b.branch_type === 'head_office' ? 'head_office' : 'project_site');
+                        }}
+                        className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="none">{editingProject.linked_branch_id ? 'Not linked (release this Branch)' : '— No Branch —'}</option>
+                        {!editingProject.linked_branch_id && <option value="auto">New Branch with this Project's name (or the one already called that)</option>}
+                        {branches.map((b) => {
+                          const takenBy = b.project_id && b.project_id !== editingProject.id ? b.linked_project_name || 'another Project' : null;
+                          return (
+                            <option key={b.id} value={String(b.id)} disabled={!!takenBy}>
+                              {b.branch_name} · {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              {takenBy ? ` — linked to ${takenBy}` : b.project_id && b.project_id === editingProject.id ? ' — this Project' : ' — free'}
+                            </option>
+                          );
+                        })}
+                      </SearchSelect>
+                      <p className="text-[11px] text-slate-400 mt-1">The Branch this Project belongs to. A Branch can hold one Project; a Branch already linked elsewhere is greyed out.</p>
+                    </div>
+                    {projectBranchLink !== 'none' && (
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch Type</label>
+                        <div className="flex gap-2">
+                          {(['head_office', 'project_site'] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setProjectBranchType(t)}
+                              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                                projectBranchType === t ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t === 'head_office' ? 'Head Office' : 'Project Side'}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Which Weekend / Holiday calendar the people of this Branch follow (Admin Panel &rarr; Holidays). Changing it asks to confirm first.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
                 <ProjectEntrySharing
                   token={token}
                   value={projectEntryScope}
@@ -5673,7 +5911,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <p className="text-xs text-slate-500">Users select projects strictly from this list</p>
                   </div>
                   <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
-                    {projects.length} Project{projects.length === 1 ? '' : 's'}
+                    {activeProjects.length} Project{activeProjects.length === 1 ? '' : 's'}
                   </span>
                 </div>
                 <div className="mt-3 relative">
@@ -5685,6 +5923,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     placeholder="Search projects..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filter by Branch type">
+                  {([
+                    ['all', 'All'],
+                    ['head_office', 'Head Office'],
+                    ['project_site', 'Project Side'],
+                    ['none', 'No Branch'],
+                    ['archived', 'Archived']
+                  ] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={projectBranchFilter === k}
+                      onClick={() => setProjectBranchFilter(k)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        projectBranchFilter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} ({projectBranchCounts[k]})
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="divide-y divide-slate-200 max-h-[32rem] overflow-y-auto">
@@ -5745,6 +6005,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             setEditingProject(p);
                             setNewProjectName(p.project_name);
                             setProjectEntryScope((p.entry_scope as EntryScope) || 'team');
+                            setProjectBranchLink(p.linked_branch_id ? String(p.linked_branch_id) : 'none');
+                            setProjectBranchType(p.linked_branch_type === 'head_office' ? 'head_office' : 'project_site');
                             setProjectLocation({
                               lat: p.location_lat != null ? Number(p.location_lat) : null,
                               lng: p.location_lng != null ? Number(p.location_lng) : null,
@@ -5756,6 +6018,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           title="Edit project"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleArchive('projects', p)}
+                          className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                          title={isArchived(p) ? 'Restore project' : 'Archive project'}
+                        >
+                          {isArchived(p) ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => handleDeleteProject(p.id)}
@@ -5810,7 +6079,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                    Holiday Calendar Group
+                    Branch Type (Holiday Calendar)
                   </label>
                   <div className="flex gap-2">
                     <button
@@ -5833,7 +6102,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      Project Site
+                      Project Side
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -5843,7 +6112,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {canSee('projects') ? (
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                      Attendance Project
+                      Linked Project (optional)
                     </label>
                     <SearchSelect
                       value={branchProjectLink}
@@ -5869,13 +6138,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         const takenBy = p.linked_branch_id && p.linked_branch_id !== editingBranch?.id ? p.linked_branch_name : null;
                         return (
                           <option key={p.id} value={String(p.id)} disabled={!!takenBy}>
-                            {p.project_name}{takenBy ? ` — linked to ${takenBy}` : ''}
+                            {p.project_name}
+                            {takenBy ? ` — linked to ${takenBy}${p.linked_branch_type ? ` (${p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'})` : ''}` : p.linked_branch_id && p.linked_branch_id === editingBranch?.id ? ' — this Branch' : ' — free'}
                           </option>
                         );
                       })}
                     </SearchSelect>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      The Project used for attendance check-in (and PEPM). Its name and map location are kept the same as this Branch's.
+                      Leave it as it is for most Branches. A linked Project lets "Their Branch" check-in and Transfer find it, and its name and map location are kept the same as this Branch's.
                     </p>
                   </div>
                 ) : editingBranch?.linked_project_name ? (
@@ -5955,9 +6225,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <h3 className="text-lg font-bold text-slate-900">Branches List</h3>
                     <p className="text-xs text-slate-500">Company branches — Phase 1 (management only)</p>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
-                    {branches.length} Branch{branches.length === 1 ? '' : 'es'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {canSee('projects') && (
+                      <button
+                        type="button"
+                        onClick={openLinkByName}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                        title="Link Branches to the Project with exactly the same name"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Link by name
+                      </button>
+                    )}
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
+                      {activeBranches.length} Branch{activeBranches.length === 1 ? '' : 'es'}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -5968,6 +6251,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     placeholder="Search branches..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filter Branches">
+                  {([
+                    ['active', 'All'],
+                    ['head_office', 'Head Office'],
+                    ['project_site', 'Project Side'],
+                    ['no_project', 'No project'],
+                    ['archived', 'Archived']
+                  ] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={branchListFilter === k}
+                      onClick={() => setBranchListFilter(k)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        branchListFilter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} ({branchCounts[k]})
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="divide-y divide-slate-200 max-h-[32rem] overflow-y-auto">
@@ -5990,7 +6295,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                   : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}
                             >
-                              {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                              {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                             </span>
                           </span>
                           {b.linked_project_name && (
@@ -6032,6 +6337,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           title="Edit branch"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!isArchived(b) && (
+                          <button
+                            onClick={() => setMergeBranch({ from: b, intoId: '', preview: null, busy: false })}
+                            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Merge into another Branch"
+                          >
+                            <GitMerge className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleArchive('branches', b)}
+                          className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                          title={isArchived(b) ? 'Restore branch' : 'Archive branch'}
+                        >
+                          {isArchived(b) ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => handleDeleteBranch(b.id)}
@@ -8329,6 +8650,151 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
+      {linkByName && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-xl max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Link Branches to Projects by name</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              These Branches have exactly the same name as a Project that has no Branch yet. Linking keeps every name and map pin as it is. Branches with no matching Project stay as they are.
+            </p>
+            {linkByName.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Looking for matches…</p>
+            ) : linkByName.error ? (
+              <p className="text-sm text-rose-600 mt-4">{linkByName.error}</p>
+            ) : linkByName.pairs.length === 0 ? (
+              <p className="text-sm text-slate-500 mt-4">No Branch has the same name as a free Project.</p>
+            ) : (
+              <>
+                <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>{linkByName.picked.size} of {linkByName.pairs.length} ticked</span>
+                  <button
+                    type="button"
+                    className="font-semibold text-slate-700 hover:text-slate-900"
+                    onClick={() => setLinkByName({ ...linkByName, picked: linkByName.picked.size === linkByName.pairs.length ? new Set() : new Set(linkByName.pairs.map((p) => p.branch_id)) })}
+                  >
+                    {linkByName.picked.size === linkByName.pairs.length ? 'Untick all' : 'Tick all'}
+                  </button>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {linkByName.pairs.map((p) => (
+                    <label key={p.branch_id} className="liquid-glass-inset rounded-2xl px-3.5 py-2.5 flex items-center gap-3 cursor-pointer text-[13px] text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={linkByName.picked.has(p.branch_id)}
+                        onChange={() => {
+                          const next = new Set(linkByName.picked);
+                          if (next.has(p.branch_id)) next.delete(p.branch_id);
+                          else next.add(p.branch_id);
+                          setLinkByName({ ...linkByName, picked: next });
+                        }}
+                      />
+                      <span className="font-semibold">{p.branch_name}</span>
+                      <span className="text-slate-400">→</span>
+                      <span>Project: {p.project_name}</span>
+                      <span className="ml-auto text-[11px] text-slate-500 text-right">
+                        {p.staff} staff{p.their_branch_users > 0 ? ` · ${p.their_branch_users} on "Their Branch"` : ''}
+                        {p.name_differs ? ' · capital letters differ' : ''}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                  After linking, people on "Their Branch" check-in can check in at the Project, and a Transfer into the Branch gives the Project (PEPM and Remote Attendance).
+                </p>
+              </>
+            )}
+            {linkByName.skipped.length > 0 && (
+              <details className="mt-3 text-[12px] text-slate-600">
+                <summary className="cursor-pointer font-semibold">{linkByName.skipped.length} not offered</summary>
+                <ul className="mt-1.5 space-y-1">
+                  {linkByName.skipped.map((k: any) => (
+                    <li key={k.branch_id}>
+                      <span className="font-semibold">{k.branch_name}</span>: {k.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setLinkByName(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={linkByName.busy || linkByName.picked.size === 0}
+                onClick={confirmLinkByName}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {linkByName.busy ? 'Linking…' : `Link ${linkByName.picked.size} Branch${linkByName.picked.size === 1 ? '' : 'es'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeBranch && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Merge "{mergeBranch.from.branch_name}" into another Branch</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Use this for a duplicate or misspelled Branch. Its people move to the Branch you pick (each change goes into their history), and this Branch is archived, not deleted.
+            </p>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mt-4 mb-1">Move everyone to</label>
+            <SearchSelect
+              value={mergeBranch.intoId}
+              onChange={(e) => loadMergePreview(mergeBranch.from, e.target.value)}
+              className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              <option value="">— Select Branch —</option>
+              {activeBranches
+                .filter((b) => b.id !== mergeBranch.from.id)
+                .map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.branch_name} · {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                  </option>
+                ))}
+            </SearchSelect>
+            {mergeBranch.busy && !mergeBranch.preview && <p className="text-sm text-slate-500 mt-3">Checking…</p>}
+            {mergeBranch.preview && (
+              <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-3 text-[13px] text-slate-800 space-y-1">
+                <div>
+                  <span className="font-semibold">{mergeBranch.preview.employees}</span> {mergeBranch.preview.employees === 1 ? 'person' : 'people'} will move ({mergeBranch.preview.active_employees} active).
+                </div>
+                {(mergeBranch.preview.text_copies.team_rules > 0 || mergeBranch.preview.text_copies.office_machines > 0 || mergeBranch.preview.text_copies.sims > 0) && (
+                  <div className="text-slate-600">
+                    The name also changes on {mergeBranch.preview.text_copies.team_rules} Team rule(s), {mergeBranch.preview.text_copies.office_machines} office machine(s) and {mergeBranch.preview.text_copies.sims} SIM(s).
+                  </div>
+                )}
+                {mergeBranch.preview.type_differs && (
+                  <div className="text-amber-700 font-medium">
+                    "{mergeBranch.preview.from.name}" is {mergeBranch.preview.from.type === 'project_site' ? 'Project Side' : 'Head Office'} but "{mergeBranch.preview.into.name}" is {mergeBranch.preview.into.type === 'project_site' ? 'Project Side' : 'Head Office'}: the people moved follow the other Weekend / Holiday calendar.
+                  </div>
+                )}
+                {mergeBranch.preview.from.project_id && !mergeBranch.preview.into.project_id && (
+                  <div className="text-slate-600">The Project link moves to "{mergeBranch.preview.into.name}".</div>
+                )}
+                {mergeBranch.preview.blocked.map((t: string) => (
+                  <div key={t} className="text-rose-600 font-medium">{t}</div>
+                ))}
+              </div>
+            )}
+            {mergeBranch.error && <p className="text-sm text-rose-600 mt-3">{mergeBranch.error}</p>}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setMergeBranch(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={mergeBranch.busy || !mergeBranch.preview || mergeBranch.preview.blocked.length > 0}
+                onClick={() => confirmMerge(!!mergeBranch.preview?.type_differs && !!mergeBranch.needsConfirm)}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ '--g-accent': '#dc2626' } as React.CSSProperties}
+              >
+                {mergeBranch.busy ? 'Working…' : mergeBranch.needsConfirm ? 'Yes, move them' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showBranchLocationPicker && (
         <LocationMapPicker
           title={editingBranch ? `Set Location — ${editingBranch.branch_name}` : 'Set Branch Location'}

@@ -974,7 +974,7 @@ Deploy বা `pm2 restart`-এর সময় Node app কয়েক সে�
 
 ## Claim লেখার মাঝে পাতা নতুন করে শুরু না হওয়া
 
-- **নিচে টেনে refresh (pull-to-refresh):** শুধু পাতার একদম উপরে, পাতার নিজের অংশে টানলে reload হয়। Popup / form-এর ভেতরে, input বা textarea-তে, আলাদা scroll হওয়া বাক্সে, বা `.liquid-glass-backdrop` / `[role=dialog]` / fixed অংশে টানলে কিছুই হয় না (`src/lib/usePullToRefresh.ts`) — আগে Claim form-এর ভেতরে উপরে scroll করতে গেলে পুরো অ্যাপ reload হয়ে লেখা হারাত। ছেড়ে দিলে অ্যাপের পেছনের পর্দা ঝাপসা হয়ে মাঝখানে theme-এর রঙে ছোট Infinity loader দেখায় (লোগো নয়; `InfinityLoader.tsx` — SVG + CSS, `--g-accent` থেকে রঙ নেয়, তাই Orange / Violet / Mono-তে আলাদা; `index.html`-এর শুরুর পর্দা ও অ্যাপ লোডের মুহূর্তের `BootVeil`-এ হুবহু একই আকার)। ওয়েব ব্রাউজারে প্রতিটা লোড বা Reload-এ (`index.html`) কমলা লোগোর বদলে theme-এর হালকা পর্দা ও একই ধরনের loader আসে (ডার্ক মোডে গাঢ় পর্দা, সাদা loader)। Android / iOS অ্যাপে শুধু টেনে reload করার পরের একবারের শুরুতে এটা আসে (`mpr_pull_reload` চিহ্ন); অ্যাপের সাধারণ শুরুতে লোগো ও খোলার animation আগের মতোই।
+- **নিচে টেনে refresh (pull-to-refresh):** শুধু পাতার একদম উপরে, পাতার নিজের অংশে টানলে reload হয়। Popup / form-এর ভেতরে, input বা textarea-তে, আলাদা scroll হওয়া বাক্সে, বা `.liquid-glass-backdrop` / `[role=dialog]` / fixed অংশে টানলে কিছুই হয় না (`src/lib/usePullToRefresh.ts`) — আগে Claim form-এর ভেতরে উপরে scroll করতে গেলে পুরো অ্যাপ reload হয়ে লেখা হারাত। ছেড়ে দিলে অ্যাপের পেছনের পর্দা ঝাপসা হয়ে মাঝখানে theme-এর রঙে ছোট Infinity loader দেখায় (লোগো নয়; `ThemedInfinity.tsx` — অ্যাপের নিজের loader-এর SVG রূপ (`assets/infinity-loader.svg`, `infinity-loader.json`-এর export; নিজে-চলা SVG, কোনো animation player লাগে না), সাতটা stroke-রঙ `--g-accent` থেকে `color-mix` দিয়ে হিসাব করা (`.chr-il`, index.css), তাই Orange / Violet / Mono-তে আলাদা)। ওয়েব ব্রাউজারে প্রতিটা লোড বা Reload-এ (`index.html`) কমলা লোগোর বদলে theme-এর হালকা পর্দা ও একই loader আসে (HTML-এর সাথেই আঁকা), অ্যাপের কোড লোডের মুহূর্তে (`BootVeil.tsx`) একই loader থাকে — মাঝে ফাঁকা পর্দা থাকে না। Reload-এর পর loader অন্তত একটা পুরো ঘুরন (প্রায় 1.7 সেকেন্ড) চলে তারপর অ্যাপ দেখায় (`LoaderHold`, `BootVeil.tsx`) — অ্যাপ আগে তৈরি থাকলেও loader আধখানা এঁকে মিলিয়ে যায় না; পেজ আগেই 1.7 সেকেন্ড পেরোলে বাড়তি অপেক্ষা নেই। Android / iOS অ্যাপে শুধু টেনে reload করার পরের একবারের শুরুতে এটা আসে (`mpr_pull_reload` চিহ্ন); অ্যাপের সাধারণ শুরুতে লোগো ও খোলার animation আগের মতোই।
 - **না পাঠানো form-এর খসড়া:** Bill Claim-এর নতুন claim (তারিখ, bill-এর সারি, বিবরণ, বাছাই করা ref) আর Check In/Out-এর Purpose লিখতে লিখতে এই ফোনে রেখে দেওয়া হয় (`src/lib/formDraft.ts`, key `chr_draft:<user id>:<form>`)। অ্যাপ reload / বন্ধ হয়ে আবার খুললে (যেমন camera বা file বাছতে গিয়ে Android অ্যাপ বন্ধ করে দিলে) form আবার খোলে, লেখা ফিরে আসে, উপরে সবুজ লেখা "Your unsent claim was brought back." আর "Start over" বোতাম। সংযুক্ত ফাইল রাখা যায় না — সেটা আবার দিতে বলা হয়।
 - খসড়া প্রতি account-এর আলাদা (একই ফোনে অন্য login দেখে না), ৩ দিন পর বাদ, claim পাঠালে বা Start over-এ মুছে যায়, Cancel করলে আর নিজে খোলে না, আর sign-out-এ সব খসড়া মুছে যায় (`App.tsx`)। অন্যের হয়ে বা পুরনো claim edit করলে খসড়া রাখা হয় না।
 
@@ -1297,3 +1297,21 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 5. **Removal log & put back:** প্রতিটা মোছা একটা batch (কে, কখন, কারণ, filter)। ৩০ দিন পর্যন্ত মুছে যাওয়া সারিগুলো (`data_cleanup_trash`) থেকে **Put back** — একই id-তে ফেরত, leave balance আবার কাটে। এর মধ্যে মাসের বেতন হয়ে গেলে, বা একই দিনে নতুন রেকর্ড / নতুন Out থাকলে সেটা ফেরত আসে না (কারণ দেখায়)। Disbursed হয়ে যাওয়া Bill-এ লাইন আর যোগ হয় না।
 
 (`DataCleanupRoutes.ts`, `src/components/DataCleanup.tsx`)
+
+## প্রজেক্ট ও Branch: কোনটা Head Office, কোনটা Project Side (২৩ নভেম্বর)
+
+একটা প্রজেক্ট একটা Branch-এর সাথে যুক্ত (`branches.project_id`); Branch-এর ধরন (`head_office` / `project_site`) ঠিক করে ওই Branch-এর কর্মীরা কোন Weekend / Holiday ক্যালেন্ডার মানবেন। আগে ধরন শুধু Branch ফর্মে বাছা যেত। এখন Admin Panel → Projects → প্রজেক্ট এডিটে (`AdminPanel.tsx`) **Branch** (বাছাই: না যুক্ত / প্রজেক্টের নামে নতুন বা একই নামের Branch / কোনো ফাঁকা Branch) আর **Branch Type** (Head Office / Project Side) বাছা যায়; তালিকার ওপরে All / Head Office / Project Side / No Branch ফিল্টার। সব তালিকায় ধরনের নাম একই ("Project Side")।
+- সেভে `PUT /api/projects/:id`-এ ঐচ্ছিক `branch_type` ও `branch_link` (`keep` / `auto` / `none` / Branch id) যায়, শুধু যখন বদলেছে। না পাঠালে সেভ আগের মতোই (`ProjectRoutes.ts`, `planBranchChange`)। আগে সবটা যাচাই, তারপর লেখা; ত্রুটিতে কিছুই বদলায় না।
+- নতুন Branch বানাতে ধরন স্পষ্ট বলতে হয় (API-র ডিফল্ট `head_office`, কলামের ডিফল্ট `project_site`, দুটো মেলে না)। অন্য প্রজেক্টে যুক্ত Branch বাছলে ত্রুটি। নতুন যুক্ত Branch-এর নিজের পিন থাকলে আর প্রজেক্টের না থাকলে পিন Branch-এরটা থাকে।
+- ধরন বদলালে `GET /api/projects/:id/branch-impact` থেকে কত জন কর্মী ওই Branch-এ আছে এনে `confirmDialog` জিজ্ঞেস করে; তৈরি payroll নিজে নতুন করে হিসাব হয় না।
+- নাম ও লোকেশন মেলানো, Branch নাম বদলালে কপি ছড়ানো, Branch ফর্মের লিঙ্ক নিয়ম আগের মতোই। সব নিয়মের তালিকা: `docs/branch-project-rules.md`।
+
+## Branch ও প্রজেক্টের গোছানো: নাম মিলিয়ে যুক্ত, Archive, Merge (২৩ নভেম্বর)
+
+লাইভ ডেটায় ১৫৬ Branch (প্রায় সব HR ডেটা থেকে আসা, ৮১৭ চালু কর্মীর সবাই কোনো না কোনো Branch-এ), ১০৭ প্রজেক্ট, আর যুক্ত মাত্র ৫টা। তাই Branch ও প্রজেক্ট আলাদা তালিকাই থাকে; `BranchTools.ts` তিনটা গোছানোর কাজ দেয় (Admin Panel → Branches / Projects):
+- **Link by name:** একই নামের Branch-ছাড়া প্রজেক্ট ও প্রজেক্ট-ছাড়া Branch আগে তালিকায় দেখিয়ে টিক দিয়ে যুক্ত করা। নাম ও পিন বদলায় না। যুক্ত হলে "Their Branch" Check In ও Transfer (PEPM, Remote Attendance) প্রজেক্টটা খুঁজে পায়।
+- **Archive:** অচল Branch/প্রজেক্ট মুছে না ফেলে লুকানো (`is_archived`), ফেরানো যায়; Branch archive-এ চালু কর্মী 0 হতে হয়।
+- **Merge Branch:** বানান-ভুল বা ডুপ্লিকেট Branch-এর কর্মী (ইতিহাস লিখে) আসল Branch-এ সরানো; পুরনোটা archive হয়।
+- **মোছার সুরক্ষা:** প্রজেক্টে PEPM Entry/হাজিরা থাকলে এবং Branch-এ কর্মী থাকলে Delete আটকায়।
+নিয়মের পূর্ণ তালিকা ও পরীক্ষার ফর্দ: `docs/branch-project-rules.md`।
+

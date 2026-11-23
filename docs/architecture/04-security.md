@@ -298,3 +298,13 @@
 ১৮ নভেম্বর — **Remote Attendance, "Any project":** Users → Module Access-এ check-in-এর জন্য "Any project" থাকলে সাধারণ User এখন কোম্পানির যেকোনো project-এ check in / out করতে পারেন (আগে শুধু যে project-এ তাঁর Budget / MPR access ছিল)। যাঁকে সীমিত রাখতে হবে তাঁর জন্য "Only these projects" বা "Their Branch" — সেগুলো আগের মতোই কড়া। প্রতিটা check-in তখনও project-এর location ও radius-এর ভেতরে হতে হয় (server যাচাই করে), আর Remote Attendance নিজেই আলাদা অনুমতি (`can_use_attendance`)। (`AttendanceRoutes.ts` `getAllowedProjectIds`)
 
 ২২ নভেম্বর — **System Data cleanup:** Leave, Bill Claim, Check In/Out, Remote Attendance ও Employee change history মোছার API (`/api/system/cleanup/*`) শুধু `users.is_platform_admin = 1` account-এর জন্য — কোম্পানির Superadmin বা কোনো module অনুমতিতে খোলে না; UI ট্যাবও শুধু তাঁকে দেখায়। তালিকা company-scope মেনে চলে, মোছার আগে server প্রতিটা id আবার সেই তালিকায় ও lock আছে কিনা যাচাই করে। প্রতিটা মোছার কারণ, কে, কখন `data_cleanup_batches`-এ থাকে; মুছে যাওয়া সারি (receipt/স্বাক্ষরসহ) ৩০ দিন `data_cleanup_trash`-এ থাকে, তারপর নিজে থেকে মুছে যায়। বেতন হয়ে যাওয়া মাস ও Disbursed Bill-এর রেকর্ড lock। (`DataCleanupRoutes.ts`)
+
+## প্রজেক্ট এডিটে Branch / Branch Type বদল (২৩ নভেম্বর)
+`PUT /api/projects/:id`-এ `branch_type` বা `branch_link` পাঠালে **Projects → Edit/Add-এর সাথে Branches সেকশনের অনুমতিও** লাগে (`planBranchChange` → `hasModuleLayer(user, "branches", "read")`); নইলে 403 ও কিছুই লেখা হয় না। `GET /api/projects/:id/branch-impact`-এও একই শর্ত। UI-তে Branch ও Branch Type ঘর শুধু `canSee('branches')` থাকলে দেখায়। Superadmin সবসময় পায়।
+
+## Link by name / Archive / Merge ও মোছার সুরক্ষা (২৩ নভেম্বর)
+- `GET /api/branches/link-preview`, `POST /api/branches/link-by-name`: `branches` মডিউল + `projects → edit_add`; সার্ভার প্রতিবার জোড়া আবার যাচাই করে।
+- `GET /api/branches/:id/merge-preview`, `POST /api/branches/:id/merge`: `branches` মডিউল + `employees → edit_add` (কর্মীর Branch বদলায়); প্রতিটা কর্মীর বদল `employee_change_log`-এ।
+- `PUT /api/branches/:id/archive`: `branches`; `PUT /api/projects/:id/archive`: `projects → edit_add`।
+- `DELETE /api/projects/:id` PEPM Entry/হাজিরা/সংশোধন থাকলে 409; `DELETE /api/branches/:id` কর্মী থাকলে 409 (আগে বিনা বাধায় মুছত)।
+

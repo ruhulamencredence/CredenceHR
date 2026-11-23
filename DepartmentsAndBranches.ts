@@ -52,14 +52,20 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   // tab) only — every signed-in account can list Branches (no per-user
   // permission table yet, unlike user_project_permissions), and nothing in
   // Remote Attendance/Timesheet reads from this table yet.
-  app.get("/api/branches", authenticateToken, async (req, res) => {
+  app.get("/api/branches", authenticateToken, async (req: any, res) => {
     try {
       const [branches, projects]: any[][] = await Promise.all([
         queryDB("SELECT * FROM branches ORDER BY branch_name ASC"),
         queryDB("SELECT * FROM projects")
       ]);
       const projectName = new Map(projects.map((p: any) => [Number(p.id), p.project_name]));
-      res.json(branches.map((b: any) => ({ ...b, linked_project_name: b.project_id ? projectName.get(Number(b.project_id)) ?? null : null })));
+      // A retired (archived) Branch is left out of pickers; the Admin Panel list asks for all.
+      const includeArchived = req.query?.include_archived === "1";
+      res.json(
+        branches
+          .filter((b: any) => includeArchived || !Number(b.is_archived))
+          .map((b: any) => ({ ...b, linked_project_name: b.project_id ? projectName.get(Number(b.project_id)) ?? null : null }))
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -303,6 +309,17 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   app.delete("/api/branches/:id", authenticateToken, requireAdmin, requireModule("branches"), async (req, res) => {
     try {
       const { id } = req.params;
+      // A Branch with people on it is not deleted: they would silently lose it
+      // (and fall back to the Head Office calendar). Archive it once it is empty,
+      // or merge it into the real one.
+      const people: any[] = await queryDB("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id = ?", [id]);
+      const n = Number(people[0]?.n || 0);
+      if (n > 0) {
+        return res.status(409).json({
+          error: `${n} employee${n === 1 ? " is" : "s are"} on this Branch, so it can't be deleted. Move them to another Branch (Merge) and archive this one instead.`,
+          employees: n
+        });
+      }
       await queryDB("DELETE FROM branches WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
