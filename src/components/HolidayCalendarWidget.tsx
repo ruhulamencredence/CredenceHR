@@ -264,13 +264,22 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     return Array.from(set).sort();
   }, [marksByDate]);
   const marksFor = (dateStr: string) => (marksByDate[dateStr] || []).filter((m) => matchesFilter(m, filter));
-  // The viewer's own day colours the whole square (a Weekend / Holiday keeps its own colour).
-  const ownCell = (dateStr: string) => {
+  // The viewer's own day is shown by the colour (and weight) of its date number
+  // only — no filled square, no dot; a Weekend / Holiday keeps its own colour.
+  // A Pending leave is underlined with a dashed line. Today keeps its round
+  // badge, with a small status dot under it (renderMarks).
+  const ownMark = (dateStr: string) => {
     const m = marksFor(dateStr).find((x) => x.user_id === me);
-    return m ? markStyle(m).cell : '';
+    return m ? { style: markStyle(m), pending: m.kind === 'leave' && m.status === 'pending' } : null;
+  };
+  const ownCell = (dateStr: string) => ownMark(dateStr)?.style.text || '';
+  const ownNumberClass = (dateStr: string, isToday: boolean) => {
+    const o = ownMark(dateStr);
+    if (!o || isToday) return 'font-semibold';
+    return `font-extrabold ${o.pending ? 'underline decoration-dashed decoration-2 decoration-pink-500 underline-offset-[3px]' : ''}`;
   };
 
-  // The viewer's own mark as a colour dot, everyone else's Leave as faces.
+  // The viewer's own mark as the colour of the date (a dot only on today), everyone else's Leave as faces.
   const renderMarks = (dateStr: string, isToday: boolean) => {
     const all = marksFor(dateStr);
     if (all.length === 0) return null;
@@ -279,14 +288,15 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     const mineStyle = mine ? markStyle(mine) : null;
     // Colour only — the legend under the calendar says what each colour is, so
     // the day's own square carries no word (the name stays for screen readers).
-    const word = mineStyle && (
-      <span
-        role="img"
-        aria-label={mineStyle.detail}
-        title={mineStyle.detail}
-        className={`inline-block rounded-full ${large ? 'w-2 h-2' : 'w-1.5 h-1.5'} ${mineStyle.solid && !isToday ? 'bg-white' : mineStyle.dot}`}
-      />
-    );
+    // Only today (whose number sits in a round badge) shows a dot; every other
+    // day is told by its number's colour, and the name stays for screen readers.
+    const word =
+      mineStyle &&
+      (isToday ? (
+        <span role="img" aria-label={mineStyle.detail} title={mineStyle.detail} className={`inline-block rounded-full ring-2 ring-white ${large ? 'w-2 h-2' : 'w-1.5 h-1.5'} ${mineStyle.dot}`} />
+      ) : (
+        <span className="sr-only">{mineStyle.detail}</span>
+      ));
     if (marks.length === 0) return word;
     const max = large ? (word ? 2 : 3) : word ? 1 : 2;
     return (
@@ -490,7 +500,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                           : ownCell(cell.dateStr) || 'text-slate-700 hover:bg-slate-50'
                   }`}
                 >
-                  <span className="font-semibold leading-none">{dates.main}</span>
+                  <span className={`${ownNumberClass(cell.dateStr, isToday && cell.inCurrentMonth)} leading-none`}>{dates.main}</span>
                   {dates.sub && <span className={`text-[10px] leading-none ${isToday && cell.inCurrentMonth ? 'text-white/80' : 'opacity-60'}`}>{dates.sub}</span>}
                   {entry && cell.inCurrentMonth && (
                     <span className="text-[10px] font-bold uppercase tracking-wide">
@@ -543,7 +553,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                   }`}
                 >
                   <span
-                    className={`font-semibold ${
+                    className={`${ownNumberClass(cell.dateStr, isToday && cell.inCurrentMonth)} ${
                       isToday && cell.inCurrentMonth ? 'w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center' : ''
                     }`}
                   >
