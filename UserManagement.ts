@@ -43,6 +43,9 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // Who is a Head / Supervisor is Departments data: shown in the Users list
+  // only to an account with the Departments module's Read layer.
+  hasModuleLayer?: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   // AttendanceProjects.ts: replaces an account's check-in Project list — an
   // older screen sending the single attendance_project_id lands there too.
   replaceAttendanceProjects?: (queryDB: any, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) => Promise<void>;
@@ -576,6 +579,27 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
           }))
         );
       }
+      // Department Head (departments.head_user_id) and team Supervisor
+      // (department_teams.supervisor_user_id) — only for an account allowed to
+      // read Departments (Superadmin always); otherwise the fields are left out.
+      const seesDeptRoles =
+        req.user.role === "superadmin" || (!!deps.hasModuleLayer && (await deps.hasModuleLayer(req.user, "departments", "read").catch(() => false)));
+      const headOf = new Map<number, string[]>();
+      const supervisorOf = new Map<number, string[]>();
+      if (seesDeptRoles) {
+        const add = (m: Map<number, string[]>, uid: any, label: string) => {
+          const k = Number(uid);
+          if (!k) return;
+          const list = m.get(k) || [];
+          if (!list.includes(label)) list.push(label);
+          m.set(k, list);
+        };
+        const heads: any[] = (await queryDB("SELECT head_user_id, name FROM departments WHERE head_user_id IS NOT NULL").catch(() => [])) || [];
+        for (const h of heads) add(headOf, h.head_user_id, String(h.name));
+        const sups: any[] =
+          (await queryDB("SELECT t.supervisor_user_id, d.name FROM department_teams t JOIN departments d ON d.id = t.department_id WHERE t.supervisor_user_id IS NOT NULL").catch(() => [])) || [];
+        for (const t of sups) add(supervisorOf, t.supervisor_user_id, String(t.name));
+      }
       // Mobile App on (AppAccess.ts): the account's own switch, or the
       // workspace's "New accounts get the Mobile App" when it has none.
       const appRows: any[] = (await queryDB("SELECT id, can_use_app, group_id, role, is_platform_admin FROM users").catch(() => [])) || [];
@@ -584,6 +608,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       res.json(visibleUsers.map((u: any) => ({
         ...u,
         app_on: appOnById.get(Number(u.id)) ?? true,
+        dept_head_of: seesDeptRoles ? headOf.get(Number(u.id)) || [] : undefined,
+        dept_supervisor_of: seesDeptRoles ? supervisorOf.get(Number(u.id)) || [] : undefined,
         employee_active: !inactiveUsers.has(Number(u.id)),
         // From the linked Employee record (Users page department filter).
         department: departmentByUser.get(Number(u.id)) || null,

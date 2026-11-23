@@ -861,6 +861,9 @@ export interface User {
   // 'admin' it's OFF by default and must be explicitly switched on by the
   // Superadmin (PUT /api/users/:id/login-location-access). Irrelevant for 'user'.
   can_view_login_location?: boolean;
+  // Departments this account heads / supervises a team in (Users list filters; only sent to an account that may read Departments).
+  dept_head_of?: string[];
+  dept_supervisor_of?: string[];
   // Superadmin-only grant: can this Admin ALSO set OTHER accounts' Module Access
   // (the module_permissions grant above) themselves, via PUT
   // /api/users/:id/module-permissions? Always false for role !== 'admin'. OFF by

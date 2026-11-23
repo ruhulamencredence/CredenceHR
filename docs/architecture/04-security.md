@@ -311,3 +311,6 @@
 ## অচল (inactive) কর্মীর login আর চলে না (২৩ নভেম্বর)
 আগে সাইন-ইন আটকাত শুধু `users.is_blocked` (Users → Block, Exit/Offboarding, HR Operations-এর পদক্ষেপ)। কর্মীর রেকর্ড Edit Employee বা ইমপোর্টে "Inactive" / Job Status Resigned-Terminated হলে login চালু থাকত। এখন `AccountBlock.ts`-এর `accountState` কর্মীর রেকর্ড থেকে নিজে হিসাব করে: login-এর Employee রেকর্ড আছে অথচ কোনোটাই "চালু ও Job Status ছুটি-না-নেওয়া" নয়, এমন হলে অবস্থা `inactive`। **সাইন-ইন (`finishLogin`) 403** দেয়, আর **খোলা সেশনও পরের অনুরোধে (সর্বোচ্চ ৩০ সেকেন্ডে) 401 `ACCOUNT_BLOCKED`** পায়। কর্মীকে আবার চালু করলে login সাথে সাথে ফিরে আসে (`is_blocked` ছোঁয়া হয় না)। ছাড় (কখনো আটকায় না): Superadmin, সিস্টেম-মালিক, নতুন-যোগদানকারীর অস্থায়ী login, Employee রেকর্ডহীন একাউন্ট। ERP 360 SSO আগে থেকেই অচল কর্মী ফেরাত; এখন সাধারণ সাইন-ইনও একই নীতিতে।
 
+
+## Users তালিকার "Department Head / Supervisor" ফিল্টার (২৩ নভেম্বর)
+কে কোন Department-এর Head (`departments.head_user_id`) বা team Supervisor (`department_teams.supervisor_user_id`) — এই তথ্য Departments মডিউলের। তাই `GET /api/users` এই দুটি ক্ষেত্র (`dept_head_of`, `dept_supervisor_of`) পাঠায় শুধু Superadmin-কে, অথবা যার Departments মডিউলে Read layer আছে তাকে; অন্য Admin-এর response-এ ক্ষেত্র দুটি থাকেই না এবং Users পাতায় ফিল্টার-chip দুটিও দেখায় না। UI লুকানো + API-তে বাদ, দুটোই।

@@ -466,13 +466,16 @@ const ReportRow = React.memo(function ReportRow({
 // cache (keyed by rounded coordinate) already dedupes accounts sharing a
 // login spot, like an office Wi-Fi gate.
 // User Management quick filter chips.
-const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean }[] = [
+const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean; deptRole?: boolean }[] = [
   { key: 'admins', label: 'Admins', match: (u) => u.role === 'admin' },
   { key: 'no_modules', label: 'No modules', match: (u) => u.role !== 'superadmin' && (u.module_permissions || []).length === 0 },
   { key: 'attendance', label: 'Attendance on', match: (u) => u.role !== 'superadmin' && !!u.can_use_attendance },
   { key: 'tracking', label: 'Tracking on', match: (u) => u.role !== 'superadmin' && !!u.can_use_tracking },
   { key: 'leave_summary', label: 'Leave Summary on', match: (u) => u.role !== 'superadmin' && !!u.can_view_leave_summary },
   { key: 'job_edit', label: 'Job Edit on', match: (u) => u.role !== 'superadmin' && !!u.can_job_edit },
+  // Departments data: the server sends these only to an account that may read Departments.
+  { key: 'dept_head', label: 'Department Head', deptRole: true, match: (u) => (u.dept_head_of || []).length > 0 },
+  { key: 'dept_supervisor', label: 'Department Supervisor', deptRole: true, match: (u) => (u.dept_supervisor_of || []).length > 0 },
   { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null },
   // Mobile App (APK) off — turn it on for them from the bar above (AppAccessBanner).
   { key: 'app_off', label: 'Mobile App off', match: (u) => u.role !== 'superadmin' && u.app_on === false }
@@ -7255,7 +7258,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           {/* Quick filters — one tap narrows the list to accounts with a given
               switch on (counts are for the whole list, not the current search). */}
           <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-1.5">
-            {USER_ACCESS_FILTERS.map((f) => {
+            {USER_ACCESS_FILTERS.filter((f) => !f.deptRole || users.some((u) => u.dept_head_of !== undefined)).map((f) => {
               const count = users.filter(f.match).length;
               const active = userAccessFilter === f.key;
               return (

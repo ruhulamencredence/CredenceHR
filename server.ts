@@ -3321,7 +3321,7 @@ async function startServer() {
   // before the Users routes so /api/users/attendance-projects/bulk is
   // never read as a user id.
   const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
+  registerUserManagementRoutes(app, { hasModuleLayer, authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
   // Admin Panel -> Users -> Module Access: Mobile App switch and App ticks
   // (after the Users routes, so the access audit log records changes).
   registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId, activeGroupId });
