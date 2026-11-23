@@ -38,6 +38,7 @@ import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { TOUR_SECTION_EVENT, openTutorials, takeTourSection, useTutorialsState } from '../lib/tutorials';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
+import { MyTeamCard } from './MyTeam';
 const LeaveReviewPage = React.lazy(() => import('./LeaveReviewPage').then((m) => ({ default: m.LeaveReviewPage })));
 const EmployeeDirectory = React.lazy(() => import('./EmployeeDirectory').then((m) => ({ default: m.EmployeeDirectory })));
 const NoticeBoard = React.lazy(() => import('./NoticeBoard').then((m) => ({ default: m.NoticeBoard })));
@@ -3337,6 +3338,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
 
+        {/* My Team (MyTeam.tsx) — only for an account with people under it. */}
+        <MyTeamCard token={token} className="flex flex-col [&>*]:flex-1" />
+
         {/* Book a Ride + My Asset quick access — web only; the app's own
             Dashboard has the mobile tiles above. */}
         {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
@@ -3617,6 +3621,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         />
       )}
 
+
+      {/* My Team — a Head / Supervisor's own people today (MyTeam.tsx);
+          renders nothing for an account with nobody under it. */}
+      {mobileActiveSection === null && !isDesktop && <MyTeamCard token={token} className="md:hidden" />}
 
       {/* Global Calendar (Admin Panel -> Holidays) — read-only "pocket
           calendar" of every set Weekend/Holiday date, same widget every role

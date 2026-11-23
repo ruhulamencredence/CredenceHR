@@ -1,0 +1,24 @@
+PASS Head: has a team
+PASS Head: the whole Department — not the one who resigned, nobody from elsewhere: Early,Late,Leaver,Nologin
+PASS Head: shown as "Head of <Department>"
+PASS today: P1 present, In 08:40
+PASS today: P2 late (11:30)
+PASS today: P3 on Casual Leave
+PASS today: the Employee with no login is listed, not in yet
+PASS summary counts {"total":4,"present":1,"late":1,"leave":1,"off":0,"not_in":1}
+PASS Team Supervisor: their team members, from any Department: Late,Teamed
+PASS Team Supervisor: shown with the team name
+PASS "Everyone else" team: plus the Department's people in no team: Early,Late,Leaver,Nologin,Teamed
+PASS Direct Supervisor: only the person whose Supervisor tab names them
+PASS someone with nobody under them: no team
+PASS outsider cannot open a person
+PASS Head cannot open someone outside the Department
+PASS Head cannot open the one who resigned
+PASS Superadmin: only people actually under them, not the whole company
+PASS Superadmin cannot open someone not under them here (Employee 360 is for that)
+PASS Head opens P1: today + email
+PASS P1 this month so far {"from":"2026-11-01","to":"2026-11-23","present":1,"late":0,"leave":0,"absent":22}
+PASS no attendance recorded at all this month: not shown absent every day {"from":"2026-11-01","to":"2026-11-23","present":0,"late":0,"leave":0,"absent":null}
+PASS no longer Head: the team is gone at once
+PASS no longer Head: cannot open P1
+ALL PASS

@@ -323,3 +323,10 @@ Attendance, Leave ও Bill Claim ভিত্তিক রিপোর্টে 
 
 ## Leave Manage-এর নতুন layer "joiner_rules" (২৩ নভেম্বর)
 Joiner & Probation নিয়ম বদলানো (`PUT /api/leave-policies/:key/joiner-rules`) এবং Confirmation-এ balance প্রস্তাব/যোগ (`GET /api/leave-joiner/confirmation-preview`, `POST /api/leave-joiner/confirmation-apply`) চালাতে `can_manage_leave` ও Leave Manage-এর `joiner_rules` layer লাগে (Superadmin সবসময়)। layer-টি কারও balance নিজে বদলাতে পারে, তাই `leave_rules`-এর মতোই explicit-only: কোনো layer সংরক্ষিত না থাকলে ডিফল্টে পাওয়া যায় না। UI-তে সেটিং-ব্লক ও Confirmation popup শুধু layer থাকলে দেখায়; API-তেও একই আটকানো। প্রতিটি Confirmation-যোগ কর্মীর edit history-তে (কে, কত, কবে) লেখা হয়।
+
+## Self Service → My Team: মডিউল ছাড়া, শুধু নিজের লোক (২৩ নভেম্বর)
+`GET /api/my-team` ও `GET /api/my-team/:employeeId` (`MyTeamRoutes.ts`) কোনো মডিউল বা per-account সুইচের পেছনে নেই। CLAUDE.md-এর "প্রতিটি Self Service feature একটি সুইচের পেছনে" নিয়মের ব্যতিক্রম, মালিকের সিদ্ধান্তে (২৩ নভেম্বর)। ঝুঁকি কম রাখা হয়েছে এভাবে:
+- প্রতিটি অনুরোধে সার্ভার database থেকে নতুন করে বের করে কে কার অধীনে (Head of Department, team Supervisor, Employees → Supervisor tab)। token বা client-এর কোনো তালিকায় ভরসা করা হয় না; Head / Supervisor পদ সরালে সাথে সাথে দেখা বন্ধ।
+- কেউ শুধু নিজের অধীনের সক্রিয় কর্মীদেরই দেখেন; `/:employeeId` অন্য কারও জন্য 403 দেয়, Superadmin-এর জন্যও (Superadmin অন্যদের Employee 360-এ দেখেন)। চাকরি ছেড়ে যাওয়া কর্মী তালিকায় আসেন না।
+- যা দেখায়: নাম, ID, designation, department, branch, আজকের In / Out ও জায়গা, Leave-এর ধরন, এ মাসের Present / Late / Leave / Absent সংখ্যা, ফোন ও email। বেতন, ব্যক্তিগত ঠিকানা, NID, documents কিছুই নয়। শুধু পড়া, কিছু বদলানো যায় না।
+- যার অধীনে কেউ নেই তার response শুধু `has_team: false`, UI-তে কার্ডও নেই।
