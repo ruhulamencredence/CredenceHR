@@ -1952,7 +1952,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Division, Department &amp; Branch</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <TextField label="Division" value={form.division} onChange={(v) => setForm((f) => ({ ...f, division: v }))} placeholder="e.g. Corporate Office" />
+                      {/* Division is the Branch's type, set by the system (BranchDivision.ts). */}
+                      {(() => {
+                        const picked = form.branch_id ? branches.find((b) => b.id === form.branch_id) : null;
+                        const shown = picked ? (picked.branch_type === 'project_site' ? 'Project Side' : 'Head Office') : form.division;
+                        return (
+                          <div>
+                            <label className={fieldLabelClass}>Division</label>
+                            <input type="text" value={shown} readOnly disabled placeholder="From the Branch" className={`${fieldInputClass} opacity-80 cursor-not-allowed`} />
+                            <p className="mt-1 text-[11px] text-slate-400">Set from the Branch: Head Office or Project Side.</p>
+                          </div>
+                        );
+                      })()}
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
                         <SearchSelect
