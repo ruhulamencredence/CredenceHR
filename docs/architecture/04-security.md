@@ -314,3 +314,6 @@
 
 ## Users তালিকার "Department Head / Supervisor" ফিল্টার (২৩ নভেম্বর)
 কে কোন Department-এর Head (`departments.head_user_id`) বা team Supervisor (`department_teams.supervisor_user_id`) — এই তথ্য Departments মডিউলের। তাই `GET /api/users` এই দুটি ক্ষেত্র (`dept_head_of`, `dept_supervisor_of`) পাঠায় শুধু Superadmin-কে, অথবা যার Departments মডিউলে Read layer আছে তাকে; অন্য Admin-এর response-এ ক্ষেত্র দুটি থাকেই না এবং Users পাতায় ফিল্টার-chip দুটিও দেখায় না। UI লুকানো + API-তে বাদ, দুটোই।
+
+## Reports & Insights: Department ড্রপডাউনে শুধু নিজের Department (২৩ নভেম্বর)
+Attendance, Leave ও Bill Claim ভিত্তিক রিপোর্টে Department-wise সীমা (Head of Department বা সীমিত Admin) আগে চালানোর সময় ঠিকই কার্যকর ছিল, কিন্তু ড্রপডাউনে সব Department দেখাত, ফলে অন্যটি বাছলে "You don't have access to this Department." আসত। এখন `GET /api/reports-insights/catalog` প্রতিটি রিপোর্টের সাথে `departments` দেয় (সীমা থাকলে শুধু ঐ তালিকা, না থাকলে null = সব), এবং ড্রপডাউন সেটাই দেখায়। চালানোর সময়কার সার্ভার-যাচাই আগের মতোই আছে।
