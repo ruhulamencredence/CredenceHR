@@ -64,16 +64,20 @@ useLiveRefresh(() => load());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // "Available" mirrors the remaining balance across all three Leave types —
-  // rejections already refund their day_count server-side (see decision
-  // endpoint), so this always reflects what's actually left to spend right
-  // now. "Leave Used" is everything currently deducted against that — i.e.
-  // every application NOT rejected, pending included, since day_count is
-  // taken out of the balance the moment it's submitted, before any decision.
-  const available = balance ? balance.casual_leave + balance.sick_leave + balance.leave_without_pay : 0;
-  const used = applications.filter((a) => a.status !== 'rejected').reduce((sum, a) => sum + a.day_count, 0);
-
+  // "Available" is the Casual + Sick left (rejections already refund their
+  // day_count server-side, so it is what is really left to spend). Leave
+  // Without Pay is not a balance to spend, so it is left out of the total.
+  // "Leave Used" counts only this year's leave (the period shown on the card),
+  // every application NOT rejected, pending included, since day_count is taken
+  // out of the balance the moment it is submitted. Leave Without Pay taken this
+  // year is shown on its own line, not added to Used.
   const year = new Date().getFullYear();
+  const casual = balance ? balance.casual_leave : 0;
+  const sick = balance ? balance.sick_leave : 0;
+  const available = casual + sick;
+  const thisYear = applications.filter((a) => a.status !== 'rejected' && String(a.start_date || '').slice(0, 4) === String(year));
+  const used = thisYear.filter((a) => a.leave_type !== 'without_pay').reduce((sum, a) => sum + a.day_count, 0);
+  const withoutPay = thisYear.filter((a) => a.leave_type === 'without_pay').reduce((sum, a) => sum + a.day_count, 0);
 
   return (
     <>
@@ -161,11 +165,15 @@ useLiveRefresh(() => load());
             </div>
             <div>
               <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used · {year}
               </div>
               <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{used}</p>
             </div>
           </div>
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            Casual {casual} · Sick {sick}
+            {withoutPay > 0 ? ` · Without pay ${withoutPay} (not counted)` : ''}
+          </p>
         </div>
       </div>
       </div>

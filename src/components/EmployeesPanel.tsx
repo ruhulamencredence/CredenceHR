@@ -8,6 +8,7 @@ import {
 import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { UserAvatar } from './UserAvatar';
 import { apiUrl } from '../lib/api';
+import { ConfirmationLeaveBalance, type ConfirmationPreview } from './ConfirmationLeaveBalance';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
 import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
@@ -401,6 +402,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // (status, branch…) can never wipe it (Office Attendance would then ask to
   // link that PIN again).
   const [loadedPin, setLoadedPin] = useState('');
+  // Job Base when the form was opened: Probation -> something else offers HR the Leave balance (Leave Manage layer joiner_rules).
+  const [loadedJobBase, setLoadedJobBase] = useState('');
+  const [confirmationLeave, setConfirmationLeave] = useState<ConfirmationPreview | null>(null);
+  const canJoinerLeave = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('joiner_rules');
   const [form, setForm] = useState<EmployeeFormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -648,6 +653,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const openEditForm = (e: Employee) => {
     setEditingId(e.id);
     setLoadedPin(e.zk_device_pin || '');
+    setLoadedJobBase(e.job_base || '');
     setForm({
       employee_id: e.employee_id || '',
       name: e.name || '',
@@ -1030,8 +1036,20 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         type: careerNote.includes('not saved') ? 'error' : 'success',
         text: (editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.') + careerNote
       });
+      // Probation -> confirmed: offer HR the Leave days to add (only to an account with the Joiner & Probation layer).
+      const wasProbation = !!editingId && loadedJobBase.trim().toLowerCase() === 'probation';
+      const nowProbation = String(form.job_base || '').trim().toLowerCase() === 'probation';
       closeForm();
       fetchAll();
+      if (wasProbation && !nowProbation && canJoinerLeave && editingId) {
+        try {
+          const pr = await fetch(apiUrl(`/api/leave-joiner/confirmation-preview?employee_id=${editingId}`), { headers: authHeaders });
+          const pj = await pr.json().catch(() => ({}));
+          if (pr.ok && pj.enabled) setConfirmationLeave(pj as ConfirmationPreview);
+        } catch {
+          // no popup; the Employee is saved either way
+        }
+      }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong' });
     } finally {
@@ -2792,6 +2810,17 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             </div>
           </div>
         </div>
+      )}
+      {confirmationLeave && (
+        <ConfirmationLeaveBalance
+          token={token}
+          preview={confirmationLeave}
+          onClose={() => setConfirmationLeave(null)}
+          onDone={(text) => {
+            setConfirmationLeave(null);
+            setMessage({ type: 'success', text });
+          }}
+        />
       )}
     </div>
   );

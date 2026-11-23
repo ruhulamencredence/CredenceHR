@@ -1322,3 +1322,11 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 
 ## Employee Division = Branch-এর ধরন (২৩ নভেম্বর)
 Division আর হাতে লেখা হয় না; Branch-এর ধরন অনুযায়ী "Head Office" বা "Project Side" বসে (`BranchDivision.ts`)। Branch বাছলে (Edit Employee, Transfer, Merge, Branch-এর ধরন বদল, Employee import, joiner → employee) এটি নিজে ঠিক হয়। আগের সবার জন্য Branches পাতার "Set Division from Branch" (আগে preview, তারপর প্রয়োগ, প্রতি পরিবর্তন ইতিহাসে)। Branch না থাকলে পুরনো Division থাকে।
+
+## Leave: নতুন joiner, Probation ও Confirmation (২৩ নভেম্বর)
+Leave Manage-এর নতুন অংশ "Joiner & Probation" (Casual / Sick / Without Pay, ডিফল্টে বন্ধ — `LeaveJoiner.ts`)। প্রতিটি Leave Type-এ দুটি সুইচ: (১) Probation চলাকালে (`probation_mode`): সীমা নেই / pro-rata / দেওয়া হবে না, (২) বছরের মাঝে যোগ দিলে pro-rata (`joiner_prorata`)।
+- Pro-rata = Balance Workflow-এর পূর্ণ বছরের দিন × (যোগদানের মাস থেকে ডিসেম্বর, যোগদানের মাস পুরো) ÷ 12, নিকটতম আধা দিনে গোল। বছর = ক্যালেন্ডার বছর।
+- Probation = Employee-এর Job Base "Probation"। কর্মী Probation-এ থাকলে "না-দেওয়া" Leave Type-এর আবেদন ফেরত যায় ("isn't available during Probation")।
+- নিয়ম খাটে শুধু যখন কারও balance **দেওয়া** হয়: নতুন account-এর প্রথম balance (`ensureDefaultLeaveBalances`) ও বছর-শেষের rollover। আগে থেকে সংরক্ষিত balance, "Apply Now" বা "Set Balance in Bulk" নিয়ম দিয়ে বদলায় না।
+- Confirmation: Edit Employee-তে Job Base Probation থেকে অন্য কিছু করে Save করলে (যার Leave Manage-এর `joiner_rules` layer আছে) HR-এর সামনে popup আসে: `GET /api/leave-joiner/confirmation-preview` প্রস্তাব দেয় (Casual = পূর্ণ দিন × confirmation-মাস থেকে বাকি মাস ÷ 12, এ বছর যা নেওয়া হয়েছে তা বাদ; Probation-এ pro-rata পাওয়া Sick-এ 0)। HR সংখ্যা বদলে `POST /api/leave-joiner/confirmation-apply` চাপলে balance-এ যোগ হয় ও কর্মীর history-তে (`leave_casual_balance`) লেখা থাকে।
+- Dashboard-এর Leave Summary কার্ড: Available = Casual + Sick (Leave Without Pay বাদ); "Leave Used · <বছর>" = শুধু এ বছরের (Without Pay বাদ); Without Pay আলাদা ছোট লাইনে।

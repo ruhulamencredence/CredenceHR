@@ -599,14 +599,14 @@ const EDITLOG_LAYER_KEYS = ["read", "mpr_followup"] as const;
 // set — see requireLeaveManagerLayer() below.
 // "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
 // left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
-const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules", "joiner_rules"] as const;
 // HR Data Import's layers: one tick per kind of data that can be imported.
 // Having a module (Employees, Leave, Payroll…) is NOT enough to import into
 // it — the account also needs the HR Data Import module and that kind's tick
 // here. All explicit-only: an account with no saved layers gets none.
 // (Salary import keeps its own explicit Payroll layer "salary_bulk_upload".)
 const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_bill_claims", "import_attendance", "import_office_attendance"] as const;
-const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
+const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules" && k !== "joiner_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
 // endpoint (UserManagement.ts) accepts — a single map instead of one flat
