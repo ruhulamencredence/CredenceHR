@@ -43,3 +43,18 @@ The Out Time box no longer shows "Set again". For an account allowed to give
 the Out again (users.can_update_check_out) the box itself is tapped; it asks
 first, as before. For anyone else the box does nothing.
 - `out-again-tap-ui.txt` — 9/9; screenshot `out-again-card.png`.
+
+# In Time / Out Time popup, new look
+
+AttendanceMapConfirm.tsx (both In and Out), liquid-glass card: "In Time" /
+"Out Time" with the project and the time now; a big map showing the whole
+attendance area (theme colour; other projects dashed), you as a blue dot, no
++/- buttons (pinch), the status line on the map (inside / km away — goes for
+approval / no area set) and the location button on the map instead of "Use
+current location" and the raw coordinates; Remarks (optional) or Reason
+(needed — Submit off until written); Cancel and Submit side by side. Same map
+(OpenStreetMap) and the same rules as before.
+- `attendance-popup-ui.txt` — 17/17 (run twice); screenshots
+  `attendance-popup-in.png`, `attendance-popup-out-offsite.png`.
+- The card accepts a GPS fix up to 30 s old, so the test waits 31 s after
+  moving the location before the Out.

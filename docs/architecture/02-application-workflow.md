@@ -1341,3 +1341,6 @@ Leave Manage-এর নতুন অংশ "Joiner & Probation" (Casual / Sick /
 
 ## Phone-এর Leave পাতা: "Given for <বছর>" ও নিচে Apply Leave (২৩ নভেম্বর)
 Gauge card-এর উপরে পাতলা সারি: এ বছর প্রতিটি ছুটির ধরনে কত দিন দেওয়া = এখন বাকি + এ বছর approve হয়ে নেওয়া + অনুমোদনের অপেক্ষায় থাকা (আবেদন পাঠানোর সময়ই balance থেকে কাটা হয়, reject হলে ফেরত আসে)। তাই HR হাতে balance বদলালেও (Set Balance, joiner pro-rata, Confirmation) সংখ্যা ঐ ব্যক্তির নিজের balance-এর সাথে মেলে। No pay-তে "No limit"। কোনো ধরনে tap করলে Given / Taken / Waiting / Left। Apply Leave বোতাম card থেকে সরে Check In/Out-এর "Add Check In/Out"-এর মতো নিচের bar-এর উপরে ভাসে, শুধু Leave পাতা খোলা থাকলে। Server-এ কিছু বদলায়নি (`LeavePhone.tsx`, `LeaveReviewPage.tsx`)।
+
+## In Time / Out Time popup-এর নতুন চেহারা (২৩ নভেম্বর)
+`AttendanceMapConfirm.tsx` (In ও Out দুটোতেই): উপরে "In Time" / "Out Time", প্রজেক্ট ও এখনকার সময়; বড় map-এ পুরো attendance area (অন্য প্রজেক্টের area হালকা দাগে) আর নীল বিন্দুতে নিজের অবস্থান; map-এর উপরে এক লাইনে অবস্থা (area-র ভেতরে / কত দূরে — approval-এ যাবে / area নেই) আর কোণায় location বোতাম (আগের "Use current location" ও coordinate সরানো); Remarks (ঐচ্ছিক) বা area-র বাইরে Reason (বাধ্যতামূলক, না লেখা পর্যন্ত Submit বন্ধ); নিচে Cancel ও Submit পাশাপাশি। Map (OpenStreetMap) ও সব নিয়ম আগের মতোই — দূরত্ব, off-site approval, mock location আটকানো।
