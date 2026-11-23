@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৪টি টেবিল, ২৯৭৯টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৬টি টেবিল, ৩০০০টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1716,6 +1716,37 @@ Unique: `app_id`(app_id)
 | `new_accounts_app` | tinyint(1) | না | default 1 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+### `data_cleanup_batches`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | হ্যাঁ |  | কোম্পানি-মালিকানা (code-level scope) |
+| `kind` | varchar(20) | না |  | |
+| `mode` | varchar(20) | হ্যাঁ |  | |
+| `count` | int(11) | না | default 0 | |
+| `reason` | text | না |  | |
+| `filters_json` | text | হ্যাঁ |  | |
+| `actor_id` | int(11) | না |  | |
+| `actor_name` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | না | default current_timestamp() | |
+| `restored_at` | datetime | হ্যাঁ |  | |
+| `restored_by` | int(11) | হ্যাঁ |  | |
+| `restored_count` | int(11) | হ্যাঁ |  | |
+
+### `data_cleanup_trash`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `batch_id` | int(11) | না |  | |
+| `kind` | varchar(20) | না |  | |
+| `record_id` | varchar(40) | না |  | |
+| `label` | varchar(500) | হ্যাঁ |  | |
+| `rows_json` | longtext | না |  | |
+| `restored` | tinyint(1) | না | default 0 | |
+| `created_at` | timestamp | না | default current_timestamp() | |
 
 ### `employee_template_assignments`
 

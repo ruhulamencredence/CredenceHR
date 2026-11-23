@@ -139,6 +139,9 @@ export function registerDataCleanupRoutes(app: Express, deps: Deps) {
       schemaReady = null;
       throw e;
     }));
+  // Also made at startup, so the tables exist (and the architecture docs'
+  // schema build sees them) before anyone opens Data cleanup.
+  void ensureSchema().catch(() => {});
   const purgeOld = () =>
     queryDB(
       `DELETE FROM data_cleanup_trash WHERE created_at < (NOW() - INTERVAL ${KEEP_DAYS} DAY)`
