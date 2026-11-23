@@ -5,6 +5,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
 import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
@@ -132,17 +133,21 @@ useLiveRefresh(() => load(true));
     applications
       .filter((a) => a.leave_type === key && a.status === 'approved' && Number(String(a.start_date).slice(0, 4)) === thisYear)
       .reduce((n, a) => n + Number(a.day_count || 0), 0);
+  // Waiting for approval: already taken off the balance when sent.
+  const pendingOf = (key: string) =>
+    applications.filter((a) => a.leave_type === key && a.status === 'pending').reduce((n, a) => n + Number(a.day_count || 0), 0);
   const leaveTypes: LeaveTypeInfo[] = balance
     ? [
-        { key: 'casual', label: 'Casual leave', short: 'Casual', left: Number(balance.casual_leave), taken: takenThisYear('casual') },
-        { key: 'sick', label: 'Sick leave', short: 'Sick', left: Number(balance.sick_leave), taken: takenThisYear('sick') },
+        { key: 'casual', label: 'Casual leave', short: 'Casual', left: Number(balance.casual_leave), taken: takenThisYear('casual'), pending: pendingOf('casual') },
+        { key: 'sick', label: 'Sick leave', short: 'Sick', left: Number(balance.sick_leave), taken: takenThisYear('sick'), pending: pendingOf('sick') },
         { key: 'without_pay', label: 'Leave without pay', short: 'No pay', left: null, taken: takenThisYear('without_pay') },
         ...(balance.custom_leaves || []).map((c) => ({
           key: c.key,
           label: c.label,
           short: c.label.replace(/\s+leave$/i, ''),
           left: Number(c.balance),
-          taken: takenThisYear(c.key)
+          taken: takenThisYear(c.key),
+          pending: pendingOf(c.key)
         }))
       ]
     : [];
@@ -155,15 +160,11 @@ useLiveRefresh(() => load(true));
   return (
     <>
     {isPhone ? (
-      <div className="flex flex-col gap-3.5 px-1 pt-2 pb-8">
-        {!balanceLoading && leaveTypes.length === 0 && (
-          <button type="button" onClick={() => setShowNewModal(true)} className="self-center inline-flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform" style={{ background: 'var(--g-accent, #7f00ff)', boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)' }}>
-            <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Apply Leave
-          </button>
-        )}
+      // Bottom room so the last card scrolls clear of the floating Apply Leave.
+      <div className="flex flex-col gap-3.5 px-1 pt-2 pb-24">
         {balanceLoading ? null : leaveTypes.length > 0 && (
           <div data-tour="leave-balance">
-            <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} onSubmit={() => setShowNewModal(true)} />
+            <LeaveGauge types={leaveTypes} year={thisYear} filter={typeFilter} onFilter={setTypeFilter} />
           </div>
         )}
         <div data-tour="leave-tabs" className="grid grid-cols-3 gap-1 p-[5px] rounded-full bg-white/75 border border-white/90 shadow-[0_10px_30px_-14px_rgba(var(--g-accent-rgb,127,0,255),.3)]">
@@ -437,8 +438,29 @@ useLiveRefresh(() => load(true));
     </>
     )}
 
-      {/* On a phone, Submit leave sits in the gauge card (LeavePhone.tsx);
-          desktop has it in the header row above. */}
+      {/* Phone: Apply Leave floats centred above the bottom bar — the same
+          pill and place as Check In/Out's "Add Check In/Out" and Bill
+          Claim's "New Claim". Portalled to <body> (a liquid-glass /
+          animated parent would otherwise pin a fixed button to itself), and
+          only while this page is the one showing (the bottom nav keeps it
+          mounted). Desktop has Submit Leave in the header row above. */}
+      {isPhone && active && !showNewModal &&
+        createPortal(
+          <button
+            type="button"
+            onClick={() => setShowNewModal(true)}
+            data-testid="leave-apply-fab"
+            className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform"
+            style={{
+              bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))',
+              background: 'var(--g-accent, #7f00ff)',
+              boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)'
+            }}
+          >
+            <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Apply Leave
+          </button>,
+          document.body
+        )}
       {showNewModal && (
         <NewLeaveApplicationModal
           token={token}

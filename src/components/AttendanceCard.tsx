@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { latesCombined } from '../lib/lateDeduction';
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
@@ -477,16 +478,32 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
   const inParts = status?.check_in_at ? formatTimeParts(status.check_in_at as string) : null;
   const outParts = status?.check_out_at ? formatTimeParts(status.check_out_at as string) : null;
   const busy = working !== null || !!pending || loadingStatus;
+  // The Out Time box itself gives the Out again (no "Set again" text).
+  const canSetOutAgain = hasCheckedOut && !!outParts && !!status?.can_update_check_out && !busy;
+  const setOutAgain = async () => {
+    if (!canSetOutAgain || !outParts) return;
+    const msg =
+      status?.check_out_source === 'office'
+        ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
+        : `Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`;
+    if (!(await confirmDialog(msg))) return;
+    void handleMark('out');
+  };
 
   const lateWarnings: { badge: string; text: string }[] = [];
   if (lateSummary?.policy) {
     const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
     const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
     const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
-    if (oneShort(Number(lateSummary.late_count) || 0, per)) {
+    // Extreme = 0 in the Late Policy: Extreme Delay counts with the lates (lib/lateDeduction.ts).
+    const combined = latesCombined(lateSummary.policy);
+    const lates = (Number(lateSummary.late_count) || 0) + (combined ? Number(lateSummary.extreme_late_count) || 0 : 0);
+    if (oneShort(lates, per)) {
       lateWarnings.push({
-        badge: `${lateSummary.late_count}/${per} late`,
-        text: `${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
+        badge: `${lates}/${per} late`,
+        text: combined
+          ? `${lates} lates this month (Delay and Extreme Delay together) — 1 more and a day's salary will be deducted (${per} lates = 1 day).`
+          : `${lates} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
       });
     }
     if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {
@@ -577,7 +594,29 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        {/* Gave it too early, or the office machine took a stray punch as
+            the Out? The same day it can be given again
+            (users.can_update_check_out — off unless ticked) by tapping this
+            box; no "Set again" text, it asks first (confirmDialog). */}
+        <div
+          className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'} ${
+            canSetOutAgain ? 'cursor-pointer active:scale-[0.98] transition-transform' : ''
+          }`}
+          {...(canSetOutAgain
+            ? {
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': 'Out Time — tap to give it again',
+                onClick: setOutAgain,
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOutAgain();
+                  }
+                }
+              }
+            : {})}
+        >
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {!hasCheckedOut && waiting?.out_at ? (
             <>
@@ -594,26 +633,10 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
                 <span className="text-[11px] align-middle">{outParts.meridiem}</span>
               </div>
               {placeLine(status?.check_out_source, status?.check_out_place)}
-              {/* Gave it too early, or the office machine took a stray punch as
-                  the Out? The same day it can be given again
-                  (users.can_update_check_out — off unless ticked). */}
-              {status?.can_update_check_out && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const msg =
-                      status?.check_out_source === 'office'
-                        ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
-                        : `Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`;
-                    if (!(await confirmDialog(msg))) return;
-                    void handleMark('out');
-                  }}
-                  disabled={busy}
-                  className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {working === 'out' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
-                  Set again
-                </button>
+              {working === 'out' && (
+                <div className="mt-0.5">
+                  <Spinner size={12} />
+                </div>
               )}
             </>
           ) : (

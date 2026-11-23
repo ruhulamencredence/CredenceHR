@@ -109,6 +109,7 @@ import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequ
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerEmployeeActivityRoutes } from "./EmployeeActivityRoutes";
+import { registerMyTeamRoutes } from "./MyTeamRoutes";
 import { ensureUserAccessLogSchema, userAccessLogMiddleware } from "./UserAccessLog";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerHrQuickReportsRoutes, ensureHrQuickReportsSchema } from "./HrQuickReports";
@@ -3743,6 +3744,8 @@ async function startServer() {
   // family / training records + every other module's data for one Employee.
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
   registerEmployeeActivityRoutes(app, { authenticateToken, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB });
+  // Self Service -> My Team: a Head / Supervisor's own people, read-only (no module — see the file).
+  registerMyTeamRoutes(app, { authenticateToken, queryDB });
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });

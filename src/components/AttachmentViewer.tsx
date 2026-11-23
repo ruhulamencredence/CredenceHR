@@ -12,7 +12,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, FileText, Loader2, Paperclip, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileText, Loader2, Paperclip, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { loadPdfjs } from '../lib/pdfjs';
 import { saveBlobCrossPlatform } from '../lib/saveFile';
@@ -31,8 +31,15 @@ export const AttachmentViewer: React.FC<{
   // An API path such as /api/bill-claims/12/file (sent with the sign-in).
   src: string;
   name?: string | null;
+  // Instead of fetching `src`: the file from somewhere else (Credence Mail's
+  // attachments come through mailApi.fetchAttachment). `type` is its MIME type.
+  load?: () => Promise<Blob>;
+  type?: string | null;
+  // Several files to page through (e.g. one mail's attachments): "2 / 3" and
+  // ‹ › in the header, ← → keys. The parent shows the next one.
+  nav?: { index: number; count: number; onPrev: () => void; onNext: () => void };
   onClose: () => void;
-}> = ({ token, src, name, onClose }) => {
+}> = ({ token, src, name, load, type, nav, onClose }) => {
   const [blob, setBlob] = useState<Blob | null>(null);
   const [kind, setKind] = useState<'image' | 'pdf' | 'other' | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -45,24 +52,38 @@ export const AttachmentViewer: React.FC<{
   useBackButtonClose(true, onClose);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      else if (nav && e.key === 'ArrowLeft' && nav.index > 0) nav.onPrev();
+      else if (nav && e.key === 'ArrowRight' && nav.index < nav.count - 1) nav.onNext();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, nav]);
 
   useEffect(() => {
     let cancelled = false;
     let made: string | null = null;
     (async () => {
       try {
-        const res = await fetch(apiUrl(src), { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Could not open the attachment.');
-        const disp = res.headers.get('content-disposition') || '';
-        const fromHeader = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp)?.[1];
-        const shownName = name || (fromHeader ? decodeURIComponent(fromHeader) : 'Attachment');
-        const b = await res.blob();
+        let b: Blob;
+        let shownName: string;
+        let contentType: string;
+        if (load) {
+          b = await load();
+          shownName = name || 'Attachment';
+          contentType = type || b.type || '';
+        } else {
+          const res = await fetch(apiUrl(src), { headers: { Authorization: `Bearer ${token}` } });
+          if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || 'Could not open the attachment.');
+          const disp = res.headers.get('content-disposition') || '';
+          const fromHeader = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp)?.[1];
+          shownName = name || (fromHeader ? decodeURIComponent(fromHeader) : 'Attachment');
+          b = await res.blob();
+          contentType = res.headers.get('content-type') || b.type || '';
+        }
         if (cancelled) return;
-        const k = kindOf(res.headers.get('content-type') || b.type || '', shownName);
+        const k = kindOf(contentType, shownName);
         setFileName(shownName);
         setBlob(b);
         setKind(k);
@@ -111,6 +132,19 @@ export const AttachmentViewer: React.FC<{
               <div className="text-sm font-bold text-slate-900 truncate">{fileName}</div>
               {kind === 'pdf' && pages > 0 && <div className="text-[11px] text-slate-500">{pages} page{pages === 1 ? '' : 's'}</div>}
             </div>
+            {nav && nav.count > 1 && (
+              <div className="flex items-center gap-1 shrink-0">
+                <button type="button" onClick={nav.onPrev} disabled={nav.index === 0} aria-label="Previous file" className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600 disabled:opacity-35">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span data-testid="attachment-viewer-count" className="text-xs font-semibold text-slate-600 tabular-nums px-0.5">
+                  {nav.index + 1} / {nav.count}
+                </span>
+                <button type="button" onClick={nav.onNext} disabled={nav.index >= nav.count - 1} aria-label="Next file" className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600 disabled:opacity-35">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             {kind === 'image' && (
               <button
                 type="button"

@@ -14,6 +14,7 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { ChatImageViewer, useChatImageUrl, type ChatImageItem } from './chat/ChatImageViewer';
 import { UserAvatar } from './UserAvatar';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
@@ -160,15 +161,18 @@ function useAttachmentUrl(token: string, messageId: number): string | null {
   return url;
 }
 
-const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token, messageId }) => {
-  const url = useAttachmentUrl(token, messageId);
+// A photo in a bubble (or the Photos grid); tapping it opens the in-app
+// viewer with every photo of the conversation (chat/ChatImageViewer.tsx).
+const AttachmentImage: React.FC<{ token: string; messageId: number; onOpen?: () => void }> = ({ token, messageId, onOpen }) => {
+  const url = useChatImageUrl(token, messageId);
   if (!url) return <div className="w-48 h-32 bg-slate-200 rounded-lg animate-pulse" />;
   return (
     <img
       src={url}
       alt="attachment"
+      data-testid="chat-photo"
       className="max-w-[240px] max-h-[240px] rounded-lg object-cover cursor-pointer"
-      onClick={() => window.open(url, '_blank')}
+      onClick={onOpen}
     />
   );
 };
@@ -193,6 +197,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // The photo viewer: which photos (this conversation's, or the Photos grid's) and where to start.
+  const [photoViewer, setPhotoViewer] = useState<{ images: ChatImageItem[]; startId: number } | null>(null);
+  const conversationPhotos = useCallback(
+    (): ChatImageItem[] =>
+      messages
+        .filter((m) => m.message_type === 'image' && m.has_attachment)
+        .map((m) => ({ id: m.id, sender_name: m.sender_name, created_at: m.created_at, filename: m.attachment_filename })),
+    [messages]
+  );
+  useEffect(() => setPhotoViewer(null), [activeRoomId]);
   const [roomSearch, setRoomSearch] = useState('');
   // Chat list: only one-to-one chats with people of these Departments (empty = all).
   const [roomDepts, setRoomDepts] = useState<string[]>([]);
@@ -1798,7 +1812,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                                 <div className="truncate">{msg.reply_to_content}</div>
                               </button>
                             )}
-                            {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
+                            {msg.message_type === 'image' && msg.has_attachment && (
+                              <AttachmentImage token={token} messageId={msg.id} onOpen={() => setPhotoViewer({ images: conversationPhotos(), startId: msg.id })} />
+                            )}
                             {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
                             {msg.message_type === 'file' && msg.has_attachment && (
                               <a
@@ -2087,7 +2103,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
             {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
-            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => (
+                  <AttachmentImage
+                    token={token}
+                    messageId={id}
+                    onOpen={() =>
+                      setPhotoViewer({
+                        images: profile.media
+                          .filter((m) => m.message_type === 'image')
+                          .map((m) => ({ id: m.id, sender_name: m.sender_name, created_at: m.created_at, filename: m.attachment_filename })),
+                        startId: id
+                      })
+                    }
+                  />
+                )} onOpenFile={(id) => void openAttachment(id)} />}
             {activeRoom.type === 'direct' && profile && (
               <CommonGroups
                 groups={profile.commonGroups}
@@ -2364,6 +2393,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           }}
         />
       )}
+      {photoViewer && <ChatImageViewer token={token} images={photoViewer.images} startId={photoViewer.startId} onClose={() => setPhotoViewer(null)} />}
     </div>
   );
 };
