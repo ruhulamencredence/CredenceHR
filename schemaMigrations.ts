@@ -1509,6 +1509,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add branches.branch_type column: " + err.message);
     }
   }
+  // is_archived — a retired Branch / Project is hidden from lists and pickers
+  // (Admin Panel can still show it) instead of being deleted, which would take
+  // its history with it. Default 0: nothing existing changes.
+  for (const table of ["branches", "projects"]) {
+    try {
+      await dbPool.query(`ALTER TABLE ${table} ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add ${table}.is_archived column: ` + err.message);
+    }
+  }
   // project_id — the Project (attendance check-in site + PEPM) this Branch
   // is kept in step with, so Admin Panel -> Branches is the one place to
   // keep a site's name and map pin. At most one Branch per Project. Only

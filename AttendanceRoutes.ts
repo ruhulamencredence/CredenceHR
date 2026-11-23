@@ -205,7 +205,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   app.get("/api/attendance/my-projects", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
-      const rows: any[] = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      // A retired (archived) Project is not offered for check-in.
+      const rows: any[] = (await queryDB("SELECT * FROM projects ORDER BY project_name ASC")).filter((p: any) => !Number(p.is_archived));
       res.json(allowed ? rows.filter((p: any) => allowed.has(Number(p.id))) : rows);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

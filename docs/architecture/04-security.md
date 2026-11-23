@@ -302,3 +302,9 @@
 ## প্রজেক্ট এডিটে Branch / Branch Type বদল (২৩ নভেম্বর)
 `PUT /api/projects/:id`-এ `branch_type` বা `branch_link` পাঠালে **Projects → Edit/Add-এর সাথে Branches সেকশনের অনুমতিও** লাগে (`planBranchChange` → `hasModuleLayer(user, "branches", "read")`); নইলে 403 ও কিছুই লেখা হয় না। `GET /api/projects/:id/branch-impact`-এও একই শর্ত। UI-তে Branch ও Branch Type ঘর শুধু `canSee('branches')` থাকলে দেখায়। Superadmin সবসময় পায়।
 
+## Link by name / Archive / Merge ও মোছার সুরক্ষা (২৩ নভেম্বর)
+- `GET /api/branches/link-preview`, `POST /api/branches/link-by-name`: `branches` মডিউল + `projects → edit_add`; সার্ভার প্রতিবার জোড়া আবার যাচাই করে।
+- `GET /api/branches/:id/merge-preview`, `POST /api/branches/:id/merge`: `branches` মডিউল + `employees → edit_add` (কর্মীর Branch বদলায়); প্রতিটা কর্মীর বদল `employee_change_log`-এ।
+- `PUT /api/branches/:id/archive`: `branches`; `PUT /api/projects/:id/archive`: `projects → edit_add`।
+- `DELETE /api/projects/:id` PEPM Entry/হাজিরা/সংশোধন থাকলে 409; `DELETE /api/branches/:id` কর্মী থাকলে 409 (আগে বিনা বাধায় মুছত)।
+

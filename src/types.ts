@@ -1217,6 +1217,8 @@ export interface Project {
   linked_branch_id?: number | null;
   linked_branch_name?: string | null;
   linked_branch_type?: 'head_office' | 'project_site' | null;
+  // Retired: hidden from lists and pickers, nothing deleted (BranchTools.ts).
+  is_archived?: number | boolean;
 }
 
 // A company Branch (Admin Panel -> Branches, a separate AdminModuleKey from
@@ -1234,6 +1236,7 @@ export interface Branch {
   // Employee assigned to this Branch — see all_employees.branch_id /
   // getEmployeeBranchTypeMap in holidayRoutes.ts.
   branch_type: 'head_office' | 'project_site';
+  is_archived?: number | boolean;
   created_by?: number;
   created_at?: string;
   // Site location pin set from Admin Panel -> Branches -> "Set Location on Map"

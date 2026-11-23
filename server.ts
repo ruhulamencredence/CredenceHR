@@ -25,6 +25,7 @@ import { ensureUserRecordsGuard } from "./UserRecordsGuard";
 import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
+import { registerBranchToolsRoutes } from "./BranchTools";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
@@ -3326,6 +3327,7 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
+  registerBranchToolsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
   // Head of Department + teams with their own Supervisor (DepartmentTeams.ts).
   registerDepartmentTeamsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, onChange: () => requestApprovalReconcile() });
 

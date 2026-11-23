@@ -1306,3 +1306,12 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 - ধরন বদলালে `GET /api/projects/:id/branch-impact` থেকে কত জন কর্মী ওই Branch-এ আছে এনে `confirmDialog` জিজ্ঞেস করে; তৈরি payroll নিজে নতুন করে হিসাব হয় না।
 - নাম ও লোকেশন মেলানো, Branch নাম বদলালে কপি ছড়ানো, Branch ফর্মের লিঙ্ক নিয়ম আগের মতোই। সব নিয়মের তালিকা: `docs/branch-project-rules.md`।
 
+## Branch ও প্রজেক্টের গোছানো: নাম মিলিয়ে যুক্ত, Archive, Merge (২৩ নভেম্বর)
+
+লাইভ ডেটায় ১৫৬ Branch (প্রায় সব HR ডেটা থেকে আসা, ৮১৭ চালু কর্মীর সবাই কোনো না কোনো Branch-এ), ১০৭ প্রজেক্ট, আর যুক্ত মাত্র ৫টা। তাই Branch ও প্রজেক্ট আলাদা তালিকাই থাকে; `BranchTools.ts` তিনটা গোছানোর কাজ দেয় (Admin Panel → Branches / Projects):
+- **Link by name:** একই নামের Branch-ছাড়া প্রজেক্ট ও প্রজেক্ট-ছাড়া Branch আগে তালিকায় দেখিয়ে টিক দিয়ে যুক্ত করা। নাম ও পিন বদলায় না। যুক্ত হলে "Their Branch" Check In ও Transfer (PEPM, Remote Attendance) প্রজেক্টটা খুঁজে পায়।
+- **Archive:** অচল Branch/প্রজেক্ট মুছে না ফেলে লুকানো (`is_archived`), ফেরানো যায়; Branch archive-এ চালু কর্মী 0 হতে হয়।
+- **Merge Branch:** বানান-ভুল বা ডুপ্লিকেট Branch-এর কর্মী (ইতিহাস লিখে) আসল Branch-এ সরানো; পুরনোটা archive হয়।
+- **মোছার সুরক্ষা:** প্রজেক্টে PEPM Entry/হাজিরা থাকলে এবং Branch-এ কর্মী থাকলে Delete আটকায়।
+নিয়মের পূর্ণ তালিকা ও পরীক্ষার ফর্দ: `docs/branch-project-rules.md`।
+
