@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { SelfCard } from './SelfCard';
-import { Check, Clock, Plus, X } from 'lucide-react';
+import { Check, Clock, X } from 'lucide-react';
 import { LeaveApplication } from '../types';
 
 export interface LeaveTypeInfo {
@@ -22,7 +22,18 @@ export interface LeaveTypeInfo {
   // (Leave Without Pay), which then shows days taken instead.
   left: number | null;
   taken: number;
+  // Days in applications still waiting for approval — already taken off
+  // `left` when they were sent (LeaveRoutes.ts), so they are part of what
+  // was given.
+  pending?: number;
 }
+
+// What this year's balance of a type was: what is left + approved this year
+// + still waiting (both already deducted). Matches the person's own balance
+// even after HR changed it by hand (Set Balance, joiner pro-rata,
+// Confirmation), which the Balance Workflow's figure wouldn't.
+export const givenOf = (t: LeaveTypeInfo): number | null => (t.left == null ? null : Math.max(0, t.left) + t.taken + (t.pending || 0));
+const num = (n: number) => String(Math.round(n * 10) / 10);
 
 const PALETTE: Record<string, { color: string; soft: string; fg: string }> = {
   casual: { color: '#2563eb', soft: '#dbeafe', fg: '#1e40af' },
@@ -54,8 +65,7 @@ export const LeaveGauge: React.FC<{
   year: number;
   filter: string | null;
   onFilter: (key: string | null) => void;
-  onSubmit: () => void;
-}> = ({ types, year, filter, onFilter, onSubmit }) => {
+}> = ({ types, year, filter, onFilter }) => {
   const keys = types.map((t) => t.key);
   const picked = filter ? types.find((t) => t.key === filter) || null : null;
   // Without a pick: every type with a yearly allowance. With one: just it.
@@ -82,9 +92,45 @@ export const LeaveGauge: React.FC<{
     // A shorter drop shadow than .liquid-glass's own, so it doesn't spill
     // over the Review / Approved / Rejected switch below.
     <div
-      className="liquid-glass rounded-[28px] px-4 pt-4 pb-4 flex flex-col items-center gap-3"
+      className="liquid-glass rounded-[28px] px-3.5 pt-3 pb-3 flex flex-col items-center gap-2.5"
       style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 1px rgba(255,255,255,.35), 0 10px 30px -16px rgba(var(--g-accent-rgb,127,0,255),.3)' }}
     >
+      {/* Given this year: one thin row — every type, or the picked one's
+          Given / Taken / Left (and Waiting when something is pending). */}
+      <div className="w-full" data-testid="leave-given">
+        <div className="flex items-center gap-2 text-[9.5px] font-bold uppercase tracking-[.06em] text-zinc-500 after:content-[''] after:flex-1 after:h-px after:bg-zinc-900/[.07]">
+          {picked ? `${picked.label} · ${year}` : `Given for ${year} (days)`}
+        </div>
+        {(() => {
+          const pills: { k: string; label: string; value: string; bg: string; fg: string }[] = picked
+            ? [
+                ...(givenOf(picked) == null
+                  ? [{ k: 'given', label: 'Given', value: 'No limit', bg: leaveTypeStyle(picked.key, keys).soft, fg: leaveTypeStyle(picked.key, keys).fg }]
+                  : [{ k: 'given', label: 'Given', value: num(givenOf(picked)!), bg: leaveTypeStyle(picked.key, keys).soft, fg: leaveTypeStyle(picked.key, keys).fg }]),
+                { k: 'taken', label: 'Taken', value: num(picked.taken), bg: 'rgba(24,24,27,.05)', fg: '#3f3f46' },
+                ...(picked.pending ? [{ k: 'wait', label: 'Waiting', value: num(picked.pending), bg: 'rgba(24,24,27,.05)', fg: '#3f3f46' }] : []),
+                ...(picked.left != null ? [{ k: 'left', label: 'Left', value: num(Math.max(0, picked.left)), bg: 'rgba(24,24,27,.05)', fg: '#3f3f46' }] : [])
+              ]
+            : types.map((t) => {
+                const st = leaveTypeStyle(t.key, keys);
+                const g = givenOf(t);
+                return { k: t.key, label: t.short, value: g == null ? 'No limit' : num(g), bg: st.soft, fg: st.fg };
+              });
+          return (
+            <div
+              className={pills.length > 4 ? 'mt-1.5 flex gap-1.5 overflow-x-auto no-scrollbar [&>div]:shrink-0 [&>div]:px-3' : 'mt-1.5 grid gap-1.5'}
+              style={pills.length > 4 ? undefined : { gridTemplateColumns: `repeat(${pills.length}, minmax(0, 1fr))` }}
+            >
+              {pills.map((x) => (
+                <div key={x.k} className="h-[26px] rounded-full flex items-baseline justify-center gap-1 px-1.5 leading-[26px] whitespace-nowrap min-w-0" style={{ background: x.bg, color: x.fg }}>
+                  <span className="text-[10.5px] font-semibold truncate">{x.label}</span>
+                  <span className="text-[12.5px] font-extrabold tabular-nums">{x.value}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
       <div className="relative w-[200px] h-[108px]">
         <svg width="200" height="108" viewBox="0 0 200 108" role="img" aria-label={`${big} ${caption}`}>
           <path d={ARC} fill="none" stroke="rgba(99,0,198,.10)" strokeWidth="14" strokeLinecap="round" />
@@ -134,10 +180,6 @@ export const LeaveGauge: React.FC<{
           );
         })}
       </div>
-      {/* Same plain accent pill as Check In/Out's "+ Add Check In/Out". */}
-      <button type="button" onClick={onSubmit} className="self-center inline-flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform" style={{ background: 'var(--g-accent, #7f00ff)', boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)' }}>
-        <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> Apply Leave
-      </button>
     </div>
   );
 };

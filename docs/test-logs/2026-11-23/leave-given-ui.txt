@@ -1,0 +1,14 @@
+PASS Dashboard: no Apply Leave button
+PASS Leave: the Given row is there
+PASS Given row says "Given for 2026"
+PASS Given: Casual 10 (6 left + 3 taken + 1 waiting), Sick 14, No pay No limit — GIVEN FOR 2026 (DAYS) Casual 10 Sick 14 No pay No limit
+PASS Given row is thin (46px)
+PASS Leave: Apply Leave button shows
+PASS Apply Leave is centred
+PASS Apply Leave sits just above the bottom bar
+PASS no Apply Leave inside the card any more
+PASS Casual picked: Given 10 · Taken 3 · Waiting 1 · Left 6 — CASUAL LEAVE · 2026 Given 10 Taken 3 Waiting 1 Left 6
+PASS Apply Leave opens the form (button steps aside while it is open)
+PASS back on Home: the button goes away
+PASS no page errors []
+ALL PASS

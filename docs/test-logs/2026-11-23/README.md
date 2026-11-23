@@ -24,3 +24,15 @@ the database on every request.
 
 Note: the UI test writes its output to /tmp while it runs — the dev server
 reloads the page whenever a file under docs/ changes.
+
+# Phone Leave page — "Given for <year>" and Apply Leave at the bottom
+
+- A thin row at the top of the gauge card: what each leave type's balance was
+  this year = days left + approved this year + still waiting for approval
+  (a pending application is taken off the balance when it's sent). No pay
+  shows "No limit". A tapped type shows Given / Taken / Waiting / Left.
+- Apply Leave no longer sits in the card: it floats centred above the bottom
+  bar, the same pill and place as Check In/Out's "Add Check In/Out", only
+  while the Leave page is showing and not while the form is open.
+- `leave-given-ui.txt` — 13/13; screenshots `leave-given-phone.png`,
+  `leave-given-casual-phone.png`.

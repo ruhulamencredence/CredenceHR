@@ -1338,3 +1338,6 @@ Leave Manage-এর নতুন অংশ "Joiner & Probation" (Casual / Sick /
 - **কার্ড**: আজ কতজন Present / Late / On leave / Not in yet, কারা late। যেকোনো সংখ্যায় tap করলে সেই filter-সহ পুরো তালিকা।
 - **See all**: সূত্র অনুযায়ী ভাগ (Head of …, … — you supervise, Direct report), নাম / ID / designation / department দিয়ে খোঁজা, আজকের অবস্থা দিয়ে filter।
 - **একজনকে tap**: আজকের In / Out, এ মাসের এ পর্যন্ত Present / Late / Leave / Absent (এ মাসে কোনো attendance-ই রেকর্ড না থাকলে Absent "—", Dashboard calendar ও Payroll-এর মতো), "Under you as", ফোন ও email, Call / Mail। কিছু বদলানো যায় না।
+
+## Phone-এর Leave পাতা: "Given for <বছর>" ও নিচে Apply Leave (২৩ নভেম্বর)
+Gauge card-এর উপরে পাতলা সারি: এ বছর প্রতিটি ছুটির ধরনে কত দিন দেওয়া = এখন বাকি + এ বছর approve হয়ে নেওয়া + অনুমোদনের অপেক্ষায় থাকা (আবেদন পাঠানোর সময়ই balance থেকে কাটা হয়, reject হলে ফেরত আসে)। তাই HR হাতে balance বদলালেও (Set Balance, joiner pro-rata, Confirmation) সংখ্যা ঐ ব্যক্তির নিজের balance-এর সাথে মেলে। No pay-তে "No limit"। কোনো ধরনে tap করলে Given / Taken / Waiting / Left। Apply Leave বোতাম card থেকে সরে Check In/Out-এর "Add Check In/Out"-এর মতো নিচের bar-এর উপরে ভাসে, শুধু Leave পাতা খোলা থাকলে। Server-এ কিছু বদলায়নি (`LeavePhone.tsx`, `LeaveReviewPage.tsx`)।
