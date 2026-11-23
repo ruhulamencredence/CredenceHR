@@ -53,6 +53,8 @@ interface ReportMeta {
   dateLabel: string;
   maxDays: number | null;
   statuses: { value: string; label: string }[];
+  // Departments this account may pick for the report (null = all of them).
+  departments?: string[] | null;
 }
 interface Catalog {
   categories: string[];
@@ -403,7 +405,7 @@ export const ReportsInsights: React.FC<{ token: string }> = ({ token }) => {
               <label className={labelCls}>Department</label>
               <select value={department} onChange={(e) => setDepartment(e.target.value)} className={inputCls}>
                 <option value="">All departments</option>
-                {catalog.departments.map((d) => (
+                {(active.departments ?? catalog.departments).map((d) => (
                   <option key={d} value={d}>
                     {d}
                   </option>
