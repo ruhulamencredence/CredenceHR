@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৪টি টেবিল, ২৯৭৫টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৪টি টেবিল, ২৯৭৭টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2955,6 +2955,7 @@ Unique: `zk_device_pin`(zk_device_pin)
 | `project_id` | int(11) | হ্যাঁ | UNI  | FK → `projects.id` |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `branch_type` | enum('head_office','project_site') | না | default 'project_site' | |
+| `is_archived` | tinyint(1) | না | default 0 | |
 
 Unique: `unique_branch_project`(project_id), `unique_company_branch_name`(company_id,branch_name)
 
@@ -3385,6 +3386,7 @@ Unique: `employee_id`(employee_id)
 | `location_label` | varchar(255) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `location_radius` | int(11) | হ্যাঁ |  | |
+| `is_archived` | tinyint(1) | না | default 0 | |
 | `entry_scope` | varchar(10) | না | default 'team' | |
 
 Unique: `unique_company_project_name`(company_id,project_name)
