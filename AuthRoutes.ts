@@ -16,6 +16,7 @@ import { checkAppDevice } from "./DeviceRoutes";
 import { APP_FLAG_KEYS, APP_OFF_MESSAGE, appAccessFor, appMaskStore } from "./AppAccess";
 import { loginBlocked, recordLogin, trustedDeviceFor, trustedDeviceToken } from "./LoginGuard";
 import { clientIp } from "./ActiveUsersRoutes";
+import { freshAccountState, INACTIVE_MESSAGE } from "./AccountBlock";
 import { activeCompanyId } from "./companyContext";
 import { activeGroupId } from "./companyContext";
 import { companyStore } from "./companyContext";
@@ -206,6 +207,11 @@ export async function finishLogin(deps: RegisterAuthRoutesDeps, req: any, res: a
   // Admin Panel -> Users -> Block, or an approved Termination / Resignation.
   if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
     return void res.status(403).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+  }
+  // The Employee record is inactive / separated: the login can't sign in
+  // either, however the record was made inactive (AccountBlock.ts).
+  if ((await freshAccountState(queryDB, Number(user.id))) === "inactive") {
+    return void res.status(403).json({ error: INACTIVE_MESSAGE, code: "ACCOUNT_BLOCKED" });
   }
   // A new joiner's temporary login (OnboardingSelfServiceRoutes.ts) is open
   // until its expiry while the joiner hasn't submitted yet.

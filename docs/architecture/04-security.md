@@ -308,3 +308,6 @@
 - `PUT /api/branches/:id/archive`: `branches`; `PUT /api/projects/:id/archive`: `projects → edit_add`।
 - `DELETE /api/projects/:id`: PEPM Entry, হাজিরা, সংশোধন, Admin-এডিট, প্রজেক্ট-অনুমতি, Check In-তালিকা, পিন-করা একাউন্ট, Guard Post, Site Attendance Team বা Budget Lock কোনোটা থাকলে 409; `DELETE /api/branches/:id`: কর্মী (id বা নাম মিলিয়ে), নতুন-যোগদান আবেদন, Team নিয়ম, অফিস মেশিন বা SIM থাকলে 409। কারণ সংখ্যাসহ বলে, Archive করতে বলে।
 
+## অচল (inactive) কর্মীর login আর চলে না (২৩ নভেম্বর)
+আগে সাইন-ইন আটকাত শুধু `users.is_blocked` (Users → Block, Exit/Offboarding, HR Operations-এর পদক্ষেপ)। কর্মীর রেকর্ড Edit Employee বা ইমপোর্টে "Inactive" / Job Status Resigned-Terminated হলে login চালু থাকত। এখন `AccountBlock.ts`-এর `accountState` কর্মীর রেকর্ড থেকে নিজে হিসাব করে: login-এর Employee রেকর্ড আছে অথচ কোনোটাই "চালু ও Job Status ছুটি-না-নেওয়া" নয়, এমন হলে অবস্থা `inactive`। **সাইন-ইন (`finishLogin`) 403** দেয়, আর **খোলা সেশনও পরের অনুরোধে (সর্বোচ্চ ৩০ সেকেন্ডে) 401 `ACCOUNT_BLOCKED`** পায়। কর্মীকে আবার চালু করলে login সাথে সাথে ফিরে আসে (`is_blocked` ছোঁয়া হয় না)। ছাড় (কখনো আটকায় না): Superadmin, সিস্টেম-মালিক, নতুন-যোগদানকারীর অস্থায়ী login, Employee রেকর্ডহীন একাউন্ট। ERP 360 SSO আগে থেকেই অচল কর্মী ফেরাত; এখন সাধারণ সাইন-ইনও একই নীতিতে।
+

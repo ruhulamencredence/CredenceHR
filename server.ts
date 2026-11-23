@@ -59,7 +59,7 @@ import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { startTrackingWakeJob } from "./TrackingWake";
 import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
-import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus, INACTIVE_MESSAGE } from "./AccountBlock";
 import { registerAccountMergeRoutes } from "./AccountMergeRoutes";
 import { registerDesignationRoutes } from "./DesignationRoutes";
 import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
@@ -3026,6 +3026,10 @@ async function startServer() {
       if (state === "blocked") {
         res.setHeader("X-Account-Blocked", "1");
         return res.status(401).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
+      if (state === "inactive") {
+        res.setHeader("X-Account-Blocked", "1");
+        return res.status(401).json({ error: INACTIVE_MESSAGE, code: "ACCOUNT_BLOCKED" });
       }
       if (state === "removed") {
         res.setHeader("X-Account-Blocked", "removed");
