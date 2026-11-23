@@ -320,3 +320,6 @@ Attendance, Leave ও Bill Claim ভিত্তিক রিপোর্টে 
 
 ## "Set Division from Branch" (২৩ নভেম্বর)
 `GET /api/branches/division-preview` ও `POST /api/branches/division-sync` চালাতে Branches মডিউল এবং Employees-এর Edit/Add layer লাগে (Superadmin সবসময়)। বোতাম UI-তেও শুধু তাদের কাছে দেখায়। প্রতিটি পরিবর্তন কর্মীর edit history-তে লেখা হয়; Branch-হীন কর্মীর কিছু বদলায় না।
+
+## Leave Manage-এর নতুন layer "joiner_rules" (২৩ নভেম্বর)
+Joiner & Probation নিয়ম বদলানো (`PUT /api/leave-policies/:key/joiner-rules`) এবং Confirmation-এ balance প্রস্তাব/যোগ (`GET /api/leave-joiner/confirmation-preview`, `POST /api/leave-joiner/confirmation-apply`) চালাতে `can_manage_leave` ও Leave Manage-এর `joiner_rules` layer লাগে (Superadmin সবসময়)। layer-টি কারও balance নিজে বদলাতে পারে, তাই `leave_rules`-এর মতোই explicit-only: কোনো layer সংরক্ষিত না থাকলে ডিফল্টে পাওয়া যায় না। UI-তে সেটিং-ব্লক ও Confirmation popup শুধু layer থাকলে দেখায়; API-তেও একই আটকানো। প্রতিটি Confirmation-যোগ কর্মীর edit history-তে (কে, কত, কবে) লেখা হয়।

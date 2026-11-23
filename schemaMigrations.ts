@@ -340,7 +340,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     ["accrual_from", "CHAR(7) NULL DEFAULT NULL"],
     // 1 = weekends/holidays inside a leave come off the balance too (the
     // old rule); 0 = only the applicant's working days do (leaveDayCount.ts).
-    ["count_off_days", "TINYINT(1) NOT NULL DEFAULT 1"]
+    ["count_off_days", "TINYINT(1) NOT NULL DEFAULT 1"],
+    // Joiner & Probation rules (LeaveJoiner.ts, Leave Manage layer "joiner_rules"): both off by default.
+    ["probation_mode", "VARCHAR(10) NOT NULL DEFAULT 'full'"],
+    ["joiner_prorata", "TINYINT(1) NOT NULL DEFAULT 0"]
   ] as [string, string][]) {
     try {
       await dbPool.query(`ALTER TABLE leave_category_policies ADD COLUMN ${col} ${def}`);

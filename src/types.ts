@@ -364,7 +364,7 @@ export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[mod
 // allow editing Leave balances" toggle), which these layers narrow further,
 // same "no saved rows -> full access" default as everywhere else on this
 // system (see requireLeaveManagerLayer() in server.ts).
-export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules';
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules' | 'joiner_rules';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
   { key: 'edit_balance', label: 'Edit Balance' },
@@ -374,9 +374,10 @@ export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] 
   { key: 'year_settings', label: 'Year Settings' },
   { key: 'workflow_manage', label: 'Balance Workflows' },
   { key: 'leave_rules', label: 'Leave Rules (accrual, carry-forward, eligibility)' },
+  { key: 'joiner_rules', label: 'Joiner & Probation Rules (new joiner, Probation, Confirmation balance)' },
 ];
 // Not part of the no-saved-layers default: it changes balances by itself, so it is ticked on purpose.
-export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules'];
+export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules', 'joiner_rules'];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
@@ -1027,6 +1028,9 @@ export interface LeaveCategoryPolicy {
   // true = weekends and holidays inside a leave come off the balance too
   // (every calendar day); false = only the applicant's working days do.
   count_off_days?: boolean;
+  // Joiner & Probation rules (Leave Manage layer "joiner_rules"); off by default.
+  probation_mode?: 'full' | 'prorata' | 'none';
+  joiner_prorata?: boolean;
   // Leave Rules (Leave Manage layer "leave_rules"); all off by default.
   // Who may apply: 'any' | 'female' | 'male', and months of service needed.
   gender?: 'any' | 'female' | 'male';
