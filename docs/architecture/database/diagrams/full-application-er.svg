@@ -6175,7 +6175,7 @@
 <text xml:space="preserve" text-anchor="start" x="1026.93" y="-5271.43" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#111827">max_consecutive_days</text>
 <text xml:space="preserve" text-anchor="start" x="1151.35" y="-5271.43" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280">int</text>
 <text xml:space="preserve" text-anchor="start" x="1194.58" y="-5271.43" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#6b7280"> </text>
-<text xml:space="preserve" text-anchor="start" x="1026.93" y="-5254.43" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +10 কলাম</text>
+<text xml:space="preserve" text-anchor="start" x="1026.93" y="-5254.43" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#9ca3af">… +12 কলাম</text>
 </g>
 <!-- users&#45;&gt;leave_category_policies -->
 <g id="edge187" class="edge">
