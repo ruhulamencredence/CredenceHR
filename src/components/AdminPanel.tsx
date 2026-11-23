@@ -1607,6 +1607,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Branches list: which slice to show, the "Link by name" preview and the "Merge" popup.
   const [branchListFilter, setBranchListFilter] = useState<'active' | 'head_office' | 'project_site' | 'no_project' | 'archived'>('active');
   const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
+  // "Set Division from Branch" (BranchTools.ts): preview, then apply.
+  const [divisionSync, setDivisionSync] = useState<null | { loading: boolean; busy: boolean; data?: any; error?: string }>(null);
   const [mergeBranch, setMergeBranch] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string; needsConfirm?: boolean }>(null);
   // Site location pin for the project being added/edited (free OpenStreetMap/
   // Leaflet picker — see LocationMapPicker). Null lat/lng = no pin set yet.
@@ -2359,6 +2361,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setMessage({ type: 'success', text: `${data.linked} Branch${data.linked === 1 ? '' : 'es'} linked to the Project of the same name.${data.skipped?.length ? ` ${data.skipped.length} skipped.` : ''}` });
     } catch (err: any) {
       setLinkByName({ ...linkByName, busy: false, error: err.message });
+    }
+  };
+
+  const openDivisionSync = async () => {
+    setDivisionSync({ loading: true, busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/division-preview'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setDivisionSync({ loading: false, busy: false, data });
+    } catch (err: any) {
+      setDivisionSync({ loading: false, busy: false, error: err.message });
+    }
+  };
+  const confirmDivisionSync = async () => {
+    if (!divisionSync?.data) return;
+    setDivisionSync({ ...divisionSync, busy: true });
+    try {
+      const res = await fetch(apiUrl('/api/branches/division-sync'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not change the Divisions.');
+      setDivisionSync(null);
+      setMessage({ type: 'success', text: `Division set from the Branch for ${data.changed} employee${data.changed === 1 ? '' : 's'}. Each change is in their history.` });
+    } catch (err: any) {
+      setDivisionSync({ ...divisionSync, busy: false, error: err.message });
     }
   };
 
@@ -3327,6 +3354,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const editlogLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.editlog;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // Employees module layers: "Set Division from Branch" changes people, so it needs Edit/Add.
+  const employeesLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.employees;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
   const usersLayer = (key: PermissionLayerKey) => {
@@ -6240,6 +6273,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         Link by name
                       </button>
                     )}
+                    {canSee('employees') && employeesLayer('edit_add') && (
+                      <button
+                        type="button"
+                        onClick={openDivisionSync}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-colors"
+                        title="Set every employee's Division from their Branch (Head Office / Project Side)"
+                      >
+                        Set Division from Branch
+                      </button>
+                    )}
                     <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
                       {activeBranches.length} Branch{activeBranches.length === 1 ? '' : 'es'}
                     </span>
@@ -8653,6 +8696,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
+      {divisionSync && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-xl max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Set Division from Branch</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Division becomes the type of the employee's Branch: Head Office or Project Side. Employees with no Branch keep their Division. Each change is written to the person's history.
+            </p>
+            {divisionSync.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Reading the employees…</p>
+            ) : divisionSync.error ? (
+              <p className="text-sm text-rose-600 mt-4">{divisionSync.error}</p>
+            ) : divisionSync.data ? (
+              <>
+                <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-4 text-[13px] text-slate-800 space-y-0.5">
+                  <div><b>{divisionSync.data.will_change}</b> will change · {divisionSync.data.already_right} already right</div>
+                  <div className="text-slate-500">{divisionSync.data.no_branch} employees have no Branch and are left as they are.</div>
+                </div>
+                {divisionSync.data.summary.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {divisionSync.data.summary.slice(0, 12).map((r: any) => (
+                      <div key={r.change} className="flex justify-between text-[12px] text-slate-700 px-1">
+                        <span>{r.change}</span>
+                        <span className="font-semibold">{r.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {divisionSync.data.sample.length > 0 && (
+                  <details className="mt-3 text-[12px] text-slate-600">
+                    <summary className="cursor-pointer font-semibold">First {divisionSync.data.sample.length} people</summary>
+                    <ul className="mt-1.5 space-y-1">
+                      {divisionSync.data.sample.map((p: any, i: number) => (
+                        <li key={i}>
+                          <span className="font-semibold">{p.name}</span> ({p.employee_id}) · {p.branch}: {p.from || '(empty)'} → {p.to}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            ) : null}
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" className="liquid-glass-chip px-4 py-2 rounded-full text-sm font-semibold text-slate-700" onClick={() => setDivisionSync(null)} disabled={divisionSync.busy}>
+                {divisionSync.data && divisionSync.data.will_change > 0 ? 'Cancel' : 'Close'}
+              </button>
+              {divisionSync.data && divisionSync.data.will_change > 0 && (
+                <button type="button" className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold" onClick={confirmDivisionSync} disabled={divisionSync.busy}>
+                  {divisionSync.busy ? 'Changing…' : `Change ${divisionSync.data.will_change} Division${divisionSync.data.will_change === 1 ? '' : 's'}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {linkByName && (
         <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
           <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-xl max-h-[88vh] overflow-y-auto p-6 sm:p-7">

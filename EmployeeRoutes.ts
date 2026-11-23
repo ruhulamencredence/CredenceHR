@@ -21,6 +21,7 @@ import { passwordProblem } from "./src/lib/passwordPolicy";
 import { employeeFieldProblem } from "./EmployeeValidation";
 import { autoLinkByEmployeeId, employeeIdConflict, orphanLoginForEmployeeId, syncEmployeeLoginId } from "./EmployeeLoginId";
 import { requestApprovalReconcile } from "./approvalReconcile";
+import { divisionOfBranchType } from "./BranchDivision";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -293,11 +294,11 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
   // `branch` is kept in sync with the resolved Branch's own name (mirrored,
   // not dropped) for every existing reader that only ever knew the free-text
   // column — same reasoning as department/department_id.
-  async function resolveEmployeeBranch(body: any): Promise<{ branch_id: number | null; branch_name: string | null }> {
+  async function resolveEmployeeBranch(body: any): Promise<{ branch_id: number | null; branch_name: string | null; branch_type?: string | null }> {
     const branchId = body.branch_id ? Number(body.branch_id) : null;
     if (branchId) {
       const rows = await queryDB("SELECT * FROM branches WHERE id = ?", [branchId]);
-      if (rows.length > 0) return { branch_id: Number(rows[0].id), branch_name: rows[0].branch_name };
+      if (rows.length > 0) return { branch_id: Number(rows[0].id), branch_name: rows[0].branch_name, branch_type: rows[0].branch_type };
     }
     const legacyText = body.branch && String(body.branch).trim() ? String(body.branch).trim() : null;
     return { branch_id: null, branch_name: legacyText };
@@ -432,6 +433,11 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       // 0/1). See EMPLOYEE_EXT_FIELDS.
       const extColumns = EMPLOYEE_EXT_FIELDS;
       const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
+      // Division is the Branch's type (BranchDivision.ts); with no Branch the typed value stays.
+      if (branch.branch_id) {
+        const di = extColumns.indexOf("division" as any);
+        if (di >= 0) extValues[di] = divisionOfBranchType(branch.branch_type);
+      }
       const dept = await resolveEmployeeDepartment(req.body);
 
       const columns = ["employee_id", "name", "designation", "department", "department_id", "branch", "branch_id", "email", "phone", "is_active", "user_id", ...extColumns];
@@ -492,6 +498,11 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
 
       const extColumns = EMPLOYEE_EXT_FIELDS;
       const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
+      // Division is the Branch's type (BranchDivision.ts); with no Branch the typed value stays.
+      if (branch.branch_id) {
+        const di = extColumns.indexOf("division" as any);
+        if (di >= 0) extValues[di] = divisionOfBranchType(branch.branch_type);
+      }
       const dept = await resolveEmployeeDepartment(req.body);
       const setClause = ["employee_id = ?", "name = ?", "designation = ?", "department = ?", "department_id = ?", "branch = ?", "branch_id = ?", "email = ?", "phone = ?", "is_active = ?", ...extColumns.map((c) => `${c} = ?`)].join(", ");
 

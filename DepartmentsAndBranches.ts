@@ -20,6 +20,7 @@
 // ADMIN_MODULE_KEYS, and resolveDepartmentSupervisor — used elsewhere by the
 // Approval Workflow, not just here) stays in server.ts.
 
+import { syncDivision } from "./BranchDivision";
 import type { Express } from "express";
 import { requestApprovalReconcile } from "./approvalReconcile";
 
@@ -280,6 +281,8 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         "UPDATE branches SET branch_name = ?, branch_type = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
         [name, branchType, loc.lat, loc.lng, loc.label, loc.radius, id]
       );
+      // Division follows the Branch's type (BranchDivision.ts).
+      await syncDivision(queryDB, { branchIds: [Number(id)] }).catch(() => {});
       const projectId = await applyProjectLink(req, Number(id), name, plan);
       // A new name reaches every copy of the old one kept as text: the
       // employees' own Branch (all_employees.branch — reports and search

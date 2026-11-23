@@ -76,3 +76,7 @@
 - **Merge:** চালু বা বন্ধ সব কর্মী (এবং `branch_id` ফাঁকা কিন্তু নাম মেলা কর্মী) নতুন Branch-এ যায়; **প্রতিটা কর্মীর পরিবর্তন `employee_change_log`-এ** (`recordEmployeeEditHistory`); Team নিয়ম, অফিস মেশিন, SIM-এর Duty Location-এর নামের কপিও নতুন নাম পায়। দুই Branch-ই ভিন্ন প্রজেক্টে যুক্ত হলে আটকায়। ধরন আলাদা হলে ক্যালেন্ডার বদলের নিশ্চিতকরণ ছাড়া এগোয় না (409)। অনুমতি: `branches` মডিউল + `employees → edit_add`।
 - **পরীক্ষিত:** প্রতিটা নিয়ম লোকালে curl ও আসল পর্দায় চালানো (সুরক্ষা, 403, 409, নামে-অপরিবর্তন, ইতিহাস লেখা)।
 
+
+## 9. Division is the Branch's type (23 Nov)
+
+An employee's **Division** is no longer typed: it is "Head Office" or "Project Side", the type of their Branch (`BranchDivision.ts`). It is set when a Branch is picked in Edit Employee (the field is read-only there), on Transfer, Merge Branch, a Branch's type change (Branches page or a Project's Branch type), Employee import and joiner -> employee. **Branches -> "Set Division from Branch"** previews and applies it to everyone already saved (each change goes to the person's history; needs Branches module and Employees Edit/Add). An employee with **no Branch keeps** the Division they had. The two names keep the words ("head", "project") that Office / Project filters, Notices and Bill Disbursement read, so those groupings do not change. Do not turn Division back into free text, and do not make anything read Division in place of the Branch's type.

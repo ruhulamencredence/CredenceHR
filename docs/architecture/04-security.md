@@ -317,3 +317,6 @@
 
 ## Reports & Insights: Department ড্রপডাউনে শুধু নিজের Department (২৩ নভেম্বর)
 Attendance, Leave ও Bill Claim ভিত্তিক রিপোর্টে Department-wise সীমা (Head of Department বা সীমিত Admin) আগে চালানোর সময় ঠিকই কার্যকর ছিল, কিন্তু ড্রপডাউনে সব Department দেখাত, ফলে অন্যটি বাছলে "You don't have access to this Department." আসত। এখন `GET /api/reports-insights/catalog` প্রতিটি রিপোর্টের সাথে `departments` দেয় (সীমা থাকলে শুধু ঐ তালিকা, না থাকলে null = সব), এবং ড্রপডাউন সেটাই দেখায়। চালানোর সময়কার সার্ভার-যাচাই আগের মতোই আছে।
+
+## "Set Division from Branch" (২৩ নভেম্বর)
+`GET /api/branches/division-preview` ও `POST /api/branches/division-sync` চালাতে Branches মডিউল এবং Employees-এর Edit/Add layer লাগে (Superadmin সবসময়)। বোতাম UI-তেও শুধু তাদের কাছে দেখায়। প্রতিটি পরিবর্তন কর্মীর edit history-তে লেখা হয়; Branch-হীন কর্মীর কিছু বদলায় না।

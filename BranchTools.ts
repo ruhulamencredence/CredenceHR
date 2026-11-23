@@ -13,6 +13,7 @@
 
 import type { Express } from "express";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
+import { divisionOfBranchType, syncDivision } from "./BranchDivision";
 
 interface Deps {
   authenticateToken: any;
@@ -273,6 +274,7 @@ export function registerBranchToolsRoutes(app: Express, deps: Deps) {
         await queryDB("UPDATE all_employees SET branch = ?, branch_id = ? WHERE id = ?", [intoName, plan.into.id, e.id]);
         moved++;
       }
+      await syncDivision(queryDB, { branchIds: [Number(plan.into.id)] }).catch(() => {});
       // The name copies kept as text follow, the same ones a Branch rename reaches.
       const fromName = String(plan.from.branch_name);
       await queryDB("UPDATE department_team_auto SET branch = ? WHERE LOWER(TRIM(branch)) = LOWER(TRIM(?))", [intoName, fromName]).catch(() => {});
@@ -286,6 +288,72 @@ export function registerBranchToolsRoutes(app: Express, deps: Deps) {
       // The emptied Branch is archived, never deleted: its row stays for the record.
       await queryDB("UPDATE branches SET is_archived = 1 WHERE id = ?", [plan.from.id]);
       res.json({ success: true, moved, archived_branch_id: Number(plan.from.id) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- Set Division from Branch (one-off for people already saved) ----------
+  // An Employee's Division is the type of their Branch (BranchDivision.ts). This
+  // previews and then applies that to everyone who has a Branch; people with no
+  // Branch keep their Division. Every change is written to the person's history.
+  async function divisionPlan() {
+    const rows: any[] =
+      (await queryDB(
+        "SELECT e.id, e.name, e.employee_id, e.division, e.branch_id, b.branch_name, b.branch_type FROM all_employees e JOIN branches b ON b.id = e.branch_id ORDER BY e.name"
+      )) || [];
+    const noBranch = Number(((await queryDB("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id IS NULL").catch(() => [{ n: 0 }])) as any[])[0]?.n || 0);
+    const changes = rows
+      .map((r) => ({ ...r, want: divisionOfBranchType(r.branch_type) }))
+      .filter((r) => String(r.division || "") !== r.want);
+    return { total_with_branch: rows.length, no_branch: noBranch, changes };
+  }
+
+  app.get("/api/branches/division-preview", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
+    try {
+      if (!(await needEmployeesEdit(req, res))) return;
+      const plan = await divisionPlan();
+      const from: Record<string, number> = {};
+      for (const c of plan.changes) {
+        const k = `${String(c.division || "").trim() || "(empty)"} → ${c.want}`;
+        from[k] = (from[k] || 0) + 1;
+      }
+      res.json({
+        total_with_branch: plan.total_with_branch,
+        no_branch: plan.no_branch,
+        will_change: plan.changes.length,
+        already_right: plan.total_with_branch - plan.changes.length,
+        summary: Object.entries(from).sort((a, b) => b[1] - a[1]).map(([change, count]) => ({ change, count })),
+        sample: plan.changes.slice(0, 15).map((c) => ({ name: c.name, employee_id: c.employee_id, branch: c.branch_name, from: c.division || "", to: c.want }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/branches/division-sync", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
+    try {
+      if (!(await needEmployeesEdit(req, res))) return;
+      const plan = await divisionPlan();
+      const today = todayInDhaka();
+      let changed = 0;
+      for (const c of plan.changes) {
+        try {
+          await recordEmployeeEditHistory(queryDB, {
+            employeeId: Number(c.id),
+            before: { division: c.division },
+            after: { division: c.want },
+            trackedFields: ["division"],
+            actionBy: req.user?.id ?? null,
+            today
+          });
+        } catch {
+          // the history is best effort; the change itself still goes on
+        }
+        await queryDB("UPDATE all_employees SET division = ? WHERE id = ?", [c.want, c.id]);
+        changed++;
+      }
+      res.json({ success: true, changed, no_branch: plan.no_branch });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

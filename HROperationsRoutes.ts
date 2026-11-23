@@ -44,6 +44,7 @@
 // reads are full-table `SELECT * FROM x` filtered in JS (the only shape the
 // in-memory fallback DB understands) and writes only ever use `WHERE id = ?`.
 
+import { syncDivision } from "./BranchDivision";
 import { fallbackServiceStatus } from "./hrServiceStatus";
 import type { Express } from "express";
 import { logUserAccess, type AccessChange } from "./UserAccessLog";
@@ -1121,6 +1122,7 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
   }
   if (to.branch_id !== undefined && to.branch_id !== null && to.branch_id !== "") {
     await queryDB("UPDATE all_employees SET branch_id = ?, branch = ? WHERE id = ?", [Number(to.branch_id), to.branch ?? null, empId]);
+    await syncDivision(queryDB, { employeeIds: [empId] }).catch(() => {});
   }
   if (Object.keys(service).length > 0) await upsertService(queryDB, empId, service, actorId);
   // What HR ticked to move with a transfer (PEPM projects, check-in, team).

@@ -1319,3 +1319,6 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 
 **অচল কর্মী ও সাইন-ইন (২৩ নভেম্বর):** কর্মীর রেকর্ড Inactive (বা Job Status Resigned / Terminated / Inactive / Hold / Regain) হলে তার login সাইন-ইনে "This employee is no longer active…" বার্তা পায়, খোলা সেশনও বন্ধ হয়; আবার চালু করলে সাথে সাথে ফেরে। Users → Block আগের মতো আলাদা (হাতে আটকানো), এটা রেকর্ড থেকে নিজে হিসাব হয়। Superadmin ও Employee রেকর্ডহীন একাউন্ট ছাড়। বিস্তারিত `04-security.md`।
 
+
+## Employee Division = Branch-এর ধরন (২৩ নভেম্বর)
+Division আর হাতে লেখা হয় না; Branch-এর ধরন অনুযায়ী "Head Office" বা "Project Side" বসে (`BranchDivision.ts`)। Branch বাছলে (Edit Employee, Transfer, Merge, Branch-এর ধরন বদল, Employee import, joiner → employee) এটি নিজে ঠিক হয়। আগের সবার জন্য Branches পাতার "Set Division from Branch" (আগে preview, তারপর প্রয়োগ, প্রতি পরিবর্তন ইতিহাসে)। Branch না থাকলে পুরনো Division থাকে।

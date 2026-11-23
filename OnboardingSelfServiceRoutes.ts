@@ -25,6 +25,7 @@
 //   onboarding_review   see applications, reject, cancel
 //   onboarding_approve  approve (creates the Employee)
 
+import { syncDivision } from "./BranchDivision";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import type { Express } from "express";
@@ -1096,6 +1097,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
         const keys = Object.keys(cols);
         const ins: any = await q(`INSERT INTO all_employees (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`, keys.map((k) => cols[k]));
         const employeeId = Number(ins.insertId);
+        await syncDivision(q, { employeeIds: [employeeId] }).catch(() => {});
         failAt(4);
         // 5. The same login becomes the Employee's own.
         await q(

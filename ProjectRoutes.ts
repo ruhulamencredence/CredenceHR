@@ -6,6 +6,7 @@
 // Projects routes (list, all, create, edit, delete), moved out of server.ts unchanged.
 // The shared helpers they use are passed in by startServer().
 
+import { syncDivision } from "./BranchDivision";
 import type { Express } from "express";
 import { ENTRY_SCOPES, fillForFromHomes, forGaps, homeProjectsOf } from "./PepmTeam";
 
@@ -258,6 +259,7 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
         void made;
       } else if (branchPlan.type && branchPlan.target) {
         await queryDB("UPDATE branches SET branch_type = ? WHERE id = ?", [branchPlan.type, branchPlan.target.id]);
+        await syncDivision(queryDB, { branchIds: [Number(branchPlan.target.id)] }).catch(() => {});
       }
       // Budget rows name their Project in text (budget_items.project_name,
       // matched by name): a new name reaches them too, so the Project's old
