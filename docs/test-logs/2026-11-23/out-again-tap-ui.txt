@@ -1,0 +1,10 @@
+PASS allowed: Out Time 06:31 PM shows
+PASS allowed: no "Set again" text
+PASS allowed: the Out Time box is tappable
+PASS tap: asks first ("Give your Out Time again?")
+PASS cancel: nothing changed
+PASS allowed: no page errors []
+PASS not allowed: Out Time shows
+PASS not allowed: the box is not tappable
+PASS not allowed: no "Set again" text
+ALL PASS

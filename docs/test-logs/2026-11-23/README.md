@@ -36,3 +36,10 @@ reloads the page whenever a file under docs/ changes.
   while the Leave page is showing and not while the form is open.
 - `leave-given-ui.txt` — 13/13; screenshots `leave-given-phone.png`,
   `leave-given-casual-phone.png`.
+
+# My Attendance: no "Set again" text
+
+The Out Time box no longer shows "Set again". For an account allowed to give
+the Out again (users.can_update_check_out) the box itself is tapped; it asks
+first, as before. For anyone else the box does nothing.
+- `out-again-tap-ui.txt` — 9/9; screenshot `out-again-card.png`.
