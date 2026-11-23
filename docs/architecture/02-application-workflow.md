@@ -1347,3 +1347,6 @@ Gauge card-এর উপরে পাতলা সারি: এ বছর প�
 
 ## Payroll Late Policy: Extreme Delay = 0 (২৩ নভেম্বর)
 Payroll → Salary Setup → Late Policy-তে "Extreme Lates per Deducted Day" এখন 0 নেয়। 0 মানে Extreme Delay-এর আলাদা কোনো কাটা নেই — Extreme দিনগুলো চিহ্নিত থাকে, কিন্তু সাধারণ Delay-এর সাথে একসাথে গোনা হয় (যেকোনো ধরনের N টা late = ১ দিন, N = "Lates per Deducted Day")। 1 বা বেশি হলে আগের মতো আলাদা গোনা। Waive করা দিন গোনায় আসে না। একই নিয়ম server-এ (`PayrollRoutes.ts` `lateDeductionsFor`) ও পাতায় (`src/lib/lateDeduction.ts`): কর্মীর This Month card ও My Attendance-এর সতর্কতা, Run Payroll-এর Step 2 ও late-days তালিকা। নিয়ম Effective Date-এর মাস থেকে চলে; আগের মাস বদলায় না।
+
+## মোবাইল অ্যাপ খোলা: লোগো দিয়ে শুরু (২৩ নভেম্বর)
+আগে ক্রম ছিল: সম্পূর্ণ কমলা → অল্প সাদা → লোগো → অ্যানিমেশন। এখন: লোগো (কমলার ওপর) → একই লোগো থেকে অ্যানিমেশন → অ্যাপ। Android-এর খোলার পর্দা (`styles.xml`, `drawable/splash_logo.xml`) ওয়েব পাতার প্রথম ফ্রেমের (`index.html #mpr-boot-spinner`) একই লোগো, একই মাপ (পর্দার প্রস্থের ৩১%, ৯৫–১৪০dp) ও একই জায়গায় আঁকে; `MainActivity` পাতার প্রথম ফ্রেম (`onPageCommitVisible`) আঁকা না হওয়া পর্যন্ত (সর্বোচ্চ ৪ সেকেন্ড) পর্দাটি ধরে রাখে, তাই সাদা WebView আর দেখা যায় না। নেটিভ অংশ বদলেছে, তাই নতুন APK তৈরি করতে হয়।
