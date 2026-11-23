@@ -306,5 +306,5 @@
 - `GET /api/branches/link-preview`, `POST /api/branches/link-by-name`: `branches` মডিউল + `projects → edit_add`; সার্ভার প্রতিবার জোড়া আবার যাচাই করে।
 - `GET /api/branches/:id/merge-preview`, `POST /api/branches/:id/merge`: `branches` মডিউল + `employees → edit_add` (কর্মীর Branch বদলায়); প্রতিটা কর্মীর বদল `employee_change_log`-এ।
 - `PUT /api/branches/:id/archive`: `branches`; `PUT /api/projects/:id/archive`: `projects → edit_add`।
-- `DELETE /api/projects/:id` PEPM Entry/হাজিরা/সংশোধন থাকলে 409; `DELETE /api/branches/:id` কর্মী থাকলে 409 (আগে বিনা বাধায় মুছত)।
+- `DELETE /api/projects/:id`: PEPM Entry, হাজিরা, সংশোধন, Admin-এডিট, প্রজেক্ট-অনুমতি, Check In-তালিকা, পিন-করা একাউন্ট, Guard Post, Site Attendance Team বা Budget Lock কোনোটা থাকলে 409; `DELETE /api/branches/:id`: কর্মী (id বা নাম মিলিয়ে), নতুন-যোগদান আবেদন, Team নিয়ম, অফিস মেশিন বা SIM থাকলে 409। কারণ সংখ্যাসহ বলে, Archive করতে বলে।
 

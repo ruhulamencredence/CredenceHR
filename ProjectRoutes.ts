@@ -330,19 +330,31 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
   app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "delete_trash"), async (req, res) => {
     try {
       const { id } = req.params;
-      // The tables below delete with the Project (ON DELETE CASCADE): a Project
-      // that has PEPM entries, attendance or corrections is not deleted — it is
-      // archived instead, so its history stays.
+      // Everything that points at this Project. Those on the left of "ON DELETE
+      // CASCADE" would be erased with it, the rest would be left pointing at
+      // nothing (Duty Roster guard posts, Site Attendance teams…) or lose their
+      // access list silently. A Project that anything uses is not deleted — it
+      // is archived instead, so history and settings stay.
       const count = async (sql: string) => Number((((await queryDB(sql, [id]).catch(() => [{ n: 0 }])) as any[])[0] || {}).n || 0);
-      const entries = await count("SELECT COUNT(*) AS n FROM entries WHERE project_id = ?");
-      const attendance = await count("SELECT COUNT(*) AS n FROM attendance WHERE project_id = ?");
-      const corrections = await count("SELECT COUNT(*) AS n FROM attendance_corrections WHERE project_id = ?");
-      if (entries + attendance + corrections > 0) {
+      // [one, many, how many]
+      const uses: [string, string, number][] = [
+        ["PEPM entry", "PEPM entries", await count("SELECT COUNT(*) AS n FROM entries WHERE project_id = ?")],
+        ["attendance record", "attendance records", await count("SELECT COUNT(*) AS n FROM attendance WHERE project_id = ?")],
+        ["attendance correction", "attendance corrections", await count("SELECT COUNT(*) AS n FROM attendance_corrections WHERE project_id = ?")],
+        ["attendance admin edit", "attendance admin edits", await count("SELECT COUNT(*) AS n FROM attendance_admin_edits WHERE project_id = ?")],
+        ["account with access to it", "accounts with access to it", await count("SELECT COUNT(*) AS n FROM user_project_permissions WHERE project_id = ?")],
+        ["account with it in the check-in list", "accounts with it in the check-in list", await count("SELECT COUNT(*) AS n FROM user_attendance_projects WHERE project_id = ?")],
+        ["account pinned to it for check-in", "accounts pinned to it for check-in", await count("SELECT COUNT(*) AS n FROM users WHERE attendance_project_id = ?")],
+        ["Duty Roster guard post", "Duty Roster guard posts", await count("SELECT COUNT(*) AS n FROM guard_posts WHERE project_id = ?")],
+        ["Site Attendance team", "Site Attendance teams", await count("SELECT COUNT(*) AS n FROM site_attendance_teams WHERE project_id = ?")],
+        ["Budget lock", "Budget locks", await count("SELECT COUNT(*) AS n FROM budget_project_locks WHERE project_id = ?")]
+      ];
+      const used = uses.filter(([, , n]) => n > 0);
+      if (used.length) {
+        const text = used.map(([one, many, n]) => `${n} ${n === 1 ? one : many}`).join(", ");
         return res.status(409).json({
-          error: `This Project can't be deleted: it has ${entries} PEPM entr${entries === 1 ? "y" : "ies"}, ${attendance} attendance record${attendance === 1 ? "" : "s"} and ${corrections} attendance correction${corrections === 1 ? "" : "s"}, which would be erased with it. Archive it instead.`,
-          entries,
-          attendance,
-          corrections
+          error: `This Project can't be deleted: it is still used (${text}). Deleting it would erase or break these. Archive it instead.`,
+          used: Object.fromEntries(used.map(([, many, n]) => [many, n]))
         });
       }
       await queryDB("DELETE FROM user_project_permissions WHERE project_id = ?", [id]);
