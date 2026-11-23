@@ -309,15 +309,28 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   app.delete("/api/branches/:id", authenticateToken, requireAdmin, requireModule("branches"), async (req, res) => {
     try {
       const { id } = req.params;
-      // A Branch with people on it is not deleted: they would silently lose it
-      // (and fall back to the Head Office calendar). Archive it once it is empty,
-      // or merge it into the real one.
-      const people: any[] = await queryDB("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id = ?", [id]);
-      const n = Number(people[0]?.n || 0);
-      if (n > 0) {
+      // Everything that points at this Branch. A Branch that anything uses is not
+      // deleted: people would silently lose it (and fall back to the Head Office
+      // calendar), and the name kept as text elsewhere would point at nothing.
+      // Archive it (once its people are moved with Merge) instead.
+      const rows: any[] = await queryDB("SELECT * FROM branches WHERE id = ?", [id]);
+      const name = String(rows[0]?.branch_name || "");
+      const count = async (sql: string, p: any[]) => Number((((await queryDB(sql, p).catch(() => [{ n: 0 }])) as any[])[0] || {}).n || 0);
+      // [one, many, how many]
+      const uses: [string, string, number][] = [
+        ["employee", "employees", await count("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id = ? OR (branch_id IS NULL AND LOWER(TRIM(branch)) = LOWER(TRIM(?)))", [id, name])],
+        ["new-joiner application", "new-joiner applications", await count("SELECT COUNT(*) AS n FROM onboarding_applications WHERE branch_id = ?", [id])],
+        ["Team new-joiner rule", "Team new-joiner rules", await count("SELECT COUNT(*) AS n FROM department_team_auto WHERE LOWER(TRIM(branch)) = LOWER(TRIM(?))", [name])],
+        ["office attendance machine", "office attendance machines", await count("SELECT COUNT(*) AS n FROM zk_devices WHERE LOWER(TRIM(branch)) = LOWER(TRIM(?)) AND ip_address <> 'import'", [name])],
+        ["SIM with this Duty Location", "SIMs with this Duty Location", await count("SELECT COUNT(*) AS n FROM mobile_sims WHERE LOWER(TRIM(duty_location)) = LOWER(TRIM(?))", [name])]
+      ];
+      const used = uses.filter(([, , n]) => n > 0);
+      if (used.length) {
+        const text = used.map(([one, many, n]) => `${n} ${n === 1 ? one : many}`).join(", ");
         return res.status(409).json({
-          error: `${n} employee${n === 1 ? " is" : "s are"} on this Branch, so it can't be deleted. Move them to another Branch (Merge) and archive this one instead.`,
-          employees: n
+          error: `This Branch can't be deleted: it is still used (${text}). Move the people to another Branch (Merge) and archive this one instead.`,
+          used: Object.fromEntries(used.map(([, many, n]) => [many, n])),
+          employees: uses[0][2]
         });
       }
       await queryDB("DELETE FROM branches WHERE id = ?", [id]);
