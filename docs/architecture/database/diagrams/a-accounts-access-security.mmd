@@ -43,6 +43,24 @@ erDiagram
     int group_id PK
     tinyint new_accounts_app
   }
+  data_cleanup_batches {
+    int id PK
+    int company_id
+    varchar kind
+    varchar mode
+    int count
+    text reason
+    text filters_json
+  }
+  data_cleanup_trash {
+    int id PK
+    int batch_id
+    varchar kind
+    varchar record_id
+    varchar label
+    longtext rows_json
+    tinyint restored
+  }
   employee_template_assignments {
     int id PK
     int employee_user_id FK
