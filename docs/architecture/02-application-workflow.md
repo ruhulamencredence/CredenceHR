@@ -1344,3 +1344,6 @@ Gauge card-এর উপরে পাতলা সারি: এ বছর প�
 
 ## In Time / Out Time popup-এর নতুন চেহারা (২৩ নভেম্বর)
 `AttendanceMapConfirm.tsx` (In ও Out দুটোতেই): উপরে "In Time" / "Out Time", প্রজেক্ট ও এখনকার সময়; বড় map-এ পুরো attendance area (অন্য প্রজেক্টের area হালকা দাগে) আর নীল বিন্দুতে নিজের অবস্থান; map-এর উপরে এক লাইনে অবস্থা (area-র ভেতরে / কত দূরে — approval-এ যাবে / area নেই) আর কোণায় location বোতাম (আগের "Use current location" ও coordinate সরানো); Remarks (ঐচ্ছিক) বা area-র বাইরে Reason (বাধ্যতামূলক, না লেখা পর্যন্ত Submit বন্ধ); নিচে Cancel ও Submit পাশাপাশি। Map (OpenStreetMap) ও সব নিয়ম আগের মতোই — দূরত্ব, off-site approval, mock location আটকানো।
+
+## Payroll Late Policy: Extreme Delay = 0 (২৩ নভেম্বর)
+Payroll → Salary Setup → Late Policy-তে "Extreme Lates per Deducted Day" এখন 0 নেয়। 0 মানে Extreme Delay-এর আলাদা কোনো কাটা নেই — Extreme দিনগুলো চিহ্নিত থাকে, কিন্তু সাধারণ Delay-এর সাথে একসাথে গোনা হয় (যেকোনো ধরনের N টা late = ১ দিন, N = "Lates per Deducted Day")। 1 বা বেশি হলে আগের মতো আলাদা গোনা। Waive করা দিন গোনায় আসে না। একই নিয়ম server-এ (`PayrollRoutes.ts` `lateDeductionsFor`) ও পাতায় (`src/lib/lateDeduction.ts`): কর্মীর This Month card ও My Attendance-এর সতর্কতা, Run Payroll-এর Step 2 ও late-days তালিকা। নিয়ম Effective Date-এর মাস থেকে চলে; আগের মাস বদলায় না।

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { latesCombined } from '../lib/lateDeduction';
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
@@ -494,10 +495,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
     const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
     const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
     const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
-    if (oneShort(Number(lateSummary.late_count) || 0, per)) {
+    // Extreme = 0 in the Late Policy: Extreme Delay counts with the lates (lib/lateDeduction.ts).
+    const combined = latesCombined(lateSummary.policy);
+    const lates = (Number(lateSummary.late_count) || 0) + (combined ? Number(lateSummary.extreme_late_count) || 0 : 0);
+    if (oneShort(lates, per)) {
       lateWarnings.push({
-        badge: `${lateSummary.late_count}/${per} late`,
-        text: `${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
+        badge: `${lates}/${per} late`,
+        text: combined
+          ? `${lates} lates this month (Delay and Extreme Delay together) — 1 more and a day's salary will be deducted (${per} lates = 1 day).`
+          : `${lates} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
       });
     }
     if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {

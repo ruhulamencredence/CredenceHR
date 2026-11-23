@@ -1,0 +1,12 @@
+PASS save: −1 refused
+PASS save: 0 accepted {"success":true,"id":7}
+PASS save: stored as 0 (not turned into 1)
+PASS my summary: 2 Delay + 1 Extreme marked separately (2, 1)
+PASS Extreme = 0: 3 lates together = 1 day, nothing extra for Extreme (1, 0)
+PASS my summary: policy says 0 / combined
+PASS Run Payroll: same — −1 day in all {"l":2,"x":1,"ld":1,"xd":0}
+PASS Run Payroll: policy shows 0
+PASS late-days list: 1 day, combined {"d":1,"x":0}
+PASS a waived day drops out: 2 lates left, nothing deducted
+PASS Extreme = 1: old rule — Delay 2÷3 = 0, Extreme 1 = 1 day
+ALL PASS

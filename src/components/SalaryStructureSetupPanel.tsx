@@ -1497,8 +1497,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
       setSaveError("Extreme Delay's grace period must be greater than Delay's grace period.");
       return;
     }
-    if (!(Number(extremeLatesPerDay) >= 1)) {
-      setSaveError('Extreme Delay lates-per-deduction-day must be at least 1.');
+    if (extremeLatesPerDay.trim() === '' || !(Number(extremeLatesPerDay) >= 0)) {
+      setSaveError('Extreme Delay lates-per-deduction-day must be 0 or more (0 = counted with the lates).');
       return;
     }
     if (!effectiveDate) {
@@ -1550,10 +1550,17 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
               <strong>{current.grace_minutes} min</strong>, <strong>{current.lates_per_deduction_day}</strong> lates = 1 day's pay deducted
               (since {current.effective_date?.slice(0, 10)}).
             </p>
-            <p>
-              Extreme Delay: grace <strong>{current.extreme_grace_minutes}</strong> min, <strong>{current.extreme_lates_per_deduction_day}</strong>{' '}
-              late{current.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
-            </p>
+            {Number(current.extreme_lates_per_deduction_day) === 0 ? (
+              <p>
+                Extreme Delay: grace <strong>{current.extreme_grace_minutes}</strong> min —{' '}
+                <strong>no separate deduction; counted with the lates above</strong> ({current.lates_per_deduction_day} lates of either kind = 1 day).
+              </p>
+            ) : (
+              <p>
+                Extreme Delay: grace <strong>{current.extreme_grace_minutes}</strong> min, <strong>{current.extreme_lates_per_deduction_day}</strong>{' '}
+                late{current.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
+              </p>
+            )}
           </div>
         )}
 
@@ -1619,13 +1626,22 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
               <label className="block text-[11px] text-slate-500 mb-1">Extreme Lates per Deducted Day</label>
               <input
                 type="number"
-                min="1"
+                min="0"
+                data-testid="extreme-lates-per-day"
                 value={extremeLatesPerDay}
                 onChange={(e) => setExtremeLatesPerDay(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
           </div>
+          {extremeLatesPerDay.trim() !== '' && Number(extremeLatesPerDay) === 0 ? (
+            <div data-testid="extreme-zero-note" className="mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-800 leading-relaxed">
+              <strong>0 = no separate deduction.</strong> Extreme Delay days are still marked, but they count together with normal lates — every{' '}
+              {Number(latesPerDay) >= 1 ? latesPerDay : 'N'} lates of either kind deduct 1 day.
+            </div>
+          ) : (
+            <p className="text-[10px] text-slate-400 mt-1">0 = no separate deduction — Extreme Delay counts with the lates above. 1 or more: its own count.</p>
+          )}
           {extremeLateCutoff && (
             <p className="text-[11px] text-slate-500 mt-1.5">
               → An employee checking in after <strong>{extremeLateCutoff}</strong> is marked Extreme Delay (not counted as a normal Delay) that day.
@@ -1695,7 +1711,7 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
                   <td className="px-4 py-2 text-slate-600">{h.grace_minutes} min</td>
                   <td className="px-4 py-2 text-slate-600">{h.lates_per_deduction_day}</td>
                   <td className="px-4 py-2 text-slate-600">{h.extreme_grace_minutes} min</td>
-                  <td className="px-4 py-2 text-slate-600">{h.extreme_lates_per_deduction_day}</td>
+                  <td className="px-4 py-2 text-slate-600">{Number(h.extreme_lates_per_deduction_day) === 0 ? '0 (with lates)' : h.extreme_lates_per_deduction_day}</td>
                   <td className="px-4 py-2 text-slate-500">{h.changed_by_name || '—'}</td>
                 </tr>
               ))}

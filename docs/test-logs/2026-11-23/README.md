@@ -58,3 +58,18 @@ current location" and the raw coordinates; Remarks (optional) or Reason
   `attendance-popup-in.png`, `attendance-popup-out-offsite.png`.
 - The card accepts a GPS fix up to 30 s old, so the test waits 31 s after
   moving the location before the Out.
+
+# Late Policy: Extreme Lates per Deducted Day = 0
+
+Payroll → Salary Setup → Late Policy now takes 0 for Extreme Delay: Extreme
+Delay has no deduction of its own; its days are still marked Extreme, but
+they count together with the Delay days (every N lates of either kind = 1
+day). 1 or more works as before. One rule on the server (PayrollRoutes.ts
+`lateDeductionsFor`) and the screens (src/lib/lateDeduction.ts): employee's
+This Month card and My Attendance warning, Run Payroll's Step 2 and late-days
+list. The old code's `|| 1` would have turned a 0 back into 1 — removed.
+- `late-extreme-zero-api.txt` — 11/11 (save 0 / refuse −1; 2 Delay + 1
+  Extreme = 1 day with 0, nothing extra for Extreme; Run Payroll and the
+  late-days list agree; a waived day drops out; back to 1 = the old rule).
+- `late-extreme-zero-ui.txt` — 10/10; screenshots `late-policy-zero.png`,
+  `late-zero-employee-card.png`.

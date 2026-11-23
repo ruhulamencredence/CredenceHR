@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { latesCombined } from '../lib/lateDeduction';
 import React, { useEffect, useState } from 'react';
 import { CalendarCheck, AlertTriangle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -121,12 +122,16 @@ export const MyMonthAttendanceCard: React.FC<MyMonthAttendanceCardProps> = ({ to
   const totalDeductionDays = summary.late_deduction_days + summary.extreme_late_deduction_days;
   // How many more late days until the next full day of salary comes off —
   // the one number that actually changes behaviour tomorrow morning.
+  // Extreme = 0 in the Late Policy: Extreme Delay has no deduction of its
+  // own and counts with the Delay days (lib/lateDeduction.ts).
+  const combined = latesCombined(summary.policy);
+  const lateTotal = summary.late_count + (combined ? summary.extreme_late_count : 0);
   const towardNextDelay = summary.policy.lates_per_deduction_day
-    ? summary.policy.lates_per_deduction_day - (summary.late_count % summary.policy.lates_per_deduction_day)
+    ? summary.policy.lates_per_deduction_day - (lateTotal % summary.policy.lates_per_deduction_day)
     : 0;
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${className}`}>
+    <div data-testid="my-month-attendance" className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${className}`}>
       <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
           <CalendarCheck className="w-4 h-4 text-blue-600" /> This Month · {monthLabel(summary.month_year)}
@@ -152,13 +157,13 @@ export const MyMonthAttendanceCard: React.FC<MyMonthAttendanceCardProps> = ({ to
         <Tile
           label="Delay"
           value={summary.late_count}
-          note={summary.late_deduction_days > 0 ? `${summary.late_deduction_days} day deducted` : null}
+          note={!combined && summary.late_deduction_days > 0 ? `${summary.late_deduction_days} day deducted` : null}
           tone={summary.late_count > 0 ? 'warn' : 'plain'}
         />
         <Tile
           label="Extreme Delay"
           value={summary.extreme_late_count}
-          note={summary.extreme_late_deduction_days > 0 ? `${summary.extreme_late_deduction_days} day deducted` : null}
+          note={combined ? (summary.extreme_late_count > 0 ? 'counts with lates' : null) : summary.extreme_late_deduction_days > 0 ? `${summary.extreme_late_deduction_days} day deducted` : null}
           tone={summary.extreme_late_count > 0 ? 'alert' : 'plain'}
         />
       </div>
@@ -167,13 +172,15 @@ export const MyMonthAttendanceCard: React.FC<MyMonthAttendanceCardProps> = ({ to
         <div className="mx-5 sm:mx-6 mb-5 flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
+            {combined && `${lateTotal} lates this month (${summary.policy.lates_per_deduction_day} lates = 1 day) → `}
             {totalDeductionDays} {totalDeductionDays === 1 ? "day's" : "days'"} salary is set to be deducted this month
             for late attendance.
           </span>
         </div>
-      ) : summary.late_count > 0 ? (
+      ) : lateTotal > 0 ? (
         <div className="mx-5 sm:mx-6 mb-5 text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-700">
-          {towardNextDelay} more Delay {towardNextDelay === 1 ? 'day' : 'days'} this month and a day's salary gets
+          {combined ? `${lateTotal} late${lateTotal === 1 ? '' : 's'} this month — ` : ''}
+          {towardNextDelay} more {combined ? 'late' : 'Delay'} {towardNextDelay === 1 ? 'day' : 'days'} this month and a day's salary gets
           deducted.
         </div>
       ) : null}

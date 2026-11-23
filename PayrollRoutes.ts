@@ -629,6 +629,25 @@ export function closedPayMonthMessage(monthYear: string): string {
 
 const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
+
+// Late Attendance Policy -> days of pay deducted for a month's (not waived)
+// late days. extreme_lates_per_deduction_day = 0 (owner's decision, 23 Nov
+// 2026): Extreme Delay has no deduction of its own — its days are still
+// marked Extreme, but they count together with the Delay days (every
+// lates_per_deduction_day lates of either kind = 1 day). 1 or more: each tier
+// is counted on its own, as before. Never `|| 1` on the extreme value — that
+// would turn the 0 back into 1.
+export function lateDeductionsFor(late: number, extreme: number, policy: any): { late: number; extreme: number; combined: boolean } {
+  const per = Math.max(1, Math.round(Number(policy?.lates_per_deduction_day)) || 1);
+  const raw = policy?.extreme_lates_per_deduction_day;
+  if (raw != null && Number(raw) === 0) return { late: Math.floor((late + extreme) / per), extreme: 0, combined: true };
+  const extremePer = Math.max(1, Math.round(Number(raw)) || 1);
+  return { late: Math.floor(late / per), extreme: Math.floor(extreme / extremePer), combined: false };
+}
+/** The policy's Extreme value as stored (0 stays 0; missing = 1). */
+export const extremePerDayOf = (policy: any): number =>
+  policy?.extreme_lates_per_deduction_day != null && Number(policy.extreme_lates_per_deduction_day) === 0 ? 0 : Math.max(1, Math.round(Number(policy?.extreme_lates_per_deduction_day)) || 1);
+
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope, computeMonthlyReport } = deps;
 
@@ -2119,8 +2138,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (extremeGraceMinutes <= graceMinutes) {
         return res.status(400).json({ error: "Extreme Delay's grace period must be greater than Delay's grace period." });
       }
-      if (!Number.isFinite(extremeLatesPerDay) || extremeLatesPerDay < 1) {
-        return res.status(400).json({ error: "extreme_lates_per_deduction_day must be at least 1." });
+      // 0 = Extreme Delay has no deduction of its own; it counts with the lates (lateDeductionsFor).
+      if (!Number.isFinite(extremeLatesPerDay) || extremeLatesPerDay < 0) {
+        return res.status(400).json({ error: "extreme_lates_per_deduction_day must be 0 or more." });
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
         return res.status(400).json({ error: "effective_date must be in YYYY-MM-DD format." });
@@ -2211,9 +2231,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         },
         days: [...days, ...extremeDays].sort((a, b) => a.date.localeCompare(b.date)),
         late_count: countedLate,
-        deduction_days: Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1)),
+        deduction_days: lateDeductionsFor(countedLate, countedExtremeLate, policy).late,
         extreme_late_count: countedExtremeLate,
-        extreme_deduction_days: Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1))
+        extreme_deduction_days: lateDeductionsFor(countedLate, countedExtremeLate, policy).extreme,
+        lates_combined: lateDeductionsFor(0, 0, policy).combined
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load late-day details." });
@@ -2333,7 +2354,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const lateCount = lateDatesByEmployee.get(Number(employee.id))?.length || 0;
       const extremeLateCount = extremeLateDatesByEmployee.get(Number(employee.id))?.length || 0;
       const latesPerDay = Number(policy.lates_per_deduction_day || 1);
-      const extremeLatesPerDay = Number(policy.extreme_lates_per_deduction_day || 1);
+      const extremeLatesPerDay = extremePerDayOf(policy);
+      const deducted = lateDeductionsFor(lateCount, extremeLateCount, policy);
 
       // Working days elapsed so far. For the month in progress, counting the
       // whole month would report every day still to come as a day not yet
@@ -2373,9 +2395,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         leave_days: leaveDays,
         absent_days: absentDays,
         late_count: lateCount,
-        late_deduction_days: Math.floor(lateCount / latesPerDay),
+        late_deduction_days: deducted.late,
         extreme_late_count: extremeLateCount,
-        extreme_late_deduction_days: Math.floor(extremeLateCount / extremeLatesPerDay),
+        extreme_late_deduction_days: deducted.extreme,
+        lates_combined: deducted.combined,
         policy: {
           shift_start_time: policy.shift_start_time,
           grace_minutes: policy.grace_minutes,
@@ -3319,8 +3342,6 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
         employees, monthStart, monthEnd, holidayMapsByGroup, branchTypeByUserId, latePolicy
       );
-      const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
-      const extremeLatesPerDay = Number(latePolicy.extreme_lates_per_deduction_day || 1);
 
       // Running Payroll before the month is over (e.g. on the 28th): the
       // working days still to come can't have attendance yet, so they're
@@ -3373,9 +3394,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const present = Math.min(workingDays - leave - lwp, hasAttendanceData ? presentDates.size + upcomingDays : workingDays);
         const absent = Math.max(0, workingDays - present - leave - lwp);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
-        const lateDeductionDays = Math.floor(lateCount / latesPerDay);
         const extremeLateCount = extremeLateDatesByEmployee.get(e.id)?.length || 0;
-        const extremeLateDeductionDays = Math.floor(extremeLateCount / extremeLatesPerDay);
+        // Extreme = 0: both kinds counted together (lateDeductionsFor).
+        const { late: lateDeductionDays, extreme: extremeLateDeductionDays } = lateDeductionsFor(lateCount, extremeLateCount, latePolicy);
         return {
           employee_id: e.id,
           employee_code: e.employee_code,
