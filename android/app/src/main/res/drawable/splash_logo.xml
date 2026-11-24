@@ -6,7 +6,11 @@
      Android 12+ and the AndroidX splash on older phones show this drawable on
      the orange (windowSplashScreenBackground). The first item is an empty
      288dp canvas on purpose: the splash draws the icon area at 288dp, and a
-     drawable smaller than that would be stretched up to fill it. -->
+     drawable smaller than that would be stretched up to fill it.
+     Size: @dimen/splash_logo_size — one step per 20dp of screen width
+     (values-swNNNdp), and on Android 12+ (values*-v31) 1/1.5 of it, because
+     the system enlarges a splash icon 1.5x as an adaptive icon's foreground
+     (124dp set showed at ~186dp on a phone, 23 Nov). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:width="288dp" android:height="288dp">
         <shape android:shape="rectangle">
