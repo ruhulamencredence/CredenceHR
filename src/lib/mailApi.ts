@@ -187,6 +187,7 @@ export interface MailSettings {
   layout: any;
   language: string;
   timezone: string;
+  signatureLinks?: SignatureLinks;
 }
 
 export interface AddressSuggestion {
@@ -219,6 +220,19 @@ export function setMailViewAs(userId: number | null) {
 }
 const viewAsHeader = (): Record<string, string> => (viewAsUserId ? { 'X-Mail-View-As': String(viewAsUserId) } : {});
 
+// The links the Credence design signature carries (Mail Administration ->
+// Signature). Taken from every settings response, so a change by the
+// Superadmin shows in every signature the next time mail settings load.
+export interface SignatureLinks {
+  website: string;
+  facebook: string;
+  linkedin: string;
+}
+let signatureLinks: SignatureLinks = { website: 'https://credencehousing.com', facebook: 'https://facebook.com/credencehousing', linkedin: 'https://linkedin.com/company/credencehousing' };
+export function setSignatureLinks(links: Partial<SignatureLinks> | null | undefined) {
+  if (links && typeof links === 'object') signatureLinks = { ...signatureLinks, ...links };
+}
+
 export async function mailFetch<T = any>(token: string, path: string, init: { method?: string; body?: any } = {}): Promise<T> {
   const res = await fetch(apiUrl(`/api/mail${path}`), {
     method: init.method || 'GET',
@@ -227,6 +241,7 @@ export async function mailFetch<T = any>(token: string, path: string, init: { me
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new MailApiError(data?.error || `Request failed (${res.status})`, res.status);
+  if (path === '/settings' && data?.signatureLinks) setSignatureLinks(data.signatureLinks);
   return data as T;
 }
 
@@ -393,10 +408,12 @@ export function credenceSignatureHtml(f: SignatureFields, logoUrl?: string): str
   if (f.mobile) contact.push(`Mobile: <span style="color:#E05A1A;font-weight:700;">${esc(f.mobile)}</span>`);
   if (f.pabx) contact.push(`PABX: <span style="color:#E05A1A;font-weight:700;">${esc(f.pabx)}</span>`);
   const link = (href: string, label: string) =>
-    `<a href="${href}" style="color:#E05A1A;font-weight:700;font-size:10px;text-decoration:none;font-family:Arial,sans-serif;letter-spacing:0.05em;">${label}</a>`;
-  const links = [link('https://credencehousing.com', 'WEBSITE'), link('https://facebook.com/credencehousing', 'FACEBOOK'), link('https://linkedin.com/company/credencehousing', 'LINKEDIN')].join(
-    '<span style="color:#ccc;margin:0 5px;">|</span>'
-  );
+    `<a href="${esc(href)}" style="color:#E05A1A;font-weight:700;font-size:10px;text-decoration:none;font-family:Arial,sans-serif;letter-spacing:0.05em;">${label}</a>`;
+  // An address the Superadmin left empty is not shown.
+  const links = ([[signatureLinks.website, 'WEBSITE'], [signatureLinks.facebook, 'FACEBOOK'], [signatureLinks.linkedin, 'LINKEDIN']] as const)
+    .filter(([href]) => !!href)
+    .map(([href, label]) => link(href, label))
+    .join('<span style="color:#ccc;margin:0 5px;">|</span>');
   return `<table cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,sans-serif;width:100%;max-width:520px;margin-top:16px;">
 <tr><td style="padding-bottom:12px;">
 <p style="margin:0;font-size:12px;font-style:italic;color:#555;font-family:Georgia,serif;">With Regards,</p>
@@ -411,11 +428,16 @@ ${logoUrl ? `<td style="width:80px;vertical-align:middle;padding-right:14px;"><i
 <p style="margin:0 0 3px;font-size:13px;font-weight:700;color:#1a1a1a;letter-spacing:0.02em;">CREDENCE HOUSING LIMITED</p>
 <p style="margin:0 0 1px;font-size:10px;color:#555;">Telephone: +8802 41021375, +8802 41021378 | Hotline: 16769</p>
 <p style="margin:0 0 6px;font-size:10px;color:#555;">Corporate Address: House-15, Road-13/A, Dhanmondi, Dhaka-1209, Bangladesh</p>
-<p style="margin:0;">${links}</p>
+${links ? `<p style="margin:0;">${links}</p>` : ''}
 </td></tr></table>
 </td></tr>
 </table>`;
 }
+
+// A signature's HTML as it should look now: the Credence design is built again
+// from its fields, so the links the Superadmin has set apply to signatures
+// saved earlier too; a signature of the person's own is used as it is.
+export const signatureContent = (sig: { content: string; fields?: SignatureFields; logoUrl?: string }): string => (sig.fields ? credenceSignatureHtml(sig.fields, sig.logoUrl) : sig.content);
 
 // Folder list (left column). `label` is what /api/mail/messages takes.
 export const MAIL_FOLDERS = [
