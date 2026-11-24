@@ -21,6 +21,43 @@ interface LeaveSummaryCardProps {
   onOpen: () => void;
 }
 
+// One Leave Type as a ring: the days left inside it, "enjoyed of given" beside it.
+const LeaveRing: React.FC<{ label: string; left: number; used: number; fmt: (n: number) => string }> = ({ label, left, used, fmt }) => {
+  const given = left + used;
+  const c = 2 * Math.PI * 17;
+  const share = given > 0 ? Math.min(1, Math.max(0, left / given)) : 0;
+  return (
+    <div className="flex items-center gap-2.5 flex-1 min-w-0">
+      <div className="relative w-[46px] h-[46px] shrink-0">
+        <svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true">
+          <circle cx="23" cy="23" r="17" fill="none" strokeWidth="6" style={{ stroke: 'rgba(var(--g-accent-rgb, 255, 103, 0), 0.2)' }} />
+          <circle
+            cx="23"
+            cy="23"
+            r="17"
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="6"
+            strokeLinecap="round"
+            strokeDasharray={c}
+            strokeDashoffset={c * (1 - share)}
+            transform="rotate(-90 23 23)"
+          />
+        </svg>
+        <div className="leave-num absolute inset-0 flex items-center justify-center text-[15px] font-extrabold text-slate-900">{fmt(left)}</div>
+      </div>
+      <div className="min-w-0">
+        <div className="text-xs font-bold text-slate-800">{label}</div>
+        <div className="text-[11px] leading-tight text-slate-500">
+          {fmt(used)} enjoyed
+          <br />
+          of {fmt(given)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Dashboard-only compact version of the old all-in-one Leave Summary card:
 // still every account's own Leave Applications (not Admin-gated, same data
 // as "Self Service -> Leave Application"), but now trimmed down to just the
@@ -64,20 +101,23 @@ useLiveRefresh(() => load());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // "Available" is the Casual + Sick left (rejections already refund their
-  // day_count server-side, so it is what is really left to spend). Leave
-  // Without Pay is not a balance to spend, so it is left out of the total.
-  // "Leave Used" counts only this year's leave (the period shown on the card),
-  // every application NOT rejected, pending included, since day_count is taken
-  // out of the balance the moment it is submitted. Leave Without Pay taken this
-  // year is shown on its own line, not added to Used.
+  // Per Leave Type (Casual, Sick): Given = what the year gave (left + taken),
+  // Enjoyed = this year's leave not rejected (pending included, since day_count
+  // comes off the balance when it is submitted), Left = the balance now
+  // (rejections already refund their day_count server-side). Only this year's
+  // leave counts (the period shown on the card). Leave Without Pay is not a
+  // balance to spend, so it is left out; it is in the bottom line's tooltip.
   const year = new Date().getFullYear();
-  const casual = balance ? balance.casual_leave : 0;
-  const sick = balance ? balance.sick_leave : 0;
-  const available = casual + sick;
   const thisYear = applications.filter((a) => a.status !== 'rejected' && String(a.start_date || '').slice(0, 4) === String(year));
-  const used = thisYear.filter((a) => a.leave_type !== 'without_pay').reduce((sum, a) => sum + a.day_count, 0);
-  const withoutPay = thisYear.filter((a) => a.leave_type === 'without_pay').reduce((sum, a) => sum + a.day_count, 0);
+  const takenOf = (type: string) => thisYear.filter((a) => a.leave_type === type).reduce((sum, a) => sum + a.day_count, 0);
+  const casualLeft = balance ? balance.casual_leave : 0;
+  const sickLeft = balance ? balance.sick_leave : 0;
+  const casualUsed = takenOf('casual');
+  const sickUsed = takenOf('sick');
+  const withoutPay = takenOf('without_pay');
+  const available = casualLeft + sickLeft;
+  const enjoyed = casualUsed + sickUsed;
+  const fmt = (n: number) => String(Math.round(n * 10) / 10);
 
   return (
     <>
@@ -128,7 +168,7 @@ useLiveRefresh(() => load());
             <h3 className="text-base font-bold flex items-center gap-2">
               <CalendarDays className="w-4 h-4" /> Leave Summary
             </h3>
-            <p className="text-xs text-white/70 mt-0.5">Your Leave balance and review status</p>
+            <p className="text-xs text-white/70 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           </div>
           <div className="shrink-0 w-20 h-20 -mt-2 -mr-1 pointer-events-none">
             {beachAnimation && <Lottie src={beachAnimation} autoplay loop className="w-full h-full" />}
@@ -154,31 +194,16 @@ useLiveRefresh(() => load());
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
           className={`glass-mask-fix bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
         >
-          <p className="text-xs font-bold text-slate-900">Total Leave</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
-          <div className="mt-1.5 flex items-center gap-6">
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Available
-              </div>
-              <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{available}</p>
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used · {year}
-              </div>
-              <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{used}</p>
-            </div>
-            {/* Beside the two numbers, so the card keeps its height: what Available is made of
-                (Leave Without Pay taken this year is in the tooltip, not counted). */}
-            <div
-              className="ml-auto text-[11px] leading-tight text-slate-500 text-right"
-              title={withoutPay > 0 ? `Without pay ${withoutPay} this year (not counted)` : undefined}
-            >
-              <div>Casual {casual}</div>
-              <div>Sick {sick}</div>
-            </div>
+          <div className="flex gap-3 mt-0.5">
+            <LeaveRing label="Casual" left={casualLeft} used={casualUsed} fmt={fmt} />
+            <LeaveRing label="Sick" left={sickLeft} used={sickUsed} fmt={fmt} />
           </div>
+          <p
+            className="text-[11px] text-slate-500 mt-1"
+            title={withoutPay > 0 ? `Without pay ${fmt(withoutPay)} this year (not counted)` : undefined}
+          >
+            <b className="text-emerald-600">{fmt(available)}</b> available in all · {fmt(enjoyed)} enjoyed
+          </p>
         </div>
       </div>
       </div>
