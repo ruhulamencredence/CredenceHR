@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৬টি টেবিল, ৩০০৩টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৬টি টেবিল, ৩০০৫টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -418,6 +418,7 @@ Unique: `uq_mail_group_email`(email)
 | `scheduled_at` | datetime | হ্যাঁ |  | |
 | `send_error` | varchar(500) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `via_server` | tinyint(1) | না | default 0 | |
 | `via_internal` | tinyint(1) | না | default 0 | |
 | `flags_changed_at` | datetime | হ্যাঁ |  | |
 
@@ -447,6 +448,7 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `timezone` | varchar(80) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 | `picture_senders_json` | text | হ্যাঁ |  | |
+| `send_via_server` | tinyint(1) | না | default 0 | |
 
 ### `mail_signature_images`
 
