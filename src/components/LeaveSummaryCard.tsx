@@ -21,7 +21,7 @@ interface LeaveSummaryCardProps {
   onOpen: () => void;
 }
 
-// One Leave Type as a ring: the days left inside it, "enjoyed of given" beside it.
+// One Leave Type as a ring: the days left inside it, "taken out of given" beside it.
 const LeaveRing: React.FC<{ label: string; left: number; used: number; fmt: (n: number) => string }> = ({ label, left, used, fmt }) => {
   const given = left + used;
   const c = 2 * Math.PI * 17;
@@ -49,9 +49,9 @@ const LeaveRing: React.FC<{ label: string; left: number; used: number; fmt: (n: 
       <div className="min-w-0">
         <div className="text-xs font-bold text-slate-800">{label}</div>
         <div className="text-[11px] leading-tight text-slate-500">
-          {fmt(used)} enjoyed
+          {fmt(used)} taken
           <br />
-          of {fmt(given)}
+          out of {fmt(given)}
         </div>
       </div>
     </div>
@@ -202,7 +202,7 @@ useLiveRefresh(() => load());
             className="text-[11px] text-slate-500 mt-1"
             title={withoutPay > 0 ? `Without pay ${fmt(withoutPay)} this year (not counted)` : undefined}
           >
-            <b className="text-emerald-600">{fmt(available)}</b> available in all · {fmt(enjoyed)} enjoyed
+            <b className="text-emerald-600">{fmt(available)}</b> available in all · {fmt(enjoyed)} taken
           </p>
         </div>
       </div>
