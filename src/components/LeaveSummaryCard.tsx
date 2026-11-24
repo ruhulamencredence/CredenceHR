@@ -169,11 +169,16 @@ useLiveRefresh(() => load());
               </div>
               <p className="leave-num text-lg font-bold text-slate-900 mt-0.5">{used}</p>
             </div>
+            {/* Beside the two numbers, so the card keeps its height: what Available is made of
+                (Leave Without Pay taken this year is in the tooltip, not counted). */}
+            <div
+              className="ml-auto text-[11px] leading-tight text-slate-500 text-right"
+              title={withoutPay > 0 ? `Without pay ${withoutPay} this year (not counted)` : undefined}
+            >
+              <div>Casual {casual}</div>
+              <div>Sick {sick}</div>
+            </div>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1.5">
-            Casual {casual} · Sick {sick}
-            {withoutPay > 0 ? ` · Without pay ${withoutPay} (not counted)` : ''}
-          </p>
         </div>
       </div>
       </div>

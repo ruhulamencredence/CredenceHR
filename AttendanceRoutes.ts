@@ -34,6 +34,10 @@ import { restrictedAttendanceProjects } from "./AttendanceProjects";
 import { activeReliefDuties } from "./GuardRoutes";
 import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
+import { closeOffsiteRequest, reconcileOffsiteIn } from "./OffsiteReconcile";
+import { companyStore, DEFAULT_COMPANY_ID } from "./companyContext";
+import { runsBackgroundJobs } from "./jobRunner";
+import { createAlert } from "./Alerts";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -502,11 +506,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (otherIn.length) {
         return res.status(400).json({ error: `You've already checked in today${otherIn[0].project_name ? ` at ${otherIn[0].project_name}` : ""}.` });
       }
-      const waitingIn: any[] = await queryDB(
-        "SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND offsite_in = 1 LIMIT 1",
-        [req.user.id, today]
-      );
-      if (waitingIn.length) return res.status(400).json({ error: "Your off-site In for today is already waiting for approval." });
+      // A waiting off-site In does not block an In given inside the circle: this In counts
+      // at once, and the waiting request stays only if it is EARLIER (the approver decides;
+      // approving never moves the day's In later — OffsiteReconcile.ts).
 
       // Office Attendance (ZKTeco) gate — if the linked Employee already has an
       // In Time today from the office biometric device, that's already this
@@ -721,6 +723,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   app.get("/api/attendance/day-status", authenticateToken, async (req: any, res) => {
     try {
       const today = todayInDhaka();
+      // A waiting off-site In that an earlier valid In (e.g. the office machine) made pointless closes itself.
+      await reconcileOffsiteIn(queryDB, createAlert, { userId: Number(req.user.id), sinceDays: 1 }).catch(() => 0);
       const { inS, outS } = await dayPicture(req.user, today);
       // Off-site In / Out given today and still waiting for approval.
       const pend: any[] =
@@ -1937,6 +1941,47 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       res.status(500).json({ error: err.message });
     }
   });
+
+  // POST /api/attendance/offsite/withdraw — the person takes back their own off-site In / Out
+  // that still waits for approval (today's only), so what they give inside the circle counts.
+  app.post("/api/attendance/offsite/withdraw", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
+    try {
+      const day = todayInDhaka();
+      const rows: any[] =
+        (await queryDB(
+          "SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND (offsite_in = 1 OR offsite_out = 1)",
+          [req.user.id, day]
+        )) || [];
+      if (!rows.length) return res.status(404).json({ error: "You have no off-site request waiting for today." });
+      let n = 0;
+      for (const r of rows) if (await closeOffsiteRequest(queryDB, createAlert, Number(r.id), "withdrawn")) n++;
+      res.json({ success: true, withdrawn: n });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Every 10 minutes: waiting In-only off-site requests that an earlier valid In (office
+  // machine punches arrive later than the phone) made pointless close themselves, so they
+  // do not pile up with the approver. One process only under PM2 cluster mode (jobRunner.ts).
+  async function sweepOffsite(): Promise<void> {
+    try {
+      const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g");
+      if (!groups.length) {
+        await reconcileOffsiteIn(queryDB, createAlert);
+        return;
+      }
+      for (const g of groups) {
+        await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => reconcileOffsiteIn(queryDB, createAlert));
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Off-site In clean-up failed: " + err.message);
+    }
+  }
+  if (runsBackgroundJobs()) {
+    setTimeout(sweepOffsite, 60_000);
+    setInterval(sweepOffsite, 10 * 60 * 1000);
+  }
 
   return { computeMonthlyReport };
 }

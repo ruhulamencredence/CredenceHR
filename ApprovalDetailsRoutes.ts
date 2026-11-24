@@ -35,6 +35,7 @@
 //     Superadmin, whoever raised it, its approvers, and accounts with
 //     Payroll's "See salary amounts"; everyone else gets "*****".
 
+import { validInFor, dayOf } from "./OffsiteReconcile";
 import type { Express } from "express";
 
 type Q = (sql: string, params?: any[]) => Promise<any>;
@@ -300,6 +301,19 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
     } else if (t === "attendance_correction") {
       const proj = await projectName(r.project_id);
       title = `Attendance correction — ${d(r.attendance_date)}`;
+      // An off-site In that waits: what already counts for the day, and what approving does.
+      let inNote: string | null = null;
+      if (r.status === "pending" && Number(r.offsite_in) === 1 && r.requested_check_in_at) {
+        const valid = await validInFor(queryDB, Number(r.user_id), dayOf(r.attendance_date));
+        if (valid) {
+          const t = valid.at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" });
+          const src = valid.source === "office" ? "the office machine" : "a project check-in";
+          inNote =
+            valid.at.getTime() <= new Date(r.requested_check_in_at).getTime()
+              ? `The day already has an earlier In at ${t} (${src}). Approving keeps that time; this In changes nothing.`
+              : `The person also has a later In at ${t} (${src}). Approving makes the day's In the earlier time asked for here.`;
+        }
+      }
       fields = F([
         ["Date", d(r.attendance_date)],
         ["Project", proj],
@@ -310,6 +324,7 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
         ["Check out place", r.out_place],
         ["Check out distance", r.out_distance_m != null ? `${Math.round(Number(r.out_distance_m))} m from the project` : null],
         ["Reason", r.remarks],
+        ["Note", inNote],
         ["Status", r.status]
       ]);
       loc("Check in", r.in_lat, r.in_lng, r.in_place);
