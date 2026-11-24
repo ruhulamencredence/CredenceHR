@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Rational;
 import android.view.View;
 import android.view.WindowManager;
@@ -27,6 +28,7 @@ import android.webkit.WebView;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.content.ContextCompat;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -131,8 +133,23 @@ public class MainActivity extends BridgeActivity {
     }
     private ActivityResultLauncher<String[]> mediaPermissionLauncher;
 
+    // The opening screen (orange + the app's logo, set in styles.xml) stays up
+    // until the web page has drawn its own first frame (the same logo, see
+    // index.html #mpr-boot-spinner), or at most this long on a very slow
+    // connection. Without the wait the splash left as soon as the window was
+    // ready and a white WebView showed until the page arrived.
+    private static final long SPLASH_MAX_MS = 4000;
+    private volatile boolean pageShown = false;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Must come before super.onCreate: installs the opening screen and
+        // holds it until the page is visible (pageShown), then removes it at
+        // once (no fade over the page, whose first frame is the same picture).
+        final long startedAt = SystemClock.uptimeMillis();
+        SplashScreen splash = SplashScreen.installSplashScreen(this);
+        splash.setKeepOnScreenCondition(() -> !pageShown && SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS);
+        splash.setOnExitAnimationListener(provider -> provider.remove());
         // App's own plugins have to be registered before the bridge starts.
         registerPlugin(LocationAccessPlugin.class);
         registerPlugin(CallAudioPlugin.class);
@@ -184,10 +201,18 @@ public class MainActivity extends BridgeActivity {
         // (shouldOverrideUrlLoading, shouldInterceptRequest, etc.) keeps
         // working exactly as before -- we only add error handling on top.
         webView.setWebViewClient(new BridgeWebViewClient(this.bridge) {
+            // The page has drawn its first frame: the opening screen can go.
+            @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                pageShown = true;
+            }
+
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 super.onReceivedError(view, request, error);
                 if (request.isForMainFrame()) {
+                    pageShown = true;
                     showOfflinePage(view);
                 }
             }
@@ -216,6 +241,7 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                pageShown = true;
                 // The very first window-insets dispatch (below) can land
                 // before the page has actually loaded, so document.documentElement
                 // isn't there yet and that evaluateJavascript call silently
