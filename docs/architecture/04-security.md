@@ -330,3 +330,6 @@ Joiner & Probation নিয়ম বদলানো (`PUT /api/leave-policies/
 - কেউ শুধু নিজের অধীনের সক্রিয় কর্মীদেরই দেখেন; `/:employeeId` অন্য কারও জন্য 403 দেয়, Superadmin-এর জন্যও (Superadmin অন্যদের Employee 360-এ দেখেন)। চাকরি ছেড়ে যাওয়া কর্মী তালিকায় আসেন না।
 - যা দেখায়: নাম, ID, designation, department, branch, আজকের In / Out ও জায়গা, Leave-এর ধরন, এ মাসের Present / Late / Leave / Absent সংখ্যা, ফোন ও email। বেতন, ব্যক্তিগত ঠিকানা, NID, documents কিছুই নয়। শুধু পড়া, কিছু বদলানো যায় না।
 - যার অধীনে কেউ নেই তার response শুধু `has_team: false`, UI-তে কার্ডও নেই।
+
+## Off-site In withdraw ও স্বয়ংক্রিয় বন্ধ (২৪ নভেম্বর)
+`POST /api/attendance/offsite/withdraw` শুধু চলতি অ্যাকাউন্টের নিজের, আজকের pending off-site অনুরোধ ফিরিয়ে নেয় (Remote Attendance-এর বর্তমান অনুমতি `can_use_attendance`-এর ভেতরে; অন্যের রেকর্ডে হাত দেওয়া যায় না)। স্বয়ংক্রিয় বন্ধ কোনো অনুমোদন দেয় না, শুধু এমন অনুরোধ বন্ধ করে যেটা দিনের In বদলাত না। Approve কখনও দিনের In আরও পরে সরায় না। সব পরিবর্তন অনুরোধের remark-এ লেখা থাকে।

@@ -1350,3 +1350,10 @@ Payroll → Salary Setup → Late Policy-তে "Extreme Lates per Deducted Day"
 
 ## মোবাইল অ্যাপ খোলা: লোগো দিয়ে শুরু (২৩ নভেম্বর)
 আগে ক্রম ছিল: সম্পূর্ণ কমলা → অল্প সাদা → লোগো → অ্যানিমেশন। এখন: লোগো (কমলার ওপর) → একই লোগো থেকে অ্যানিমেশন → অ্যাপ। Android-এর খোলার পর্দা (`styles.xml`, `drawable/splash_logo.xml`) ওয়েব পাতার প্রথম ফ্রেমের (`index.html #mpr-boot-spinner`) একই লোগো, একই মাপ (পর্দার প্রস্থের ৩১%, ৯৫–১৪০dp) ও একই জায়গায় আঁকে; `MainActivity` পাতার প্রথম ফ্রেম (`onPageCommitVisible`) আঁকা না হওয়া পর্যন্ত (সর্বোচ্চ ৪ সেকেন্ড) পর্দাটি ধরে রাখে, তাই সাদা WebView আর দেখা যায় না। নেটিভ অংশ বদলেছে, তাই নতুন APK তৈরি করতে হয়।
+
+## Off-site In: pending অনুরোধ আর In-কে আটকায় না (২৪ নভেম্বর)
+বৃত্তের বাইরের In আসল attendance-এ লেখা হয় না, approval-এর অপেক্ষার একটি অনুরোধ (`attendance_corrections`, `offsite_in = 1`) হয়। আগে এটি pending থাকলে বৃত্তের ভেতরের In-ও আটকে যেত। এখন (`OffsiteReconcile.ts`):
+- বৃত্তের ভেতরের In (বা অফিসের ZKT পাঞ্চ) pending off-site In থাকলেও আটকায় না; আগের মতো সঙ্গে সঙ্গে গণ্য হয়।
+- দিনের In = সবচেয়ে আগেরটি (project-এর `attendance` In বা ZKT-এর প্রথম পাঞ্চ)। Off-site In **approve** হলে দিনের In আর পরে সরে না: আগে থেকে একই বা আগের সময়ের In থাকলে সেটাই থাকে (remark: "In kept at the earlier time already counted"), না থাকলে আগের মতো off-site সময় বসে।
+- শুধু In-এর off-site অনুরোধ, যার দিনে আগে থেকেই একই বা আগের সময়ের বৈধ In আছে, নিজে বন্ধ হয় ("[Closed by the system] …", status `rejected`, approval request-ও বন্ধ, কর্মী alert পান): My Attendance কার্ড খুললে, আর প্রতি ১০ মিনিটে ব্যাকগ্রাউন্ড clean-up-এ (ZKT পাঞ্চ ফোন-পাঞ্চের পরে এলেও ধরা পড়ে)। Off-site সময় আগের হলে অনুরোধ খোলা থাকে এবং approver পর্দায় "Note" দেখেন (আগেই In আছে/পরের In আছে, approve করলে কী হবে)।
+- কর্মী নিজে "Withdraw" দিয়ে আজকের নিজের pending off-site অনুরোধ ফিরিয়ে নিতে পারেন (`POST /api/attendance/offsite/withdraw`, remark "[Withdrawn by the employee]")।

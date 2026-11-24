@@ -361,6 +361,25 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
 
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
+  // Take back the off-site In / Out that still waits for approval, so an In given inside
+  // the project area counts instead (POST /api/attendance/offsite/withdraw).
+  const withdrawOffsite = async () => {
+    if (!(await confirmDialog('Withdraw your off-site request for today? It will not go for approval, and you can check in inside the project area.', { title: 'Withdraw', confirmLabel: 'Withdraw' }))) return;
+    setWorking('in');
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl('/api/attendance/offsite/withdraw'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not withdraw the request.');
+      setMessage({ type: 'success', text: 'Your off-site request was withdrawn.' });
+      await loadDay();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Could not withdraw the request.' });
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const handleMark = async (kind: 'in' | 'out') => {
     // The Project is the one whose area you're standing in — for the In and
     // for the Out alike (they may be different Projects). With one Project
@@ -578,6 +597,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
                 <span className="text-[11px] align-middle">{formatTimeParts(waiting.in_at).meridiem}</span>
               </div>
               <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
+              <button
+                type="button"
+                onClick={() => handleMark('in')}
+                disabled={busy}
+                className="mt-1 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 transition-colors"
+              >
+                {working === 'in' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
+                Check in here
+              </button>
             </>
           ) : (
             <button
@@ -672,8 +700,14 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
 
             {waiting && (
               <span className="text-amber-700">
-                Off-site · {waiting.in_place || waiting.out_place} — counts once approved
+                Off-site · {waiting.in_place || waiting.out_place} —{' '}
+                {status?.check_in_at && waiting.in_at ? 'waiting; if it is earlier than your In, the approver decides' : 'counts once approved'}
               </span>
+            )}
+            {waiting && (
+              <button type="button" onClick={withdrawOffsite} disabled={busy} className="font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40">
+                Withdraw
+              </button>
             )}
             {!!status?.check_in_at && <ApprovalBadge approval={status?.check_in_approval} />}
             {hasCheckedOut && <ApprovalBadge approval={status?.check_out_approval} />}

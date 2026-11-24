@@ -1,6 +1,7 @@
 // Load .env before any other module: imports run before this file's own
 // code, so modules that read process.env when imported (WebSecurity,
 // MailRoutes, AiAssistantRoutes, companyScope…) otherwise saw it empty.
+import { validInFor } from "./OffsiteReconcile";
 import "dotenv/config";
 import express from "express";
 import path from "path";
@@ -2015,6 +2016,17 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     c.project_id,
     c.attendance_date
   ]);
+  // An off-site In never moves the day's In later: if an In at the same time or
+  // earlier already counts (a Project In or the office machine), that one stays
+  // and only the Out (if any) is applied (OffsiteReconcile.ts).
+  let keptEarlierIn: Date | null = null;
+  if (Number(c.offsite_in) === 1 && c.requested_check_in_at) {
+    const valid = await validInFor(queryDB, Number(c.user_id), toDateOnlyString(c.attendance_date) || "");
+    if (valid && valid.at.getTime() <= new Date(c.requested_check_in_at).getTime()) {
+      keptEarlierIn = valid.at;
+      c.requested_check_in_at = null;
+    }
+  }
   // An off-site In / Out (AttendanceRoutes.ts offsitePunch) also brings the
   // place it was given; an ordinary correction has none and changes no place.
   const offIn = Number(c.offsite_in) === 1 && c.requested_check_in_at;
@@ -2044,7 +2056,7 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
         offOut ? 1 : 0,
         existing[0].id]
     );
-  } else {
+  } else if (c.requested_check_in_at || c.requested_check_out_at) {
     await queryDB(
       `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at,
                                check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks,
@@ -2062,7 +2074,9 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     correctionId
   ]).catch(() => undefined);
   await queryDB("UPDATE attendance_corrections SET status = 'approved', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [
-    remarks,
+    keptEarlierIn
+      ? `${remarks ? remarks + " " : ""}[In kept at the earlier time already counted: ${keptEarlierIn.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" })}]`
+      : remarks,
     approvedBy,
     correctionId
   ]);
