@@ -60,6 +60,8 @@ export interface MailMessage {
   messageId: string | null;
   // Came / went inside CredenceHR, not through the mail server.
   internal?: boolean;
+  // Chosen "Send through the mail server" (kept on drafts / scheduled mail).
+  viaServer?: boolean;
 }
 
 export interface MailList {
@@ -187,6 +189,8 @@ export interface MailSettings {
   layout: any;
   language: string;
   timezone: string;
+  // The person's own default for "Send through the mail server" in Compose.
+  sendViaServer?: boolean;
   signatureLinks?: SignatureLinks;
 }
 

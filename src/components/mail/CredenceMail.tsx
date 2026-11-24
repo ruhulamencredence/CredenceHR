@@ -1023,7 +1023,8 @@ export const CredenceMail: React.FC<{
       subject: full.subject === '(no subject)' ? '' : full.subject,
       body: full.body,
       draftId: full.id,
-      draftAttachments: full.attachments
+      draftAttachments: full.attachments,
+      viaServer: !!full.viaServer
     });
   };
 

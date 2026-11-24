@@ -304,6 +304,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_accounts.employee_id", "ALTER TABLE mail_accounts ADD COLUMN employee_id INT NULL", ["ER_DUP_FIELDNAME"]);
   // Senders whose pictures always show (no "Show pictures" each time).
   await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_messages.via_server", "ALTER TABLE mail_messages ADD COLUMN via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  await run("mail_settings.send_via_server", "ALTER TABLE mail_settings ADD COLUMN send_via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // A colleague who hasn't connected their mailbox in Credence Mail (or
   // can't open it): 'server' = the mail goes through the mail server to
@@ -866,6 +868,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       layout: parseJson<any>(r.layout_json, { density: "comfortable", previewPane: "right", theme: "light" }),
       language: r.language || "en",
       timezone: r.timezone || "Asia/Dhaka",
+      // The person's own default for "Send through the mail server" in Compose.
+      sendViaServer: !!Number(r.send_via_server),
       // What the Credence design signature links to (Mail Administration -> Signature).
       signatureLinks: (await systemSettings()).signatureLinks
     };
@@ -1246,8 +1250,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
 
   // Which recipients get the mail inside CredenceHR: address -> the
   // connected mailboxes with that address (usually one).
-  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean } = { create: true }): Promise<Map<string, any[]>> {
+  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean; viaServer?: boolean } = { create: true }): Promise<Map<string, any[]>> {
     const out = new Map<string, any[]>();
+    // The sender chose "Send through the mail server": nobody gets it inside.
+    if (opts.viaServer) return out;
     const sys = await systemSettings();
     if (!sys.internalDelivery || !sys.domains.includes(domainOf(a.email))) return out;
     const wanted = [...new Set(recipients.map((x) => x.toLowerCase()))].filter((x) => sys.domains.includes(domainOf(x)));
@@ -1533,14 +1539,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // Sends one built message: inside CredenceHR to the internal recipients,
   // by SMTP to the rest. SMTP goes first — if it fails, nobody got it yet
   // and the mail can simply be sent again.
-  async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean } = {}) {
+  async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean; viaServer?: boolean } = {}) {
     // Group addresses are opened into their members (the To / Cc lines still
     // show the group, so a Reply all goes back to it).
     const g = await expandGroups(a, recipients);
     const denied = g.groups.filter((x) => x.denied);
     if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you`, 403);
     const all = [...new Set([...g.rest, ...g.members])];
-    const internal = await internalTargets(a, all);
+    const internal = await internalTargets(a, all, { create: true, viaServer: !!opts.viaServer });
     const external = all.filter((x) => !internal.has(x));
     if (external.length) await sendRaw(a, { from: a.email, to: external }, raw);
     const blobs = internal.size ? await deliverInside(a, internal, m, opts) : [];
@@ -1643,10 +1649,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     sendError: r.send_error || null,
     messageId: r.message_id || null,
     // Came / went inside CredenceHR, not through the mail server.
-    internal: !!Number(r.via_internal)
+    internal: !!Number(r.via_internal),
+    // Chosen "Send through the mail server" (kept on drafts / scheduled mail).
+    viaServer: !!Number(r.via_server)
   });
   const LIST_COLS =
-    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id, via_internal";
+    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id, via_internal, via_server";
   async function messageOf(userId: number, id: any, withBody = true): Promise<any> {
     const rows: any[] = await queryDB(`SELECT ${withBody ? "*" : LIST_COLS + ", folder_role, uid"} FROM mail_messages WHERE id = ? AND user_id = ?`, [Number(id), userId]);
     if (!rows[0]) throw bad("Message not found.", 404);
@@ -1869,15 +1877,17 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const written = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
       const g = await expandGroups(a, written);
       const all = [...new Set([...g.rest, ...g.members])];
-      const inside = await internalTargets(a, all, { create: false });
+      const viaServer = !!req.body?.viaServer;
+      const inside = await internalTargets(a, all, { create: false, viaServer });
       const external = all.filter((x) => !inside.has(x));
       res.json({
+        viaServer,
         internal: all.filter((x) => inside.has(x)),
         // Groups written, how many each reaches, and any the sender can't use.
         groups: g.groups,
         external,
         // Why each one goes through the mail server.
-        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, await whyOutside(a, x)]))),
+        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, viaServer ? "you chose to send through the mail server" : await whyOutside(a, x)]))),
         // So the screen can say why ours went out through the server.
         ourDomains: (await systemSettings()).domains,
         enabled: (await systemSettings()).internalDelivery
@@ -3095,7 +3105,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       subject: row.subject || "",
       html: row.body || "",
       files
-    });
+    }, { viaServer: !!Number(row.via_server) });
     // A copy in the server's Sent folder (other mail apps see it too) — only
     // when it went out through the server; mail that stayed inside
     // CredenceHR is kept here only.
@@ -3150,17 +3160,18 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       refs = [...refList(orig?.refs), inReplyTo].filter((x, i, all) => all.indexOf(x) === i).join(" ").slice(0, 4000);
     }
     const thread = threadOf(messageId, inReplyTo, refs);
+    const viaServer = b.viaServer ? 1 : 0;
     let id = existingId;
     if (id) {
       await queryDB(
-        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, refs = ?, message_id = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ? WHERE id = ? AND user_id = ?`,
-        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, refs, messageId, thread, a.email, a.display_name || a.email, id, userId]
+        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, refs = ?, message_id = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ?, via_server = ? WHERE id = ? AND user_id = ?`,
+        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, refs, messageId, thread, a.email, a.display_name || a.email, viaServer, id, userId]
       );
     } else {
       const r: any = await queryDB(
-        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, message_id, thread_id, in_reply_to, refs, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at)
-         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?)`,
-        [userId, Number(a.id), messageId, thread, inReplyTo, refs, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt]
+        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, message_id, thread_id, in_reply_to, refs, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at, via_server)
+         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?, ?)`,
+        [userId, Number(a.id), messageId, thread, inReplyTo, refs, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, viaServer]
       );
       id = Number(r.insertId);
     }
@@ -3322,7 +3333,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
            picture_senders_json = VALUES(picture_senders_json), layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
         [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.pictureSenders), JSON.stringify(next.layout), next.language, next.timezone]
       );
-      res.json(next);
+      // The person's own "Send through the mail server" default (a plain true / false).
+      let sendViaServer = cur.sendViaServer;
+      if (typeof b.sendViaServer === "boolean") {
+        sendViaServer = b.sendViaServer;
+        await queryDB(
+          "INSERT INTO mail_settings (user_id, send_via_server) VALUES (?, ?) ON DUPLICATE KEY UPDATE send_via_server = VALUES(send_via_server)",
+          [uid(req), sendViaServer ? 1 : 0]
+        );
+      }
+      res.json({ ...next, sendViaServer });
     })
   );
 
