@@ -35,7 +35,7 @@ function leaveTypeLabel(a: LeaveApplication): string {
 type ReviewTab = 'pending' | 'approved' | 'rejected';
 
 const TABS: { key: ReviewTab; label: string }[] = [
-  { key: 'pending', label: 'Review' },
+  { key: 'pending', label: 'Under Review' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' }
 ];
@@ -176,7 +176,7 @@ useLiveRefresh(() => load(true));
                 type="button"
                 aria-pressed={on}
                 onClick={() => setTab(t.key)}
-                className={`min-h-[40px] rounded-full text-[13px] font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                className={`min-h-[40px] rounded-full text-[12px] max-[339px]:text-[11px] min-[380px]:text-[13px] font-bold whitespace-nowrap flex items-center justify-center gap-1 min-[380px]:gap-1.5 px-0.5 transition-colors ${
                   on ? 'bg-white text-[color:var(--g-accent,#7f00ff)] shadow-[0_4px_12px_-6px_rgba(var(--g-accent-rgb,127,0,255),.45)]' : 'text-zinc-600'
                 }`}
               >
@@ -286,7 +286,7 @@ useLiveRefresh(() => load(true));
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full whitespace-nowrap transition-colors ${
                   active ? 'text-white shadow-sm bg-indigo-600' : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
