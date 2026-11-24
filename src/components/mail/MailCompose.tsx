@@ -20,7 +20,7 @@ import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardGap } from '../../lib/useKeyboardInset';
 import { SearchSelect } from '../Combobox';
 import {
-  AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
+  AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, signatureContent, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
   loadDirectory, loadMailGroups, mailFetch, type ComposeGroups
 } from '../../lib/mailApi';
 
@@ -49,7 +49,7 @@ const SIG_OPEN = '<div data-credence-signature="1">';
 const withSignature = (body: string, sig: MailSignature | null) => {
   const stripped = body.replace(/<div data-credence-signature="1">[\s\S]*?<\/div><!--\/sig-->/, '');
   if (!sig) return stripped;
-  const block = `${SIG_OPEN}<br>${sig.content}</div><!--/sig-->`;
+  const block = `${SIG_OPEN}<br>${signatureContent(sig)}</div><!--/sig-->`;
   // Above a quoted mail (reply / forward), else at the end.
   const q = stripped.indexOf('<div data-credence-quote="1">');
   return q >= 0 ? stripped.slice(0, q) + block + stripped.slice(q) : stripped + block;

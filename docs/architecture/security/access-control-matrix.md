@@ -44,7 +44,7 @@
 | Task Management | `task_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | SIM & Mobile Bill | `mobile_bill` | `read` SIM & Mobile Bill<br>`limit_history` Limit Change History<br>`sim_inventory` SIM Inventory (history) |
 | Target Reports | `target_reports` | `read` Target Reports<br>🔒`target_export` Targets — Excel / PDF<br>🔒`target_cancel` Targets — Cancel / Close |
-| Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups |
+| Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups<br>🔒`mail_signature` Signature links (Website / Facebook / LinkedIn) |
 | Duty Roster | `duty_roster` | `read` See shifts and roster<br>🔒`roster_manage` Set shifts and roster<br>🔒`ot_approve` OT Approval<br>🔒`guard_posts` Guard posts & relief |
 | Break Time | `break_time` | `read` See break report<br>🔒`break_manage` Break rules, end forgotten breaks |
 | User Feedback | `user_feedback` | `read` See feedback<br>🔒`feedback_resolve` Mark feedback Done / Pending |

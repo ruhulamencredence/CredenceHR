@@ -333,3 +333,9 @@ Joiner & Probation নিয়ম বদলানো (`PUT /api/leave-policies/
 
 ## Off-site In withdraw ও স্বয়ংক্রিয় বন্ধ (২৪ নভেম্বর)
 `POST /api/attendance/offsite/withdraw` শুধু চলতি অ্যাকাউন্টের নিজের, আজকের pending off-site অনুরোধ ফিরিয়ে নেয় (Remote Attendance-এর বর্তমান অনুমতি `can_use_attendance`-এর ভেতরে; অন্যের রেকর্ডে হাত দেওয়া যায় না)। স্বয়ংক্রিয় বন্ধ কোনো অনুমোদন দেয় না, শুধু এমন অনুরোধ বন্ধ করে যেটা দিনের In বদলাত না। Approve কখনও দিনের In আরও পরে সরায় না। সব পরিবর্তন অনুরোধের remark-এ লেখা থাকে।
+
+## Mail Administration: Signature links ও পাতা-ভিত্তিক তালিকা (২৪ নভেম্বর)
+- Credence design signature-এর নিচের WEBSITE | FACEBOOK | LINKEDIN link এখন Mail Administration → **Signature** ট্যাব থেকে বদলানো যায় (`PUT /api/mail/admin/signature-links`)। এর জন্য Mail Administration মডিউলের নতুন layer **`mail_signature`** ("Signature links") লাগে; layer-টি explicit-only (কোনো layer সংরক্ষিত না থাকলে ডিফল্টে নেই), Superadmin সবসময় পারেন। ট্যাব সবাই (`read` layer) দেখতে পায়, কিন্তু বদলানোর ঘর layer না থাকলে বন্ধ, API-ও 403 দেয়।
+- ঠিকানা শুধু `http(s)://` দিয়ে শুরু হওয়া পূর্ণ ঠিকানা হতে পারে (`javascript:` ইত্যাদি, ফাঁকা ও `"<>` চিহ্ন নেওয়া হয় না); ফাঁকা রাখলে ঐ link signature-এ দেখায় না। সংরক্ষিত থাকে `mail_system_settings.sig_website / sig_facebook / sig_linkedin` (NULL = আগের নির্ধারিত ঠিকানা)।
+- সবার mail settings-এর response-এ (`GET/PUT /api/mail/settings`) `signatureLinks` যায়; Credence design signature আগের সংরক্ষিত হলেও তার fields থেকে আবার তৈরি হয়, তাই নতুন link সবার signature-এ পরের বার Credence Mail খুললে প্রযোজ্য।
+- `GET /api/mail/admin/accounts` ও `GET /api/mail/admin/log` এখন পাতায় পাতায় (`page`, `per_page` ২৫–২০০, সার্ভারে `q` খোঁজা ও `multi=1` ফিল্টার) ডেটা দেয়; আগে সব mailbox একসাথে যেত। অনুমতি আগের মতোই (`read`)।

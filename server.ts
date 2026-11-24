@@ -537,7 +537,8 @@ const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary", "cust
 // stays inside CredenceHR) on / off and set which domains are ours.
 // "mail_groups" = add / change / remove central mail groups (everyone with
 // "read" sees them). Explicit-only as well.
-const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups"] as const;
+// "mail_signature" = set the Website / Facebook / LinkedIn links every Credence design signature carries. Explicit-only.
+const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups", "mail_signature"] as const;
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -3234,7 +3235,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "mail_signature" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });

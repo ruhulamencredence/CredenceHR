@@ -314,6 +314,11 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
     "ALTER TABLE mail_system_settings ADD COLUMN unconnected_route VARCHAR(10) NOT NULL DEFAULT 'server'",
     ["ER_DUP_FIELDNAME"]
   );
+  // The Website / Facebook / LinkedIn links of the Credence design signature
+  // (Mail Administration -> Signature). NULL = the built-in address; '' = no such link.
+  await run("mail_system_settings.sig_website", "ALTER TABLE mail_system_settings ADD COLUMN sig_website VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_system_settings.sig_facebook", "ALTER TABLE mail_system_settings ADD COLUMN sig_facebook VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_system_settings.sig_linkedin", "ALTER TABLE mail_system_settings ADD COLUMN sig_linkedin VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
   // When read / star was last changed here (UTC). The mail server is told in
@@ -860,7 +865,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       pictureSenders: parseJson<string[]>(r.picture_senders_json, []),
       layout: parseJson<any>(r.layout_json, { density: "comfortable", previewPane: "right", theme: "light" }),
       language: r.language || "en",
-      timezone: r.timezone || "Asia/Dhaka"
+      timezone: r.timezone || "Asia/Dhaka",
+      // What the Credence design signature links to (Mail Administration -> Signature).
+      signatureLinks: (await systemSettings()).signatureLinks
     };
   }
 
@@ -1211,7 +1218,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   const DOMAIN_RE = /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
   const DEFAULT_DOMAINS = ["credencehousinglimited.com"];
   type Unconnected = "server" | "inside";
-  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[]; unconnected: Unconnected } } | null = null;
+  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[]; unconnected: Unconnected; signatureLinks: { website: string; facebook: string; linkedin: string } } } | null = null;
+  const DEFAULT_SIG_LINKS = { website: "https://www.credencehousingltd.com/", facebook: "https://www.facebook.com/credencehousingltd/", linkedin: "https://www.linkedin.com/company/credencehousinglimited/posts/" };
   async function systemSettings() {
     if (systemCache && Date.now() - systemCache.at < 30_000) return systemCache.v;
     const row: any = ((await queryDB("SELECT * FROM mail_system_settings WHERE id = 1").catch(() => [])) || [])[0];
@@ -1224,7 +1232,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const v = {
       internalDelivery: row ? !!Number(row.internal_delivery) : true,
       domains,
-      unconnected: (row?.unconnected_route === "inside" ? "inside" : "server") as Unconnected
+      unconnected: (row?.unconnected_route === "inside" ? "inside" : "server") as Unconnected,
+      signatureLinks: {
+        website: row?.sig_website == null ? DEFAULT_SIG_LINKS.website : String(row.sig_website),
+        facebook: row?.sig_facebook == null ? DEFAULT_SIG_LINKS.facebook : String(row.sig_facebook),
+        linkedin: row?.sig_linkedin == null ? DEFAULT_SIG_LINKS.linkedin : String(row.sig_linkedin)
+      }
     };
     systemCache = { at: Date.now(), v };
     return v;
@@ -1686,14 +1699,36 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const [canOpen, canPassword] = await Promise.all([hasModuleLayer(req.user, "mail_admin", "mail_open"), hasModuleLayer(req.user, "mail_admin", "mail_password")]);
       const isSuper = req.user.role === "superadmin";
       noStore(res);
+      // One page at a time: the whole list used to be sent at once.
+      const all = await adminMailboxes();
+      const perPerson = new Map<number, number>();
+      for (const r of all) perPerson.set(Number(r.user_id), (perPerson.get(Number(r.user_id)) || 0) + 1);
+      const nameOf = (r: any) => String(r.user_name || r.user_login || r.user_username || `#${r.user_id}`);
+      const q = String(req.query.q || "").trim().toLowerCase();
+      const multi = String(req.query.multi || "") === "1";
+      const perPage = Math.min(200, Math.max(10, Math.trunc(Number(req.query.per_page)) || 50));
+      const filtered = all
+        .filter((r) => !q || `${nameOf(r)} ${r.user_login || r.user_username || ""} ${r.email || ""}`.toLowerCase().includes(q))
+        .filter((r) => !multi || (perPerson.get(Number(r.user_id)) || 0) > 1)
+        // One person's mailboxes stay together.
+        .sort((x, y) => nameOf(x).localeCompare(nameOf(y)) || Number(x.user_id) - Number(y.user_id));
+      const pages = Math.max(1, Math.ceil(filtered.length / perPage));
+      const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
       res.json({
         canOpen,
         canPassword,
         serverReady: !!mailKey(),
-        items: (await adminMailboxes()).map((r) => ({
+        total: filtered.length,
+        page,
+        perPage,
+        pages,
+        totalMailboxes: all.length,
+        people: perPerson.size,
+        multiPeople: [...perPerson.values()].filter((n) => n > 1).length,
+        items: filtered.slice((page - 1) * perPage, page * perPage).map((r) => ({
           id: Number(r.id),
           userId: Number(r.user_id),
-          userName: r.user_name || r.user_login || r.user_username || `#${r.user_id}`,
+          userName: nameOf(r),
           userLogin: r.user_login || r.user_username || "",
           emailAddress: r.email,
           name: r.display_name || r.email,
@@ -1703,6 +1738,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           lastSyncAt: fromDb(r.last_sync_at),
           lastError: r.last_error || null,
           connectedAt: fromDb(r.created_at),
+          boxes: perPerson.get(Number(r.user_id)) || 1,
           // The Superadmin's own mailbox is only for the Superadmin.
           locked: r.user_role === "superadmin" && !isSuper
         }))
@@ -1739,6 +1775,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     requireModuleLayer("mail_admin", "read"),
     handler(async (req, res) => {
       if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const perPage = Math.min(200, Math.max(10, Math.trunc(Number(req.query.per_page)) || 50));
+      const total = Number((((await queryDB("SELECT COUNT(*) AS n FROM mail_admin_log l JOIN users t ON t.id = l.target_user_id")) as any[])[0] || {}).n || 0);
+      const pages = Math.max(1, Math.ceil(total / perPage));
+      const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
       const rows: any[] =
         (await queryDB(
           `SELECT l.id, l.action, l.account_id, l.created_at, l.actor_user_id, l.target_user_id, a.name AS actor_name, t.name AS target_name, m.email AS mailbox
@@ -1746,11 +1786,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
            JOIN users t ON t.id = l.target_user_id
            LEFT JOIN users a ON a.id = l.actor_user_id
            LEFT JOIN mail_accounts m ON m.id = l.account_id
-           ORDER BY l.id DESC LIMIT 300`
+           ORDER BY l.id DESC LIMIT ? OFFSET ?`,
+          [perPage, (page - 1) * perPage]
         )) || [];
       noStore(res);
-      res.json(
-        rows.map((r) => ({
+      res.json({
+        total,
+        page,
+        perPage,
+        pages,
+        items: rows.map((r) => ({
           id: Number(r.id),
           action: r.action,
           at: fromDb(r.created_at),
@@ -1758,7 +1803,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           target: r.target_name || `#${r.target_user_id}`,
           mailbox: r.mailbox || null
         }))
-      );
+      });
     })
   );
 
@@ -1844,7 +1889,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // module's "read"; changing it: the explicit-only "mail_settings" layer.
   const publicSystem = async (req: any) => ({
     ...(await systemSettings()),
-    canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_settings")
+    canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_settings"),
+    canEditSignature: await hasModuleLayer(req.user, "mail_admin", "mail_signature")
   });
   app.get(
     "/api/mail/admin/settings",
@@ -1883,6 +1929,34 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+
+  // The links on the Credence design signature. Seeing them: the module's "read";
+  // changing them: the explicit-only "mail_signature" layer. An empty address hides that link.
+  app.put(
+    "/api/mail/admin/signature-links",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_signature"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const b = req.body || {};
+      const cur = (await systemSettings()).signatureLinks;
+      const pick = (key: "website" | "facebook" | "linkedin", label: string) => {
+        if (b[key] === undefined) return cur[key];
+        const v = String(b[key] ?? "").trim();
+        if (v === "") return "";
+        if (!/^https?:\/\/[^\s"'<>]{3,290}$/i.test(v)) throw bad(`${label} must be a full web address starting with https:// (or leave it empty to hide the link).`);
+        return v;
+      };
+      const next = { website: pick("website", "Website"), facebook: pick("facebook", "Facebook"), linkedin: pick("linkedin", "LinkedIn") };
+      await queryDB(
+        `INSERT INTO mail_system_settings (id, sig_website, sig_facebook, sig_linkedin, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE sig_website = VALUES(sig_website), sig_facebook = VALUES(sig_facebook), sig_linkedin = VALUES(sig_linkedin), updated_by = VALUES(updated_by)`,
+        [next.website, next.facebook, next.linkedin, Number(req.user.id)]
+      );
+      systemCache = null;
+      res.json(await publicSystem(req));
+    })
+  );
 
   // ---- Groups: Mail Administration -> Groups ---------------------------------
   // Seeing them: the module's "read"; adding / changing / removing: the
