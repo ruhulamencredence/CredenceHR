@@ -418,9 +418,9 @@ const SignatureLinksSettings: React.FC<{ token: string }> = ({ token }) => {
         </p>
       </div>
       <div className="grid gap-3">
-        {field('website', 'Website', 'https://credencehousing.com')}
-        {field('facebook', 'Facebook', 'https://facebook.com/credencehousing')}
-        {field('linkedin', 'LinkedIn', 'https://linkedin.com/company/credencehousing')}
+        {field('website', 'Website', 'https://www.credencehousingltd.com/')}
+        {field('facebook', 'Facebook', 'https://www.facebook.com/credencehousingltd/')}
+        {field('linkedin', 'LinkedIn', 'https://www.linkedin.com/company/credencehousinglimited/posts/')}
       </div>
       <div>
         <div className="text-xs font-semibold text-slate-700 mb-1">Preview</div>

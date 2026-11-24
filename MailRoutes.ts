@@ -1219,7 +1219,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   const DEFAULT_DOMAINS = ["credencehousinglimited.com"];
   type Unconnected = "server" | "inside";
   let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[]; unconnected: Unconnected; signatureLinks: { website: string; facebook: string; linkedin: string } } } | null = null;
-  const DEFAULT_SIG_LINKS = { website: "https://credencehousing.com", facebook: "https://facebook.com/credencehousing", linkedin: "https://linkedin.com/company/credencehousing" };
+  const DEFAULT_SIG_LINKS = { website: "https://www.credencehousingltd.com/", facebook: "https://www.facebook.com/credencehousingltd/", linkedin: "https://www.linkedin.com/company/credencehousinglimited/posts/" };
   async function systemSettings() {
     if (systemCache && Date.now() - systemCache.at < 30_000) return systemCache.v;
     const row: any = ((await queryDB("SELECT * FROM mail_system_settings WHERE id = 1").catch(() => [])) || [])[0];

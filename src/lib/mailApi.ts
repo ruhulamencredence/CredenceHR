@@ -228,7 +228,7 @@ export interface SignatureLinks {
   facebook: string;
   linkedin: string;
 }
-let signatureLinks: SignatureLinks = { website: 'https://credencehousing.com', facebook: 'https://facebook.com/credencehousing', linkedin: 'https://linkedin.com/company/credencehousing' };
+let signatureLinks: SignatureLinks = { website: 'https://www.credencehousingltd.com/', facebook: 'https://www.facebook.com/credencehousingltd/', linkedin: 'https://www.linkedin.com/company/credencehousinglimited/posts/' };
 export function setSignatureLinks(links: Partial<SignatureLinks> | null | undefined) {
   if (links && typeof links === 'object') signatureLinks = { ...signatureLinks, ...links };
 }
