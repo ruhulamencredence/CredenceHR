@@ -1647,6 +1647,25 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
             .map((r: any) => ({ ...r, amount: Number(r.amount), department: slimDept.get(Number(r.user_id)) || null, employee_code: slimCode.get(Number(r.user_id)) || null }))
         );
       }
+      // Filtered in the database (status, person, date, the Department scope of a
+      // scoped Admin) and capped — with tens of thousands of imported claims the
+      // old "load everything, then filter" made this list slow and, past 65,535
+      // claims, fail with "too many placeholders". ?limit= (default 5000, at
+      // most 20000) takes the newest claims first.
+      const status = req.query.status ? String(req.query.status) : null;
+      const user_id = req.query.user_id ? Number(req.query.user_id) : null;
+      const limit = Math.min(20000, Math.max(1, Math.floor(Number(req.query.limit)) || 5000));
+      const deptScope = req.user.role === "superadmin" ? null : await getBillClaimDeptScope(req.user.id);
+      if (deptScope && deptScope.length === 0) return res.json([]);
+      const where: string[] = [];
+      const params: any[] = [];
+      if (since) { where.push("uc.claim_date >= ?"); params.push(since); }
+      if (status) { where.push("uc.status = ?"); params.push(status); }
+      if (user_id) { where.push("uc.user_id = ?"); params.push(user_id); }
+      if (deptScope) {
+        where.push(`uc.user_id IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL AND department IN (${deptScope.map(() => "?").join(",")}))`);
+        params.push(...deptScope);
+      }
       const [rows, employees] = await Promise.all([
         queryDB(
           `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
@@ -1659,9 +1678,10 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
              LEFT JOIN users r ON r.id = uc.reviewed_by
              LEFT JOIN users fb ON fb.id = uc.filed_by
              LEFT JOIN conveyance_bill_items i ON i.bill_claim_id = uc.id
-            ${since ? "WHERE uc.claim_date >= ?" : ""}
-            ORDER BY uc.id DESC`,
-          since ? [since] : []
+            ${where.length ? "WHERE " + where.join(" AND ") : ""}
+            ORDER BY uc.id DESC
+            LIMIT ${limit}`,
+          params
         ),
         queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
       ]);
@@ -1669,29 +1689,22 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       for (const e of employees) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
       }
-
-      const status = req.query.status ? String(req.query.status) : null;
-      const user_id = req.query.user_id ? Number(req.query.user_id) : null;
-      const deptScope = req.user.role === "superadmin" ? null : await getBillClaimDeptScope(req.user.id);
-      const filtered = rows.filter((r: any) => {
-        if (status && r.status !== status) return false;
-        if (user_id && Number(r.user_id) !== user_id) return false;
-        if (deptScope) {
-          const dept = departmentByUserId.get(Number(r.user_id)) || null;
-          if (!dept || !deptScope.includes(dept)) return false;
-        }
-        return true;
-      });
-      const withRefs = await attachBillClaimRefs(
-        filtered.map((r: any) => ({
-          ...r,
-          amount: Number(r.amount),
-          has_file: !!r.has_file,
-          department: departmentByUserId.get(Number(r.user_id)) || null
-        }))
-      );
-      const withApproval = await attachBillClaimApproval(withRefs);
-      res.json(await attachEditState(await attachClaimItems(queryDB, withApproval)));
+      const mapped = rows.map((r: any) => ({
+        ...r,
+        amount: Number(r.amount),
+        has_file: !!r.has_file,
+        department: departmentByUserId.get(Number(r.user_id)) || null
+      }));
+      // The lookups below take the claim ids in one IN (...) list, so they run in
+      // slices — a list can never grow past the database's placeholder limit.
+      const out: any[] = [];
+      for (let i = 0; i < mapped.length; i += 3000) {
+        const part = mapped.slice(i, i + 3000);
+        const withRefs = await attachBillClaimRefs(part);
+        const withApproval = await attachBillClaimApproval(withRefs);
+        out.push(...(await attachEditState(await attachClaimItems(queryDB, withApproval))));
+      }
+      res.json(out);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

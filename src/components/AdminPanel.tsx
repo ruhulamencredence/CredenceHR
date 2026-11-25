@@ -1606,6 +1606,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projectBranchFilter, setProjectBranchFilter] = useState<'all' | 'head_office' | 'project_site' | 'none' | 'archived'>('all');
   // Branches list: which slice to show, the "Link by name" preview and the "Merge" popup.
   const [branchListFilter, setBranchListFilter] = useState<'active' | 'head_office' | 'project_site' | 'no_project' | 'archived'>('active');
+  // Branches -> "Link Branches…": pick the Project for each Branch whose name differs from it.
+  const [linkChoose, setLinkChoose] = useState<null | { loading: boolean; branches: any[]; projects: any[]; choice: Record<number, string>; busy: boolean; error?: string }>(null);
   const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
   // "Set Division from Branch" (BranchTools.ts): preview, then apply.
   const [divisionSync, setDivisionSync] = useState<null | { loading: boolean; busy: boolean; data?: any; error?: string }>(null);
@@ -2335,6 +2337,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  const openLinkChoose = async () => {
+    setLinkChoose({ loading: true, branches: [], projects: [], choice: {}, busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-suggestions'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the Branches.');
+      const choice: Record<number, string> = {};
+      for (const b of data.branches || []) if (b.sure && b.suggested_project_id) choice[b.branch_id] = String(b.suggested_project_id);
+      setLinkChoose({ loading: false, branches: data.branches || [], projects: data.projects || [], choice, busy: false });
+    } catch (err: any) {
+      setLinkChoose({ loading: false, branches: [], projects: [], choice: {}, busy: false, error: err.message });
+    }
+  };
+  const confirmLinkChoose = async () => {
+    if (!linkChoose) return;
+    const pairs = Object.entries(linkChoose.choice).filter(([, v]) => v).map(([b, v]) => ({ branch_id: Number(b), project_id: Number(v) }));
+    if (!pairs.length) return;
+    const twice = pairs.length - new Set(pairs.map((p) => p.project_id)).size;
+    if (twice > 0) {
+      setLinkChoose({ ...linkChoose, error: 'A Project can be linked to only one Branch — two Branches have the same Project picked.' });
+      return;
+    }
+    setLinkChoose({ ...linkChoose, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-pairs'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ pairs })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not link.');
+      setLinkChoose(null);
+      fetchAllData();
+      setMessage({ type: data.skipped?.length ? 'error' : 'success', text: `${data.linked} Branch${data.linked === 1 ? '' : 'es'} linked.${data.skipped?.length ? ` ${data.skipped.length} skipped: ${data.skipped.slice(0, 3).join('; ')}${data.skipped.length > 3 ? '…' : ''}` : ''}` });
+    } catch (err: any) {
+      setLinkChoose({ ...linkChoose, busy: false, error: err.message });
+    }
+  };
   const openLinkByName = async () => {
     setLinkByName({ loading: true, pairs: [], skipped: [], picked: new Set(), busy: false });
     try {
@@ -6342,6 +6382,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <p className="text-xs text-slate-500">Company branches — Phase 1 (management only)</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {canSee('projects') && projectsLayer('edit_add') && (
+                      <button
+                        type="button"
+                        onClick={openLinkChoose}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                        title="Pick the Project for each Branch that has none (the closest-named one is suggested)"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Link Branches…
+                      </button>
+                    )}
                     {canSee('projects') && (
                       <button
                         type="button"
@@ -8826,6 +8877,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {divisionSync.busy ? 'Changing…' : `Change ${divisionSync.data.will_change} Division${divisionSync.data.will_change === 1 ? '' : 's'}`}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {linkChoose && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Link Branches to Projects</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              These Branches have active staff but no Project, so people on "Their Branch" check-in see no Project to check in at. Pick the Project for each Branch; the clearly-best match is already picked, the rest you choose. Names and map pins are never changed. Leave a row empty to skip it.
+            </p>
+            {linkChoose.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Looking at the Branches…</p>
+            ) : linkChoose.branches.length === 0 && !linkChoose.error ? (
+              <p className="text-sm text-slate-500 mt-4">Every Branch with active staff already has a Project.</p>
+            ) : (
+              <div className="mt-3 space-y-1.5">
+                {linkChoose.branches.map((b) => (
+                  <div key={b.branch_id} className="liquid-glass-inset rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-slate-800">
+                    <div className="min-w-[180px] flex-1">
+                      <div className="font-semibold">{b.branch_name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {b.staff} staff{b.their_branch_users > 0 ? ` · ${b.their_branch_users} on "Their Branch"` : ''}
+                      </div>
+                      {b.suggested_project_id && !b.sure && !linkChoose.choice[b.branch_id] && (
+                        <button
+                          type="button"
+                          className="mt-0.5 text-left text-[11px] text-blue-700 hover:underline"
+                          onClick={() => setLinkChoose({ ...linkChoose, error: undefined, choice: { ...linkChoose.choice, [b.branch_id]: String(b.suggested_project_id) } })}
+                        >
+                          Closest name: {linkChoose.projects.find((p) => p.id === b.suggested_project_id)?.name || '—'} — click to pick
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-slate-400">→</span>
+                    <div className="min-w-[220px] flex-[1.4]">
+                      <SearchSelect
+                        value={linkChoose.choice[b.branch_id] || ''}
+                        onChange={(e) => setLinkChoose({ ...linkChoose, error: undefined, choice: { ...linkChoose.choice, [b.branch_id]: e.target.value } })}
+                        className="block w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="">— No Project (skip) —</option>
+                        {linkChoose.projects.map((p) => (
+                          <option key={p.id} value={String(p.id)}>{p.name}</option>
+                        ))}
+                      </SearchSelect>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {linkChoose.error && <p className="text-sm text-rose-600 mt-3">{linkChoose.error}</p>}
+            <div className="mt-5 flex items-center justify-between gap-2.5">
+              <span className="text-[12px] text-slate-500">{Object.values(linkChoose.choice).filter(Boolean).length} of {linkChoose.branches.length} picked</span>
+              <div className="flex gap-2.5">
+                <button type="button" onClick={() => setLinkChoose(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={linkChoose.busy || Object.values(linkChoose.choice).filter(Boolean).length === 0}
+                  onClick={confirmLinkChoose}
+                  className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {linkChoose.busy ? 'Linking…' : `Link ${Object.values(linkChoose.choice).filter(Boolean).length} Branch${Object.values(linkChoose.choice).filter(Boolean).length === 1 ? '' : 'es'}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
