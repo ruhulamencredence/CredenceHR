@@ -802,15 +802,18 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
     }
   });
 
-  // "Send again" to everyone who hasn't read it yet (push).
-  const remindUnread = async (n: any, senderId?: number) => {
+  // "Send again" (push) to everyone who hasn't read it yet — or, with
+  // everyone = true, to every recipient, those who have read it too. Nobody's
+  // read / acknowledged record changes, so the notice doesn't pop up again
+  // for those who have read it; they only get the notification.
+  const remindUnread = async (n: any, senderId?: number, everyone = false) => {
     const ctx = await loadAudienceCtx(queryDB);
     const reads: any[] = (await queryDB("SELECT user_id, opened_at, acknowledged_at FROM notice_reads WHERE notice_id = ?", [n.id])) || [];
     const dismissed: any[] = (await queryDB("SELECT user_id FROM notice_dismissals WHERE notice_id = ?", [n.id])) || [];
     const done = new Set<number>();
     for (const r of reads) if (Number(n.require_ack) ? r.acknowledged_at : r.opened_at || r.acknowledged_at) done.add(Number(r.user_id));
     if (!Number(n.require_ack)) for (const d of dismissed) done.add(Number(d.user_id));
-    const to = recipientsOf(n, ctx).filter((id) => !done.has(id));
+    const to = everyone ? recipientsOf(n, ctx) : recipientsOf(n, ctx).filter((id) => !done.has(id));
     if (to.length) {
       await sendPushToUserIds(queryDB, to, "Reminder: notice", String(n.title || "").slice(0, 120), { type: "notice", relatedType: "notice", relatedId: String(n.id) }, senderId);
     }
@@ -821,7 +824,9 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       const n: any = ((await queryDB(NOTICE_SELECT + " WHERE id = ?", [Number(req.params.id)])) || [])[0];
       if (!n) return res.status(404).json({ error: "Notice not found" });
       if (!isLive(n)) return res.status(400).json({ error: "This notice isn't live right now." });
-      res.json({ success: true, sent: await remindUnread(n, req.user.id) });
+      // body.to: "unread" (default, as before) or "everyone" — same permission.
+      const everyone = req.body?.to === "everyone";
+      res.json({ success: true, to: everyone ? "everyone" : "unread", sent: await remindUnread(n, req.user.id, everyone) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

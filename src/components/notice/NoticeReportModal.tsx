@@ -9,7 +9,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, Download, BellRing, Loader2 } from 'lucide-react';
+import { X, Search, Download, BellRing, Loader2, ChevronDown, Megaphone } from 'lucide-react';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
 import { saveWorkbookCrossPlatform } from '../../lib/saveFile';
@@ -99,17 +99,38 @@ export const NoticeReportModal: React.FC<{ token: string; noticeId: number; onCl
     await saveWorkbookCrossPlatform(wb, `Notice-${data.notice.id}-readers.xlsx`);
   };
 
-  const remind = async () => {
+  // "Send again ▾": to whoever hasn't read it (as before), or to everyone the
+  // notice is for — those who have read it get only the notification; their
+  // Read ✓ stays and it doesn't pop up for them again (NoticeRoutes remind).
+  const [sendMenu, setSendMenu] = useState(false);
+  const unreadCount = data ? (data.notice.require_ack ? data.total - data.acknowledged : data.not_yet) : 0;
+  const remind = async (to: 'unread' | 'everyone') => {
     if (!data) return;
-    const n = data.notice.require_ack ? data.total - data.acknowledged : data.not_yet;
-    if (!n) return setMsg('Everyone has read it.');
-    if (!(await confirmDialog(`Send this notice again to the ${n} ${n === 1 ? 'person' : 'people'} who haven't read it yet?`))) return;
+    setSendMenu(false);
+    if (to === 'unread') {
+      const n = unreadCount;
+      if (!n) return setMsg('Everyone has read it.');
+      if (!(await confirmDialog(`Send this notice again to the ${n} ${n === 1 ? 'person' : 'people'} who haven't read it yet?`))) return;
+    } else {
+      const read = data.total - unreadCount;
+      if (
+        !(await confirmDialog(
+          `A notification goes to all ${data.total.toLocaleString()} people this notice is for — ${unreadCount.toLocaleString()} who haven't read it yet and ${read.toLocaleString()} who have. Those who have read it keep their Read ✓ and the notice won't pop up for them again.`,
+          { title: 'Send this notice to everyone?', confirmLabel: `Send to ${data.total.toLocaleString()}` }
+        ))
+      )
+        return;
+    }
     setBusy(true);
     try {
-      const r = await fetch(apiUrl(`/api/notices/${noticeId}/remind`), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(apiUrl(`/api/notices/${noticeId}/remind`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to })
+      });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Could not send it again.');
-      setMsg(`Sent again to ${d.sent} ${d.sent === 1 ? 'person' : 'people'}.`);
+      setMsg(`Sent again to ${Number(d.sent).toLocaleString()} ${d.sent === 1 ? 'person' : 'people'}.`);
     } catch (e: any) {
       setMsg(e.message);
     } finally {
@@ -150,9 +171,45 @@ export const NoticeReportModal: React.FC<{ token: string; noticeId: number; onCl
                 ))}
                 <div className="flex-1" />
                 <button type="button" onClick={() => void exportExcel()} className="px-3 py-1.5 rounded-full text-xs font-semibold bg-white border border-slate-200 inline-flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Excel</button>
-                <button type="button" disabled={busy || data.notice.status !== 'live'} onClick={() => void remind()} className="liquid-glass-button rounded-full px-3 py-1.5 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50" title={data.notice.status !== 'live' ? 'Only a live notice can be sent again' : undefined}>
-                  <BellRing className="w-3.5 h-3.5" /> Send again to unread
-                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    disabled={busy || data.notice.status !== 'live'}
+                    onClick={() => setSendMenu((v) => !v)}
+                    aria-expanded={sendMenu}
+                    className="liquid-glass-button rounded-full px-3 py-1.5 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50"
+                    title={data.notice.status !== 'live' ? 'Only a live notice can be sent again' : undefined}
+                  >
+                    <BellRing className="w-3.5 h-3.5" /> Send again <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  {sendMenu && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setSendMenu(false)} />
+                      <div role="menu" className="absolute right-0 top-full mt-2 z-20 w-[320px] max-w-[85vw] rounded-[20px] bg-white/95 border border-white shadow-[0_24px_50px_-20px_rgba(15,23,42,.45)] p-1.5">
+                        <button type="button" role="menuitem" onClick={() => void remind('unread')} className="w-full flex items-start gap-2.5 text-left rounded-2xl px-3 py-2.5 hover:bg-orange-50">
+                          <BellRing className="w-4 h-4 mt-0.5 text-orange-500 shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13px] font-bold text-slate-900">To who hasn't read it</span>
+                            <span className="block text-[11.5px] text-slate-500 leading-snug">
+                              {data.notice.require_ack ? `Not yet ${data.not_yet} + Opened ${data.opened} (opened, didn't tap "I have read this")` : `Not yet ${data.not_yet}`}
+                            </span>
+                          </span>
+                          <span className="text-[13px] font-extrabold text-orange-600 tabular-nums">{unreadCount.toLocaleString()}</span>
+                        </button>
+                        <button type="button" role="menuitem" onClick={() => void remind('everyone')} className="w-full flex items-start gap-2.5 text-left rounded-2xl px-3 py-2.5 hover:bg-orange-50">
+                          <Megaphone className="w-4 h-4 mt-0.5 text-indigo-500 shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13px] font-bold text-slate-900">To everyone</span>
+                            <span className="block text-[11.5px] text-slate-500 leading-snug">
+                              Also the {(data.total - unreadCount).toLocaleString()} who've read it — their Read ✓ stays, no popup again
+                            </span>
+                          </span>
+                          <span className="text-[13px] font-extrabold text-orange-600 tabular-nums">{data.total.toLocaleString()}</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
               {msg && <p className="text-xs mt-2 text-slate-700">{msg}</p>}
               {byDept.length > 1 && (
