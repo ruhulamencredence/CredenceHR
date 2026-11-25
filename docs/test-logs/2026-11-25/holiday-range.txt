@@ -1,0 +1,14 @@
+PASS one date: added as before
+PASS range 20–23: 3 added, the 21st (already set) skipped {"inserted":3,"skipped":["2031-03-21"],"from":"2031-03-20","to":"2031-03-23","day_type":"holiday","title":"Eid ul-Fitr","applies_to":"head_office"}
+PASS calendar: 20, 21, 22, 23 March
+PASS the other calendar (Project Side) untouched
+PASS same range again: everything already set → refused
+PASS To before From → refused
+PASS more than 62 days → refused, nothing added
+PASS every day carries the title
+PASS Add Date popup
+PASS shows "5 days, … – …"
+PASS screen: "Added 5 dates to the calendar."
+PASS calendar: 10–14 May
+PASS no page errors []
+ALL PASS

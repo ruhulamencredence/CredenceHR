@@ -315,8 +315,8 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
     return v === "head_office" || v === "project_site" ? v : null;
   }
 
-  // POST /api/holidays — add one Weekend/Holiday date, for one Employee
-  // group. Gated behind the "holidays" module: a Superadmin grants this via
+  // POST /api/holidays — add one Weekend/Holiday date (or, with end_date, a
+  // range of days such as Eid holidays), for one Employee group. Gated behind the "holidays" module: a Superadmin grants this via
   // the existing Module Access modal (same one every other tab uses) to
   // whichever Admin/User should be able to maintain the calendar.
   app.post("/api/holidays", authenticateToken, requireAdmin, requireModule("holidays"), async (req: any, res) => {
@@ -331,8 +331,40 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
       const cleanTitle = String(title || "").trim() || (type === "weekend" ? "Weekend" : "Holiday");
 
       const allRows = await fetchAllHolidayRows(queryDB);
-      const dupe = allRows.some((r: any) => String(r.entry_date).slice(0, 10) === entry_date && r.applies_to === appliesTo);
-      if (dupe) {
+      const taken = new Set(allRows.filter((r: any) => r.applies_to === appliesTo).map((r: any) => String(r.entry_date).slice(0, 10)));
+
+      // A range (end_date after entry_date, e.g. Eid holidays): every day from
+      // entry_date to end_date, at most 62 days; days already on this
+      // calendar are skipped and named in the answer.
+      const end = String(req.body?.end_date || "");
+      if (end && end !== entry_date) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "A valid To date (YYYY-MM-DD) is required." });
+        if (end < entry_date) return res.status(400).json({ error: "The To date must be on or after the From date." });
+        const days: string[] = [];
+        const d = new Date(`${entry_date}T00:00:00Z`);
+        while (days.length <= 62) {
+          const ds = d.toISOString().slice(0, 10);
+          if (ds > end) break;
+          days.push(ds);
+          d.setUTCDate(d.getUTCDate() + 1);
+        }
+        if (days.length > 62) return res.status(400).json({ error: "A range can be at most 62 days." });
+        const fresh = days.filter((ds) => !taken.has(ds));
+        const skipped = days.filter((ds) => taken.has(ds));
+        if (!fresh.length) return res.status(409).json({ error: "Every date in this range is already set on this calendar." });
+        for (const ds of fresh) {
+          await queryDB("INSERT INTO holiday_calendar (entry_date, day_type, title, applies_to, created_by) VALUES (?, ?, ?, ?, ?)", [
+            ds,
+            type,
+            cleanTitle,
+            appliesTo,
+            req.user.id
+          ]);
+        }
+        return res.json({ inserted: fresh.length, skipped, from: entry_date, to: end, day_type: type, title: cleanTitle, applies_to: appliesTo });
+      }
+
+      if (taken.has(entry_date)) {
         return res.status(409).json({ error: "This date is already set on this calendar." });
       }
       const result: any = await queryDB(

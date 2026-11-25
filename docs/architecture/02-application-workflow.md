@@ -1370,3 +1370,6 @@ Payroll → Salary Setup → Late Policy-তে "Extreme Lates per Deducted Day"
 
 ## Notice: "Send again" সবাইকে (২৫ নভেম্বর)
 Notices → Who has read it → "Send again ▾"-এ দুটো পছন্দ: যারা এখনো পড়েনি (আগের মতো — "I have read this" চাওয়া থাকলে Not yet + Opened) অথবা notice যাদের জন্য তাদের সবাইকে, যারা পড়েছে তারাসহ। শুধু push যায়; কারও Read ✓ / opened রেকর্ড বদলায় না, তাই যারা পড়েছে তাদের সামনে notice আবার popup হয় না। পাঠানোর আগে সংখ্যা দেখিয়ে জিজ্ঞেস করে। অনুমতি আগের মতোই (Notices + `notice_read_report`); `POST /api/notices/:id/remind` এখন `{ to: "everyone" }` নেয়, না দিলে আগের মতো। পরের দিনের স্বয়ংক্রিয় reminder বদলায়নি।
+
+## Holiday Calendar: একসাথে কয়েক দিন (২৫ নভেম্বর)
+Add Date-এ এখন From আর To (ঐচ্ছিক)। To দিলে From থেকে To পর্যন্ত প্রতিটি দিন বাছা calendar-এ (Head Office / Project Side) একই ধরন ও নামে যোগ হয়; আগে থেকে থাকা দিন যেমন আছে থাকে এবং বার্তায় নাম দেখায়; সর্বোচ্চ ৬২ দিন। To খালি রাখলে এক দিন, আগের মতো; Edit আগের মতো এক দিনের। `POST /api/holidays` ঐচ্ছিক `end_date` নেয়।
