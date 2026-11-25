@@ -699,9 +699,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }, []);
 
+  // A new message while a chat is open scrolls down smoothly; opening a chat
+  // jumps straight to the newest message (no scrolling by hand), and keeps it
+  // there for a moment while pictures and files lay out and make the list taller.
+  const openedScrollRoom = useRef<number | null>(null);
   useEffect(() => {
-    scrollMessagesToBottom(true);
-  }, [messages.length, scrollMessagesToBottom]);
+    if (activeRoomId === null) {
+      openedScrollRoom.current = null;
+      return;
+    }
+    if (loadingMessages || !messages.length) return;
+    if (openedScrollRoom.current === activeRoomId) {
+      scrollMessagesToBottom(true);
+      return;
+    }
+    openedScrollRoom.current = activeRoomId;
+    scrollMessagesToBottom(false);
+    const timers = [60, 200, 500, 1000].map((ms) => setTimeout(() => scrollMessagesToBottom(false), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [messages.length, activeRoomId, loadingMessages, scrollMessagesToBottom]);
 
   // window.visualViewport is the standards-based, actually-reliable way to
   // know the real visible area in a WebView, keyboard included — unlike
