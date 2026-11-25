@@ -520,6 +520,8 @@ export interface EmployeeDirectoryEntry {
   employee_id: string | null;
   name: string;
   designation: string | null;
+  // Designations -> level (1 = most senior); null when the designation has none.
+  designation_level?: number | null;
   department: string | null;
   department_id: number | null;
   email: string | null;
