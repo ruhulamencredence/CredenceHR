@@ -503,7 +503,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
         ]);
         if (!empRes.ok) throw new Error((await empRes.json()).error || 'Failed to load the Employee Directory');
         // Only people still working here — someone who has left isn't listed.
-        setEmployees(((await empRes.json()) as any[]).filter((e) => e.is_active));
+        // Senior designations first (the Designations page's level), then by name.
+        const lvl = (e: any) => (e.designation_level == null ? 9999 : Number(e.designation_level));
+        setEmployees(
+          ((await empRes.json()) as any[])
+            .filter((e) => e.is_active)
+            .sort((a, b) => lvl(a) - lvl(b) || String(a.name || '').localeCompare(String(b.name || '')))
+        );
         if (deptRes.ok) setDepartments(await deptRes.json());
       } catch (err: any) {
         setError(err.message || 'Failed to load the Employee Directory');

@@ -67,7 +67,9 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
                 e.email, e.phone, e.telephone, COALESCE(NULLIF(TRIM(e.branch), ''), br.branch_name) AS branch, e.division, e.unit,
                 e.is_active, e.user_id, e.company_id,
-                sup.name AS supervisor_name
+                sup.name AS supervisor_name,
+                -- Admin Panel -> Designations: the designation's level (1 = most senior).
+                (SELECT d.level FROM designations d WHERE d.id = e.designation_id) AS designation_level
          FROM all_employees e
          LEFT JOIN (
            -- Most recent is_direct=1 row per employee — same "current
@@ -87,7 +89,8 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
          -- The Branch / Project by name when only its id was saved, so the
          -- Directory can be searched by it.
          LEFT JOIN branches br ON br.id = e.branch_id
-         ORDER BY e.name ASC`
+         -- Senior designations first (Designations -> level), people with no level last, then by name.
+         ORDER BY (CASE WHEN (SELECT d.level FROM designations d WHERE d.id = e.designation_id) IS NULL THEN 1 ELSE 0 END), (SELECT d.level FROM designations d WHERE d.id = e.designation_id), e.name ASC`
       );
       // "Reports to" the way a request actually goes: the Direct Supervisor
       // (Employees -> Supervisor) if set, else the Supervisor of the person's
@@ -122,6 +125,7 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
           employee_id: r.employee_id,
           name: r.name,
           designation: r.designation,
+          designation_level: r.designation_level == null ? null : Number(r.designation_level),
           department: r.department,
           department_id: r.department_id,
           email: r.email,
