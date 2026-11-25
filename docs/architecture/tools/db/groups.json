@@ -220,6 +220,7 @@
   "hr_emp_training",
   "hr_employee_service",
   "loan_events",
+  "project_merge_log",
   "projects",
   "server_profiles"
  ],

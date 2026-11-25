@@ -207,6 +207,15 @@ erDiagram
     varchar method
     varchar reference
   }
+  project_merge_log {
+    int id PK
+    int from_project_id
+    varchar from_name
+    int into_project_id
+    varchar into_name
+    mediumtext moved_json
+    int merged_by
+  }
   projects {
     int id PK
     varchar project_name
