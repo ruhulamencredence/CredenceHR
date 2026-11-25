@@ -344,6 +344,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>ChatRoutes.ts</code> <code>roomRules</code>, <code>PushNotificationService.ts</code> (mute)</td>
 </tr>
 <tr>
+<td>Chat group মোছা ও message ticks</td>
+<td><code>DELETE /api/chat/rooms/:id</code> শুধু ওই group-এর admin বা Superadmin (সাধারণ member 403), এক-এক জনের chat 400, না থাকলে 404; মোছার আগে সবাইকে <code>room_deleted</code> জানানো হয়, তারপর room ও তার সব message / pin / member (cascade) আর ফাইল (অন্য chat-এ forward-করা কপি যে ফাইল ব্যবহার করে তা বাদে) মোছে। <code>GET /api/chat/rooms/:id/receipts</code> শুধু সেই room-এর member পান (অন্যরা 403) আর শুধু অন্য member-দের কতদূর দেখা / পৌঁছেছে সংখ্যা দেয়, message-এর লেখা নয়।</td>
+<td><code>ChatRoutes.ts</code></td>
+</tr>
+<tr>
 <td>Chat group invite link ও disappearing message</td>
 <td>Link শুধু group admin বানায় / reset / বন্ধ করে; code ১৬ byte random (<code>crypto.randomBytes</code>), অনুমান করা যায় না; link-এ শুধু নাম, সদস্য-সংখ্যা ও description দেখায়, member বা message নয়; যোগ দিতে Chat-এর অনুমতি লাগে, আর যোগ দিলে সবাই chat-এ "joined using this group's invite link" দেখে। Disappearing message সময় পেরোলে সব API থেকে বাদ, তারপর ডাটাবেস ও ফাইল থেকে মুছে যায় (ব্যাকআপে আগের কপি থাকতে পারে)।</td>
 <td><code>ChatRoutes.ts</code> (invite, sweep)</td>
