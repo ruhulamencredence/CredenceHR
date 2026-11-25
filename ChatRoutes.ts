@@ -584,6 +584,14 @@ export async function canUseChat(queryDB: (sql: string, params?: any[]) => Promi
 // SQL condition: the account in `alias` has Chat.
 const CHAT_ON_SQL = (alias: string) => `(${alias}.role = 'superadmin' OR COALESCE(${alias}.can_use_chat, 1) <> 0)`;
 
+// SQL condition: the person in `alias` is still with the company — their login
+// isn't blocked, and if they are an Employee, at least one of their Employee
+// records is Active (a Superadmin always counts). Inactive people are left out
+// of every Chat list: the directory, who can be added or forwarded to, a
+// group's member list, and one-to-one chats in the list. What they wrote stays.
+const CHAT_PERSON_SQL = (alias: string) =>
+  `(${alias}.role = 'superadmin' OR (COALESCE(${alias}.is_blocked, 0) = 0 AND (NOT EXISTS (SELECT 1 FROM all_employees ce WHERE ce.user_id = ${alias}.id) OR EXISTS (SELECT 1 FROM all_employees ce WHERE ce.user_id = ${alias}.id AND ce.is_active = 1))))`;
+
 export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatRouteDeps) {
   const { authenticateToken, queryDB } = deps;
 
@@ -596,7 +604,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // Of these accounts, the ones that have Chat.
   const withChat = async (ids: number[]): Promise<number[]> => {
     if (ids.length === 0) return [];
-    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")}`, ids);
+    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")} AND ${CHAT_PERSON_SQL("u")}`, ids);
     return rows.map((r: any) => Number(r.id));
   };
   // A centred note in the chat ("Rahim changed the group name to …"), seen by
@@ -630,7 +638,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
                 (SELECT e.department FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS department,
                 (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation,
                 (SELECT e.employee_id FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS employee_code
-         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} ORDER BY u.name ASC`,
+         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} AND ${CHAT_PERSON_SQL("u")} ORDER BY u.name ASC`,
         [req.user.id]
       );
       res.json(rows);
@@ -664,6 +672,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          WHERE m.user_id = ?
            -- "Delete chat": gone from this list until a newer message comes.
            AND (st.hidden_after_id IS NULL OR COALESCE(lm.id, 0) > st.hidden_after_id)
+           -- A one-to-one chat with someone who has left (inactive / blocked) is not listed.
+           AND (r.type <> 'direct' OR NOT EXISTS (
+             SELECT 1 FROM chat_room_members om JOIN users ou ON ou.id = om.user_id
+             WHERE om.room_id = r.id AND om.user_id <> m.user_id AND NOT ${CHAT_PERSON_SQL("ou")}
+           ))
          ORDER BY COALESCE(lm.created_at, r.created_at) DESC`,
         [userId]
       );
@@ -833,7 +846,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows = await queryDB(
         `SELECT m.user_id, u.name, u.email, u.username, m.role, m.joined_at
          FROM chat_room_members m JOIN users u ON u.id = m.user_id
-         WHERE m.room_id = ? ORDER BY (m.role = 'admin') DESC, u.name ASC`,
+         WHERE m.room_id = ? AND ${CHAT_PERSON_SQL("u")} ORDER BY (m.role = 'admin') DESC, u.name ASC`,
         [roomId]
       );
       res.json(rows);
@@ -1051,8 +1064,9 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows: any[] =
         (await queryDB(
           `SELECT m.user_id AS id, COALESCE(rr.last_read_message_id, 0) AS \`read\`, GREATEST(COALESCE(rr.delivered_up_to, 0), COALESCE(rr.last_read_message_id, 0)) AS delivered
-           FROM chat_room_members m LEFT JOIN chat_room_reads rr ON rr.room_id = m.room_id AND rr.user_id = m.user_id
-           WHERE m.room_id = ? AND m.user_id <> ?`,
+           FROM chat_room_members m JOIN users pu ON pu.id = m.user_id LEFT JOIN chat_room_reads rr ON rr.room_id = m.room_id AND rr.user_id = m.user_id
+           -- Someone who has left (inactive / blocked) never receives, so they don't hold the ticks back.
+           WHERE m.room_id = ? AND m.user_id <> ? AND ${CHAT_PERSON_SQL("pu")}`,
           [roomId, req.user.id]
         )) || [];
       res.json({ others: rows.map((r) => ({ id: Number(r.id), read: Number(r.read), delivered: Number(r.delivered) })) });
@@ -1104,7 +1118,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows = await queryDB(
         `SELECT u.id, u.name, rr.updated_at AS read_at
          FROM chat_room_reads rr JOIN users u ON u.id = rr.user_id
-         WHERE rr.room_id = ? AND rr.user_id != ? AND rr.last_read_message_id >= ?
+         WHERE rr.room_id = ? AND rr.user_id != ? AND rr.last_read_message_id >= ? AND ${CHAT_PERSON_SQL("u")}
          ORDER BY rr.updated_at ASC`,
         [msg.room_id, msg.sender_id, messageId]
       );
