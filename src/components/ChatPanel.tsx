@@ -242,7 +242,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<number>>(new Set());
-  const [otherReadMessageId, setOtherReadMessageId] = useState<number | null>(null);
+  // Ticks on your own messages: for every other member, how far they have read
+  // and how far it has reached them (server: /api/chat/rooms/:id/receipts).
+  // One tick = sent; two grey = reached everyone; two blue = everyone has read.
+  const [receipts, setReceipts] = useState<{ id: number; read: number; delivered: number }[]>([]);
+  const receiptsRoomRef = useRef<number | null>(null);
+  const loadReceipts = useCallback(
+    async (roomId: number) => {
+      try {
+        const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/receipts`), { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && activeRoomIdRef.current === roomId) setReceipts((await res.json()).others || []);
+      } catch {
+        // the ticks simply stay as they were
+      }
+    },
+    [token]
+  );
+  const minRead = receipts.length ? Math.min(...receipts.map((r) => r.read)) : 0;
+  const minDelivered = receipts.length ? Math.min(...receipts.map((r) => Math.max(r.delivered, r.read))) : 0;
   // Group/community "Seen by ..." — who has read at least this far, for
   // just YOUR most recent message in the room (see fetchSeenBy below).
   // WhatsApp shows this per-message via long-press; here it's shown inline
@@ -497,12 +514,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const onRead = ({ roomId, userId, messageId }: { roomId: number; userId: number; messageId: number }) => {
       if (roomId !== activeRoomIdRef.current) return;
       if (userId !== user.id) {
-        setOtherReadMessageId((prev) => Math.max(prev || 0, messageId));
+        setReceipts((prev) => prev.map((r) => (r.id === userId ? { ...r, read: Math.max(r.read, messageId), delivered: Math.max(r.delivered, messageId) } : r)));
       }
       // Someone (including a THIRD member in a group, not just "the other
       // participant" tracked above) just read further — the "Seen by ..."
       // caption on our last own message may need to grow.
       setSeenByRefreshTick((v) => v + 1);
+    };
+    const onDelivered = ({ roomId, userId, messageId }: { roomId: number; userId: number; messageId: number }) => {
+      if (roomId !== activeRoomIdRef.current || userId === user.id) return;
+      setReceipts((prev) => prev.map((r) => (r.id === userId ? { ...r, delivered: Math.max(r.delivered, messageId) } : r)));
+    };
+    // An admin deleted this group for everyone.
+    const onRoomDeleted = ({ roomId }: { roomId: number }) => {
+      if (roomId === activeRoomIdRef.current) {
+        activeRoomIdRef.current = null;
+        setActiveRoomId(null);
+        setShowInfoPanel(false);
+        setMessages([]);
+      }
+      fetchRooms();
     };
     const onPresence = ({ userId, online }: { userId: number; online: boolean }) => {
       setOnlineUserIds((prev) => {
@@ -513,7 +544,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       });
     };
     const onMembersChanged = ({ roomId }: { roomId: number }) => {
-      if (roomId === activeRoomIdRef.current) fetchMembers(roomId);
+      if (roomId === activeRoomIdRef.current) {
+        fetchMembers(roomId);
+        void loadReceipts(roomId);
+      }
       fetchRooms();
     };
     // Group name / photo / description / settings changed.
@@ -549,6 +583,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     socket.on('message_unsent', onUnsent);
     socket.on('user_typing', onTyping);
     socket.on('message_read', onRead);
+    socket.on('message_delivered', onDelivered);
+    socket.on('room_deleted', onRoomDeleted);
     socket.on('presence_change', onPresence);
     socket.on('members_changed', onMembersChanged);
     // Who is online right now — presence_change only reports changes, and
@@ -565,6 +601,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('message_unsent', onUnsent);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
+      socket.off('message_delivered', onDelivered);
+      socket.off('room_deleted', onRoomDeleted);
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
       socket.off('room_updated', onRoomUpdated);
@@ -581,12 +619,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setEditing(null);
       setPins([]);
       setPinIndex(0);
-      setOtherReadMessageId(null);
+      setReceipts([]);
+      receiptsRoomRef.current = roomId;
       setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
       activeRoomIdRef.current = roomId;
       void fetchPins(roomId);
+      void loadReceipts(roomId);
       // Members are needed up-front for @mention autocomplete in a group/
       // community, not just when the info panel is opened — see
       // handleTyping/mentionCandidates below.
@@ -614,7 +654,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       }
       setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, unread_count: 0 } : r)));
     },
-    [token, rooms, fetchMembers]
+    [token, rooms, fetchMembers, loadReceipts]
   );
 
   // Push-notification deep link (see App.tsx's pendingChatRoomId) — opens
@@ -1690,7 +1730,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     </div>
                   );
                 const isMe = msg.sender_id === user.id;
-                const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
+                const isRead = isMe && minRead > 0 && msg.id <= minRead;
+                const isDelivered = isMe && minDelivered > 0 && msg.id <= minDelivered;
                 const unsent = !!msg.unsent_at;
                 // Long-press (phone) or right-click / the ⌄ button (computer)
                 // opens the message menu: react, reply, copy, delete.
@@ -1836,7 +1877,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           {msg.starred && !unsent && <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
                           {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
+                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-sky-500" aria-label="Seen" /> : isDelivered ? <CheckCheck size={14} aria-label="Delivered" /> : <Check size={14} aria-label="Sent" />)}
                         </div>
                       </div>
                       <ReactionChips reactions={msg.reactions} meId={user.id} mine={isMe} onOpen={() => setWhoMsg(msg)} />
@@ -2226,6 +2267,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
             >
               <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
+            </button>
+          )}
+          {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && (
+            <button
+              type="button"
+              onClick={async () => {
+                const what = activeRoom.type === 'community' ? 'community' : 'group';
+                if (!(await confirmDialog(`Delete this ${what} for everyone? All its messages, photos and files are removed for every member. This can't be undone.`, { tone: 'danger', confirmLabel: `Delete ${what}` }))) return;
+                const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                if (!res.ok) {
+                  const d = await res.json().catch(() => ({}));
+                  await confirmDialog(d.error || 'Could not delete it.', { tone: 'danger', confirmLabel: 'OK', cancelLabel: 'Close' });
+                  return;
+                }
+                setShowInfoPanel(false);
+                setActiveRoomId(null);
+                fetchRooms();
+              }}
+              className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+            >
+              <Trash2 className="w-4 h-4" /> Delete {activeRoom.type === 'community' ? 'Community' : 'Group'} for everyone
             </button>
           )}
         </div>
