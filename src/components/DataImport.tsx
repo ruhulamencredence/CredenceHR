@@ -370,10 +370,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
   const needsReason = !!kind && REASON_KINDS.includes(kind.key);
   const [reason, setReason] = useState('');
   const [historyTick, setHistoryTick] = useState(0);
-  // Employee Details: Name is only needed for a NEW employee — an existing one
-  // (matched on Employee ID) keeps its name when the sheet has no Name column.
-  const optionalHere = (k: string, f: { key: string }) => k === 'employees' && f.key === 'name';
-  const missingRequired = kind ? kind.fields.filter((f) => f.required && !optionalHere(kind.key, f) && !matched.some((m) => m.field.key === f.key)) : [];
+  const missingRequired = kind ? kind.fields.filter((f) => f.required && !matched.some((m) => m.field.key === f.key)) : [];
 
   const reset = () => {
     setFileName('');
@@ -571,7 +568,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
       set(i, { state: 'run', message: '' });
       try {
         const p = await parseFile(batch[i].file, kind);
-        const missing = kind.fields.filter((f) => f.required && !(kind.key === 'employees' && f.key === 'name') && !p.matched.some((m) => m.field.key === f.key));
+        const missing = kind.fields.filter((f) => f.required && !p.matched.some((m) => m.field.key === f.key));
         if (missing.length) throw new Error(`Missing column: ${missing.map((f) => f.label).join(', ')}`);
         const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows: p.rows, dry_run: dry, reason: reason.trim(), file_name: batch[i].file.name });
         const firstError = d.results.find((r) => r.status === 'error');

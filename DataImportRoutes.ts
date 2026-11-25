@@ -106,7 +106,7 @@ export const IMPORT_KINDS: Kind[] = [
     importLayer: "import_employees",
     fields: [
       EMP,
-      { key: "name", label: "Name", type: "text", required: true, aliases: ["employee name", "full name"], example: "Rahim Uddin", note: "Needed for a new employee only — an existing one keeps its saved name when this is empty" },
+      { key: "name", label: "Name", type: "text", required: true, aliases: ["employee name", "full name"], example: "Rahim Uddin" },
       { key: "designation", label: "Designation", type: "text", example: "Site Engineer" },
       { key: "department", label: "Department", type: "text", aliases: ["dept"], example: "Engineering", note: "Matched to Admin Panel -> Departments by name" },
       { key: "branch", label: "Branch", type: "text", example: "Head Office", note: "Matched to Admin Panel -> Branches by name" },
@@ -498,9 +498,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     const handler = HANDLERS[kind.key];
     const prepared = handler.prepare ? await handler.prepare(ctx) : {};
     for (const { n, v } of rows) {
-      // Employee Details: Name is only needed for a new employee; one that exists keeps its own.
-      const nameOptional = (f: Field) => kind.key === "employees" && f.key === "name" && byCode.has(str(v.employee_id).toLowerCase());
-      const missing = kind.fields.filter((f) => f.required && !str(v[f.key]) && !nameOptional(f)).map((f) => f.label);
+      const missing = kind.fields.filter((f) => f.required && !str(v[f.key])).map((f) => f.label);
       if (missing.length) {
         out.push({ row: n, status: "error", message: `Missing ${missing.join(", ")}.`, employee: str(v.employee_id) || undefined });
         continue;
@@ -628,7 +626,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const clash = await employeeIdConflict(queryDB, code, relink ? { userId: relink.id } : {});
           if (clash) fail(clash);
         }
-        const set: Record<string, any> = { name: str(v.name) || (existing ? str(existing.name) : "") };
+        const set: Record<string, any> = { name: str(v.name) };
         const notes: string[] = [];
         const textKeys = [
           "designation", "email", "phone", "mobile", "personal_email", "gender", "blood_group", "nid_ssn", "nationality",
