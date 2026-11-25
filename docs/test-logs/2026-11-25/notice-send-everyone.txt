@@ -1,0 +1,14 @@
+PASS live notice for 4 people
+PASS no "to": as before — the 3 who haven't tapped "I have read this" ({"success":true,"to":"unread","sent":3})
+PASS to everyone: all 4, the one who read it too ({"success":true,"to":"everyone","sent":4})
+PASS nobody's Read ✓ / opened changed
+PASS someone without Notices: refused
+PASS a paused notice can't be sent again
+PASS popup: "Send again ▾" button
+PASS menu: "To who hasn't read it" 3 (Not yet 2 + Opened 1) — To who hasn't read it Not yet 2 + Opened 1 (opened, didn't tap "I have read this") 3 To everyone Also the 1 who've read 
+PASS menu: "To everyone" 4, "also the 1 who've read it"
+PASS confirm: "Send this notice to everyone?" with all 4
+PASS after sending: "Sent again to 4 people."
+PASS the old way still works: "Sent again to 3 people."
+PASS no page errors []
+ALL PASS
