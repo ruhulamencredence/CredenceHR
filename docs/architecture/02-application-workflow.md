@@ -1314,6 +1314,7 @@ Sidebar → **360 ERP** চাপলে server 360 ERP-কে যে email প�
 - **Link by name:** একই নামের Branch-ছাড়া প্রজেক্ট ও প্রজেক্ট-ছাড়া Branch আগে তালিকায় দেখিয়ে টিক দিয়ে যুক্ত করা। নাম ও পিন বদলায় না। যুক্ত হলে "Their Branch" Check In ও Transfer (PEPM, Remote Attendance) প্রজেক্টটা খুঁজে পায়।
 - **Archive:** অচল Branch/প্রজেক্ট মুছে না ফেলে লুকানো (`is_archived`), ফেরানো যায়; Branch archive-এ চালু কর্মী 0 হতে হয়।
 - **Merge Branch:** বানান-ভুল বা ডুপ্লিকেট Branch-এর কর্মী (ইতিহাস লিখে) আসল Branch-এ সরানো; পুরনোটা archive হয়।
+- **Merge Project** (Projects → প্রতি সারির merge আইকন, `ProjectMergeRoutes.ts`): একই জায়গার দুটো Project (ডুপ্লিকেট / বানান-ভুল) এক করা। পুরোনোটার attendance (check-in ও check-out স্থান), correction, admin edit, PEPM entry (`project_id` ও `for_project_id`), check-in তালিকা, access তালিকা, "pinned" check-in project, Duty Roster guard post, Site Attendance team, Budget lock আসল Project-এ সরে; budget-এর লেখা নাম (`budget_items.project_name`) আসলটার নাম হয়; পুরোনোটা **archive** হয়, মোছা হয় না। কোন সারি কয়টা সরবে আগে preview-তে দেখায়। যেখানে "একজনের এক দিনে এক record" নিয়ম ভাঙত (দুই project-এই সেই দিনের attendance), সেটা পুরোনো project-এই থেকে যায় ও জানানো হয়; যে তালিকায় আসলটা আগেই আছে সেই ডুপ্লিকেট সারি বাদ যায়। দুটোরই Branch link থাকলে আটকায় (আগে Branch merge)। সব এক transaction-এ, প্রতিটা `project_merge_log`-এ।
 - **মোছার সুরক্ষা:** প্রজেক্টে PEPM Entry/হাজিরা থাকলে এবং Branch-এ কর্মী থাকলে Delete আটকায়।
 নিয়মের পূর্ণ তালিকা ও পরীক্ষার ফর্দ: `docs/branch-project-rules.md`।
 
