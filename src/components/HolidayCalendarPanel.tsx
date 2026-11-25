@@ -17,11 +17,13 @@ interface HolidayCalendarPanelProps {
 
 interface FormState {
   entry_date: string;
+  // Add only: the last day of a range (e.g. Eid holidays); empty = one day.
+  end_date: string;
   day_type: HolidayDayType;
   title: string;
 }
 
-const emptyForm: FormState = { entry_date: '', day_type: 'holiday', title: '' };
+const emptyForm: FormState = { entry_date: '', end_date: '', day_type: 'holiday', title: '' };
 
 const WEEKDAYS = [
   { value: 0, label: 'Sunday' },
@@ -152,7 +154,7 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
 
   const openEditForm = (e: HolidayEntry) => {
     setEditingId(e.id);
-    setForm({ entry_date: e.entry_date, day_type: e.day_type, title: e.title });
+    setForm({ entry_date: e.entry_date, end_date: '', day_type: e.day_type, title: e.title });
     setShowForm(true);
   };
 
@@ -161,13 +163,18 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
       setMessage({ type: 'error', text: 'Please choose a date.' });
       return;
     }
+    if (!editingId && form.end_date && form.end_date < form.entry_date) {
+      setMessage({ type: 'error', text: 'The To date must be on or after the From date.' });
+      return;
+    }
     setSaving(true);
     try {
       const url = editingId ? apiUrl(`/api/holidays/${editingId}`) : apiUrl('/api/holidays');
       const method = editingId ? 'PUT' : 'POST';
       // applies_to is only meaningful (and only accepted server-side) on
       // create — it's immutable afterward, same as entry_date.
-      const body = editingId ? form : { ...form, applies_to: group };
+      const { end_date, ...one } = form;
+      const body = editingId ? one : { ...one, ...(end_date && end_date !== form.entry_date ? { end_date } : {}), applies_to: group };
       const res = await fetch(url, {
         method,
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
@@ -178,7 +185,16 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
         setMessage({ type: 'error', text: data.error || 'Could not save this entry.' });
         return;
       }
-      setMessage({ type: 'success', text: editingId ? 'Entry updated.' : 'Added to the calendar.' });
+      setMessage({
+        type: 'success',
+        text: editingId
+          ? 'Entry updated.'
+          : data.inserted != null
+            ? `Added ${data.inserted} date${data.inserted === 1 ? '' : 's'} to the calendar.${
+                data.skipped?.length ? ` ${data.skipped.length} already set, left as they were: ${data.skipped.map((d: string) => formatDate(d)).join(', ')}.` : ''
+              }`
+            : 'Added to the calendar.'
+      });
       setShowForm(false);
       setForm(emptyForm);
       setEditingId(null);
@@ -481,34 +497,70 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
         </div>
       )}
 
-      {/* Add / Edit single date */}
+      {/* Add (one date or a From–To range) / Edit one date — liquid-glass popup */}
       {showForm && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 liquid-glass-backdrop flex items-center justify-center p-4"
           onClick={() => !saving && setShowForm(false)}
         >
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
+          <div className="max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label={editingId ? 'Edit Date' : 'Add Date'} className="liquid-glass liquid-glass-in rounded-[32px] w-full">
+            <div className="p-5 border-b border-white/60 flex justify-between items-center">
               <h3 className="text-base font-bold text-slate-900">{editingId ? 'Edit Date' : 'Add Date'}</h3>
               <button
                 onClick={() => setShowForm(false)}
                 disabled={saving}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
+                aria-label="Close"
+                className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-500 disabled:opacity-50"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date</label>
-                <input
-                  type="date"
-                  value={form.entry_date}
-                  disabled={!!editingId}
-                  onChange={(e) => setForm((f) => ({ ...f, entry_date: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
-                />
-              </div>
+              {editingId ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date</label>
+                  <input
+                    type="date"
+                    value={form.entry_date}
+                    disabled
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label htmlFor="hol-from" className="block text-xs font-semibold text-slate-600 mb-1.5">From</label>
+                      <input
+                        id="hol-from"
+                        type="date"
+                        value={form.entry_date}
+                        onChange={(e) => setForm((f) => ({ ...f, entry_date: e.target.value, end_date: f.end_date && f.end_date < e.target.value ? '' : f.end_date }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white/80 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="hol-to" className="block text-xs font-semibold text-slate-600 mb-1.5">
+                        To <span className="font-normal text-slate-400">(optional)</span>
+                      </label>
+                      <input
+                        id="hol-to"
+                        type="date"
+                        value={form.end_date}
+                        min={form.entry_date || undefined}
+                        onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white/80 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    {form.entry_date && form.end_date && form.end_date > form.entry_date
+                      ? `${Math.round((Date.parse(form.end_date) - Date.parse(form.entry_date)) / 86400000) + 1} days, ${formatDate(form.entry_date)} – ${formatDate(form.end_date)}. Days already set are left as they are.`
+                      : 'Leave "To" empty for one day; set it for several days in a row (e.g. Eid).'}
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Type</label>
                 <div className="flex gap-2">
@@ -543,22 +595,23 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
                 />
               </div>
             </div>
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
+            <div className="p-5 border-t border-white/60 flex justify-end gap-2">
               <button
                 onClick={() => setShowForm(false)}
                 disabled={saving}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
+                className="liquid-glass-chip px-5 py-2.5 text-slate-700 text-xs font-semibold rounded-full"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+                className="liquid-glass-button px-5 py-2.5 text-xs font-semibold rounded-full disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}
