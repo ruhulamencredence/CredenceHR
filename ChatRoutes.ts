@@ -238,6 +238,8 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
       ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
       // "Forward": a copy sent on to other chats shows "Forwarded".
       ["ALTER TABLE chat_messages ADD COLUMN is_forwarded TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
+      // "Delivered" (the second grey tick): the newest message of the room that reached this account's device.
+      ["ALTER TABLE chat_room_reads ADD COLUMN delivered_up_to INT NULL", "ER_DUP_FIELDNAME"],
       ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"],
       // Attachments are files in the chat folder (chatFiles.ts, .env
       // CHAT_ATTACHMENT_DIR); this is where the file is. attachment_data is
@@ -516,12 +518,52 @@ const SEND_ADMINS_ONLY = "Only group admins can send messages in this group.";
 
 async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, userId: number, messageId: number): Promise<void> {
   await queryDB(
-    `INSERT INTO chat_room_reads (room_id, user_id, last_read_message_id)
-     VALUES (?, ?, ?)
+    `INSERT INTO chat_room_reads (room_id, user_id, last_read_message_id, delivered_up_to)
+     VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), VALUES(last_read_message_id))`,
+       last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), VALUES(last_read_message_id)),
+       delivered_up_to = GREATEST(COALESCE(delivered_up_to, 0), VALUES(delivered_up_to))`,
+    [roomId, userId, messageId, messageId]
+  );
+}
+
+// "Delivered" = the message reached the person's device. A person with a live
+// connection in the room gets it the moment it is sent; someone who was away
+// gets it when they connect again (markAllDelivered). Read implies delivered.
+async function markDelivered(io: SocketIOServer, queryDB: ChatRouteDeps["queryDB"], roomId: number, userId: number, messageId: number): Promise<void> {
+  await queryDB(
+    `INSERT INTO chat_room_reads (room_id, user_id, delivered_up_to) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE delivered_up_to = GREATEST(COALESCE(delivered_up_to, 0), VALUES(delivered_up_to))`,
     [roomId, userId, messageId]
   );
+  io.to(`room:${roomId}`).emit("message_delivered", { roomId, userId, messageId });
+}
+export async function deliverToOnline(io: SocketIOServer, queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
+  try {
+    if (!message || message.message_type === "system") return;
+    const sockets = await io.in(`room:${message.room_id}`).fetchSockets();
+    const ids = new Set<number>(sockets.map((s) => Number((s.data as any)?.user?.id)).filter((id) => id > 0 && id !== Number(message.sender_id)));
+    for (const id of ids) await markDelivered(io, queryDB, Number(message.room_id), id, Number(message.id));
+  } catch {
+    // a missed delivery tick is corrected by the next one
+  }
+}
+// An account that just connected has "received" everything sent while it was away.
+async function markAllDelivered(io: SocketIOServer, queryDB: ChatRouteDeps["queryDB"], userId: number): Promise<void> {
+  try {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT m.room_id, MAX(cm.id) AS last_id, MAX(rr.delivered_up_to) AS have
+         FROM chat_room_members m
+         JOIN chat_messages cm ON cm.room_id = m.room_id AND cm.sender_id <> ? AND cm.message_type <> 'system'
+         LEFT JOIN chat_room_reads rr ON rr.room_id = m.room_id AND rr.user_id = m.user_id
+         WHERE m.user_id = ? GROUP BY m.room_id`,
+        [userId, userId]
+      )) || [];
+    for (const r of rows) if (Number(r.last_id) > Number(r.have || 0)) await markDelivered(io, queryDB, Number(r.room_id), userId, Number(r.last_id));
+  } catch {
+    // best effort
+  }
 }
 
 // Chat access per account (users.can_use_chat, Module Access -> Chat; on
@@ -542,6 +584,14 @@ export async function canUseChat(queryDB: (sql: string, params?: any[]) => Promi
 // SQL condition: the account in `alias` has Chat.
 const CHAT_ON_SQL = (alias: string) => `(${alias}.role = 'superadmin' OR COALESCE(${alias}.can_use_chat, 1) <> 0)`;
 
+// SQL condition: the person in `alias` is still with the company — their login
+// isn't blocked, and if they are an Employee, at least one of their Employee
+// records is Active (a Superadmin always counts). Inactive people are left out
+// of every Chat list: the directory, who can be added or forwarded to, a
+// group's member list, and one-to-one chats in the list. What they wrote stays.
+const CHAT_PERSON_SQL = (alias: string) =>
+  `(${alias}.role = 'superadmin' OR (COALESCE(${alias}.is_blocked, 0) = 0 AND (NOT EXISTS (SELECT 1 FROM all_employees ce WHERE ce.user_id = ${alias}.id) OR EXISTS (SELECT 1 FROM all_employees ce WHERE ce.user_id = ${alias}.id AND ce.is_active = 1))))`;
+
 export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatRouteDeps) {
   const { authenticateToken, queryDB } = deps;
 
@@ -554,7 +604,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // Of these accounts, the ones that have Chat.
   const withChat = async (ids: number[]): Promise<number[]> => {
     if (ids.length === 0) return [];
-    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")}`, ids);
+    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")} AND ${CHAT_PERSON_SQL("u")}`, ids);
     return rows.map((r: any) => Number(r.id));
   };
   // A centred note in the chat ("Rahim changed the group name to …"), seen by
@@ -588,7 +638,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
                 (SELECT e.department FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS department,
                 (SELECT e.designation FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS designation,
                 (SELECT e.employee_id FROM all_employees e WHERE e.user_id = u.id ORDER BY e.id LIMIT 1) AS employee_code
-         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} ORDER BY u.name ASC`,
+         FROM users u WHERE u.id != ? AND ${CHAT_ON_SQL("u")} AND ${CHAT_PERSON_SQL("u")} ORDER BY u.name ASC`,
         [req.user.id]
       );
       res.json(rows);
@@ -622,6 +672,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          WHERE m.user_id = ?
            -- "Delete chat": gone from this list until a newer message comes.
            AND (st.hidden_after_id IS NULL OR COALESCE(lm.id, 0) > st.hidden_after_id)
+           -- A one-to-one chat with someone who has left (inactive / blocked) is not listed.
+           AND (r.type <> 'direct' OR NOT EXISTS (
+             SELECT 1 FROM chat_room_members om JOIN users ou ON ou.id = om.user_id
+             WHERE om.room_id = r.id AND om.user_id <> m.user_id AND NOT ${CHAT_PERSON_SQL("ou")}
+           ))
          ORDER BY COALESCE(lm.created_at, r.created_at) DESC`,
         [userId]
       );
@@ -791,7 +846,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows = await queryDB(
         `SELECT m.user_id, u.name, u.email, u.username, m.role, m.joined_at
          FROM chat_room_members m JOIN users u ON u.id = m.user_id
-         WHERE m.room_id = ? ORDER BY (m.role = 'admin') DESC, u.name ASC`,
+         WHERE m.room_id = ? AND ${CHAT_PERSON_SQL("u")} ORDER BY (m.role = 'admin') DESC, u.name ASC`,
         [roomId]
       );
       res.json(rows);
@@ -942,6 +997,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       });
       io.to(`room:${roomId}`).emit("receive_message", message);
       void notifyNewMessage(queryDB, message);
+      void deliverToOnline(io, queryDB, message);
       res.json(message);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -998,6 +1054,52 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
     }
   });
 
+  // GET /api/chat/rooms/:id/receipts — for the ticks on your own messages: for
+  // every other member, how far they have read and how far it has reached them.
+  // One tick = sent, two grey = reached everyone, two blue = everyone has read.
+  app.get("/api/chat/rooms/:id/receipts", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const rows: any[] =
+        (await queryDB(
+          `SELECT m.user_id AS id, COALESCE(rr.last_read_message_id, 0) AS \`read\`, GREATEST(COALESCE(rr.delivered_up_to, 0), COALESCE(rr.last_read_message_id, 0)) AS delivered
+           FROM chat_room_members m JOIN users pu ON pu.id = m.user_id LEFT JOIN chat_room_reads rr ON rr.room_id = m.room_id AND rr.user_id = m.user_id
+           -- Someone who has left (inactive / blocked) never receives, so they don't hold the ticks back.
+           WHERE m.room_id = ? AND m.user_id <> ? AND ${CHAT_PERSON_SQL("pu")}`,
+          [roomId, req.user.id]
+        )) || [];
+      res.json({ others: rows.map((r) => ({ id: Number(r.id), read: Number(r.read), delivered: Number(r.delivered) })) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/chat/rooms/:id — an admin of a group / community (or a
+  // Superadmin) deletes it for everyone: its messages, files, pins and members
+  // go. A one-to-one chat is never deleted this way. A group under a community
+  // only leaves the community's list (it is deleted itself, not the community).
+  app.delete("/api/chat/rooms/:id", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const room = ((await queryDB("SELECT id, type, title FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+      if (!room) return res.status(404).json({ error: "Chat not found." });
+      if (room.type === "direct") return res.status(400).json({ error: "A one-to-one chat can't be deleted for everyone." });
+      if (!(await isRoomAdmin(queryDB, roomId, req.user))) return res.status(403).json({ error: "Only an admin of this group can delete it." });
+      const files: any[] = (await queryDB("SELECT DISTINCT attachment_path FROM chat_messages WHERE room_id = ? AND attachment_path IS NOT NULL", [roomId])) || [];
+      // Tell everyone in it first (their sockets leave right after).
+      io.to(`room:${roomId}`).emit("room_deleted", { roomId });
+      io.in(`room:${roomId}`).socketsLeave(`room:${roomId}`);
+      // Every table that points at the room goes with it (ON DELETE CASCADE).
+      await queryDB("DELETE FROM chat_rooms WHERE id = ?", [roomId]);
+      // A file a forwarded copy in another chat still uses stays.
+      for (const f of files) await removeChatFileIfUnused(queryDB, f.attachment_path);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/chat/messages/:id/reads — who has read at least up through this
   // message (chat_room_reads.last_read_message_id >= this id), excluding the
   // sender. Used for the group "Seen by ..." line under your own latest
@@ -1016,7 +1118,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const rows = await queryDB(
         `SELECT u.id, u.name, rr.updated_at AS read_at
          FROM chat_room_reads rr JOIN users u ON u.id = rr.user_id
-         WHERE rr.room_id = ? AND rr.user_id != ? AND rr.last_read_message_id >= ?
+         WHERE rr.room_id = ? AND rr.user_id != ? AND rr.last_read_message_id >= ? AND ${CHAT_PERSON_SQL("u")}
          ORDER BY rr.updated_at ASC`,
         [msg.room_id, msg.sender_id, messageId]
       );
@@ -1094,6 +1196,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         for (const o of others) io.in(`user:${o.user_id}`).socketsJoin(`room:${roomId}`);
         io.to(`room:${roomId}`).emit("receive_message", message);
         void notifyNewMessage(queryDB, message);
+        void deliverToOnline(io, queryDB, message);
         sent.push(roomId);
       }
       res.json({ forwarded: sent.length, roomIds: sent });
@@ -1929,6 +2032,9 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       // GET /api/chat/rooms is called and the UI opens it (join_room below).
     }
 
+    // Whatever was sent while this account was away has now reached it.
+    void chatOn().then((on) => (on ? markAllDelivered(io, queryDB, userId) : undefined));
+
     // Everyone online right now (ChatPanel asks when it opens, since
     // presence_change only reports changes).
     socket.on("presence_list", async (ack?: (ids: number[]) => void) => {
@@ -1977,6 +2083,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
           });
           io.to(`room:${roomId}`).emit("receive_message", message);
           void notifyNewMessage(queryDB, message);
+          void deliverToOnline(io, queryDB, message);
           if (ack) ack({ ok: true, message });
         } catch (err: any) {
           if (ack) ack({ ok: false, error: err.message });

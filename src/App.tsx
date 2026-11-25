@@ -2078,8 +2078,7 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
       {/* Give feedback (More menu) + the 7-day "How do you like the app?" question. */}
       {token && user && canGiveFeedback(user) && <FeedbackHost key={user.id} token={token} />}
 
-      {/* FloatingChatButton's popup — a centered card sized like
-          NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
+      {/* FloatingChatButton's popup — a large centered card (max-w-6xl, rounded-2xl, its own backdrop)
           instead of taking over the whole screen the way showChat above
           does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
           this needs its own close button + backdrop-click-to-close. */}
@@ -2089,8 +2088,8 @@ export default function App({ freshLogin = false }: { freshLogin?: boolean } = {
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
         >
           <div
-            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
-            style={{ height: '85vh', maxHeight: '720px' }}
+            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-6xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            style={{ height: '92vh', maxHeight: '920px' }}
           >
             <button
               type="button"
