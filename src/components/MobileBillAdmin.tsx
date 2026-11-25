@@ -225,7 +225,21 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
-  const sheetRows = billed.map((r, i) => ({
+  // The payment sheet (PDF and Excel) reads Department, then Designation, then
+  // Mobile Number; people with no Department / Designation go last.
+  const byDeptDesignation = (a: BillRow, b: BillRow) => {
+    const cmp = (x?: string | null, y?: string | null) => {
+      const p = String(x || '').trim();
+      const q = String(y || '').trim();
+      if (!p && q) return 1;
+      if (p && !q) return -1;
+      return p.localeCompare(q, undefined, { sensitivity: 'base', numeric: true });
+    };
+    return cmp(a.employee?.department, b.employee?.department) || cmp(a.employee?.designation, b.employee?.designation) || cmp(a.phone_number, b.phone_number);
+  };
+  const sheetList = useMemo(() => [...billed].sort(byDeptDesignation), [billed]);
+
+  const sheetRows = sheetList.map((r, i) => ({
     SL: i + 1,
     Name: r.employee?.name || '',
     'Emp. ID': r.employee?.employee_code || '',
@@ -264,7 +278,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
       autoTable(doc, {
         ...standardTable(startY),
         head: [['Serial', 'Name', 'Emp. ID', 'Designation', 'Department', 'Duty Location', 'Mobile Number', 'Operator', 'Official Ceiling', 'Bill Amount', 'Company Pays', 'Excess Amount']],
-        body: billed.map((r, i) => [
+        body: sheetList.map((r, i) => [
           String(i + 1),
           r.employee?.name || '-',
           r.employee?.employee_code || '',
