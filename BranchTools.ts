@@ -91,6 +91,132 @@ export function registerBranchToolsRoutes(app: Express, deps: Deps) {
     return true;
   };
 
+  // ---- Link by choice ---------------------------------------------------
+  // For Branches whose name differs from their Project's ("Kolatia Godown" /
+  // "WIP-Kalatia (Godown)"): the Admin picks the Project for each Branch, with
+  // the closest-named free Project already suggested. Same rules as Link by
+  // name — a free Branch to a free Project, no name or pin is changed, and a
+  // pin is shared only into the side that has none.
+  const STOP = new Set(["wip", "plot", "p", "project", "ltd", "limited", "the", "of", "dhaka", "road", "r", "rd", "b", "block", "house", "no"]);
+  const compact = (s: string) => norm(s).replace(/[^a-z0-9]+/g, "");
+  const tokensOf = (s: string) =>
+    norm(s).replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w && !STOP.has(w));
+  const lev = (a: string, b: string) => {
+    const m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  };
+  const similar = (a: string, b: string) => {
+    const ka = compact(a), kb = compact(b);
+    if (!ka || !kb) return 0;
+    if (ka === kb) return 1;
+    let best = 1 - lev(ka, kb) / Math.max(ka.length, kb.length);
+    if (Math.min(ka.length, kb.length) >= 5 && (ka.includes(kb) || kb.includes(ka))) best = Math.max(best, 0.85);
+    // Word by word, allowing a spelling slip ("Kolatia" / "Kalatia", "Noor Park" / "Noorpark").
+    const ta = tokensOf(a), tb = tokensOf(b);
+    if (ta.length && tb.length) {
+      const used = new Set<number>();
+      let hit = 0;
+      for (const x of ta) {
+        const j = tb.findIndex((y, k) => !used.has(k) && (x === y || (Math.min(x.length, y.length) >= 4 && 1 - lev(x, y) / Math.max(x.length, y.length) >= 0.75)));
+        if (j >= 0) { used.add(j); hit++; }
+      }
+      best = Math.max(best, hit / (ta.length + tb.length - hit));
+    }
+    return best;
+  };
+  // Marks a Branch + Project as linked (same steps Link by name takes).
+  async function applyLink(branch: any, project: any) {
+    await queryDB("UPDATE branches SET project_id = ? WHERE id = ? AND project_id IS NULL", [project.id, branch.id]);
+    if (hasPin(branch) && !hasPin(project)) {
+      await queryDB("UPDATE projects SET location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?", [
+        branch.location_lat, branch.location_lng, branch.location_label ?? null, branch.location_radius ?? null, project.id
+      ]);
+    } else if (hasPin(project) && !hasPin(branch)) {
+      await queryDB("UPDATE branches SET location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?", [
+        project.location_lat, project.location_lng, project.location_label ?? null, project.location_radius ?? null, branch.id
+      ]);
+    }
+  }
+
+  app.get("/api/branches/link-suggestions", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
+    try {
+      if (!(await needProjectsEdit(req, res))) return;
+      const branches: any[] = await queryDB("SELECT * FROM branches");
+      const projects: any[] = await queryDB("SELECT * FROM projects");
+      const linked = new Set(branches.filter((b) => b.project_id).map((b) => Number(b.project_id)));
+      const freeProjects = projects.filter((p) => !linked.has(Number(p.id)) && !Number(p.is_archived));
+      const staff = await staffByBranch();
+      const rows = branches
+        .filter((b) => !b.project_id && !Number(b.is_archived) && b.branch_type === "project_site" && (staff.active.get(Number(b.id)) || 0) > 0)
+        .map((b) => {
+          const ranked = freeProjects.map((p) => ({ p, s: similar(String(b.branch_name), String(p.project_name)) })).sort((x, y) => y.s - x.s);
+          const top = ranked[0];
+          const second = ranked[1];
+          // Pre-selected only when clearly the best match; otherwise just offered.
+          const sure = !!top && top.s >= 0.8 && (!second || top.s - second.s >= 0.15);
+          return {
+            branch_id: Number(b.id),
+            branch_name: b.branch_name,
+            branch_type: b.branch_type,
+            staff: staff.active.get(Number(b.id)) || 0,
+            their_branch_users: staff.byBranchMode.get(Number(b.id)) || 0,
+            suggested_project_id: top && top.s >= 0.5 ? Number(top.p.id) : null,
+            sure,
+            score: top ? Math.round(top.s * 100) / 100 : 0
+          };
+        })
+        .sort((a, b) => b.staff - a.staff || String(a.branch_name).localeCompare(String(b.branch_name)));
+      res.json({
+        branches: rows,
+        projects: freeProjects.map((p) => ({ id: Number(p.id), name: p.project_name, has_pin: hasPin(p) })).sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/branches/link-pairs", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
+    try {
+      if (!(await needProjectsEdit(req, res))) return;
+      const asked: any[] = Array.isArray(req.body?.pairs) ? req.body.pairs.slice(0, 500) : [];
+      if (!asked.length) return res.status(400).json({ error: "Nothing to link." });
+      const branches: any[] = await queryDB("SELECT * FROM branches");
+      const projects: any[] = await queryDB("SELECT * FROM projects");
+      const byBranch = new Map(branches.map((b) => [Number(b.id), b]));
+      const byProject = new Map(projects.map((p) => [Number(p.id), p]));
+      const usedProjects = new Set(branches.filter((b) => b.project_id).map((b) => Number(b.project_id)));
+      let linked = 0;
+      const skipped: string[] = [];
+      for (const a of asked) {
+        const b = byBranch.get(Number(a?.branch_id));
+        const p = byProject.get(Number(a?.project_id));
+        if (!b || !p) { skipped.push(`Branch ${Number(a?.branch_id)} / Project ${Number(a?.project_id)}: not found`); continue; }
+        if (b.project_id) { skipped.push(`${b.branch_name}: already linked to a Project`); continue; }
+        if (usedProjects.has(Number(p.id))) { skipped.push(`${b.branch_name}: "${p.project_name}" is already linked to another Branch`); continue; }
+        if (Number(p.is_archived)) { skipped.push(`${b.branch_name}: "${p.project_name}" is archived`); continue; }
+        if (hasPin(b) && hasPin(p) && !samePin(b, p)) { skipped.push(`${b.branch_name}: the Branch and "${p.project_name}" have different map pins — check them first`); continue; }
+        try {
+          await applyLink(b, p);
+          usedProjects.add(Number(p.id));
+          linked++;
+        } catch (err: any) {
+          skipped.push(`${b.branch_name}: ${err.code === "ER_DUP_ENTRY" ? "that Project is already linked" : err.message}`);
+        }
+      }
+      res.json({ linked, skipped });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/branches/link-preview", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
     try {
       if (!(await needProjectsEdit(req, res))) return;
