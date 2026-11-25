@@ -846,10 +846,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // The calling user's own attendance history (most recent first).
   app.get("/api/attendance/mine", authenticateToken, requireTimesheetAccess, async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM attendance WHERE user_id = ? ORDER BY attendance_date DESC, id DESC", [req.user.id]);
+      // Timesheet shows the last three years (Month Wise can go back that far):
+      // every day in that window, not just the newest 200 rows — a Head Office
+      // person with a punch every working day had every month older than
+      // about nine months show as Absent. ?from=YYYY-MM-DD goes further back.
+      const asked = String(req.query.from || "");
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : `${Number(todayInDhaka().slice(0, 4)) - 3}-01-01`;
+      const rows = await queryDB("SELECT * FROM attendance WHERE user_id = ? AND attendance_date >= ? ORDER BY attendance_date DESC, id DESC", [req.user.id, since]);
       const projects = await queryDB("SELECT * FROM projects");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
-      const withApprovals = await attachApprovalStatuses("attendance", rows.slice(0, 200));
+      const withApprovals = await attachApprovalStatuses("attendance", rows);
       const mapped = withApprovals.map((r: any) => ({
         ...r,
         project_name: projectMap.get(r.project_id)?.project_name || null,
@@ -877,11 +883,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
                   CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at,
                   MAX(punch_time) AS last_punch
            FROM zk_attendance_logs
-           WHERE device_user_pin = ?
+           WHERE device_user_pin = ? AND punch_time >= ?
            GROUP BY DATE(punch_time)
-           ORDER BY attendance_date DESC
-           LIMIT 200`,
-          [emp[0].zk_device_pin]
+           ORDER BY attendance_date DESC`,
+          [emp[0].zk_device_pin, `${since} 00:00:00`]
         );
         const t = (v: any) => (v ? new Date(v).getTime() : NaN);
         // Office machine double punch: a punch within N minutes of the In isn't the Out.
