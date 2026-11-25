@@ -80,3 +80,7 @@
 ## 9. Division is the Branch's type (23 Nov)
 
 An employee's **Division** is no longer typed: it is "Head Office" or "Project Side", the type of their Branch (`BranchDivision.ts`). It is set when a Branch is picked in Edit Employee (the field is read-only there), on Transfer, Merge Branch, a Branch's type change (Branches page or a Project's Branch type), Employee import and joiner -> employee. **Branches -> "Set Division from Branch"** previews and applies it to everyone already saved (each change goes to the person's history; needs Branches module and Employees Edit/Add). An employee with **no Branch keeps** the Division they had. The two names keep the words ("head", "project") that Office / Project filters, Notices and Bill Disbursement read, so those groupings do not change. Do not turn Division back into free text, and do not make anything read Division in place of the Branch's type.
+
+## 10. Merge projects (25 Nov)
+
+A duplicate Project is merged into the real one from Admin Panel → Projects (merge icon on each row; layer `merge_projects`, explicit-only, Superadmin always). It moves every reference found in the database (see `REFS` in `ProjectMergeRoutes.ts`), keeps one-per-person-per-day attendance that would collide on the old Project, drops list rows the person already has on the kept Project, renames budget lines, and archives the old Project. If both Projects have a linked Branch it is refused (merge the Branches first). Previewed first, one transaction, logged in `project_merge_log`.

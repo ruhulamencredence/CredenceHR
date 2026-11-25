@@ -38,6 +38,8 @@ export interface ComposeInit {
   // Forward: the original's attachments are fetched and sent again.
   forwardFrom?: { messageId: string; attachments: MailAttachment[] };
   scheduledAt?: string | null;
+  // "Send through the mail server" (a draft remembers it; new mail uses the person's default).
+  viaServer?: boolean;
   // Files to start with (e.g. a report PDF from the AI Assistant).
   files?: OutgoingFile[];
 }
@@ -438,6 +440,25 @@ export const MailCompose: React.FC<{
   const [to, setTo] = useState(init.to || '');
   const [cc, setCc] = useState(init.cc || '');
   const [bcc, setBcc] = useState(init.bcc || '');
+  // "Send through the mail server": this mail skips inside delivery and goes by
+  // SMTP to everyone. New mail starts from the person's own saved default.
+  const [viaServer, setViaServer] = useState(!!init.viaServer);
+  const [viaDefault, setViaDefault] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    mailFetch<{ sendViaServer?: boolean }>(token, '/settings')
+      .then((s) => {
+        if (gone) return;
+        setViaDefault(!!s.sendViaServer);
+        if (init.viaServer === undefined && !init.draftId) setViaServer(!!s.sendViaServer);
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+  const [viaNote, setViaNote] = useState('');
   // Which recipients get it inside CredenceHR and which through the mail
   // server (MailRoutes.ts "Internal delivery") — shown under the addresses.
   const [route, setRoute] = useState<{
@@ -451,7 +472,7 @@ export const MailCompose: React.FC<{
     if (!accountId || !(to + cc + bcc).trim()) return setRoute(null);
     let gone = false;
     const t = setTimeout(() => {
-      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string>; groups?: { email: string; name: string; count: number; denied: boolean }[] }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
+      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string>; groups?: { email: string; name: string; count: number; denied: boolean }[] }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc, viaServer } })
         .then((r) => {
           if (gone) return;
           const ours = new Set(r.ourDomains.map((d) => d.toLowerCase()));
@@ -465,7 +486,7 @@ export const MailCompose: React.FC<{
       gone = true;
       clearTimeout(t);
     };
-  }, [token, accountId, to, cc, bcc]);
+  }, [token, accountId, to, cc, bcc, viaServer]);
   const [subject, setSubject] = useState(init.subject || '');
   const [sigId, setSigId] = useState<string>(init.draftId ? '' : defaultSig?.id || '');
   const [files, setFiles] = useState<(OutgoingFile & { size: number })[]>(() =>
@@ -539,7 +560,8 @@ export const MailCompose: React.FC<{
     body: html(),
     inReplyTo: init.inReplyTo || undefined,
     attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })),
-    keepAttachments: kept.map((k) => k.idx)
+    keepAttachments: kept.map((k) => k.idx),
+    viaServer
   });
   const totalSize = files.reduce((n, f) => n + f.size, 0) + kept.reduce((n, k) => n + (k.size || 0), 0);
 
@@ -567,7 +589,7 @@ export const MailCompose: React.FC<{
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [accountId, to, cc, bcc, subject, files, kept, draftId, token]
+    [accountId, to, cc, bcc, subject, files, kept, draftId, token, viaServer]
   );
 
   // Saves quietly while writing (every 10 s after a change).
@@ -851,6 +873,40 @@ export const MailCompose: React.FC<{
       />
       {ccOpen && <AddressField token={token} label="Cc" value={cc} onChange={setCc} />}
       {bccOpen && <AddressField token={token} label="Bcc" value={bcc} onChange={setBcc} />}
+      <div className="mx-4 py-1 border-b border-slate-200 text-[11px] text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+        <label className="inline-flex items-center gap-1.5 cursor-pointer select-none" title="Off: mail to colleagues stays inside CredenceHR. On: everyone gets it through the mail server, so it also shows in Outlook or a phone's mail app.">
+          <input
+            type="checkbox"
+            checked={viaServer}
+            onChange={(e) => {
+              setViaServer(e.target.checked);
+              setViaNote('');
+              dirty.current = true;
+              setSavedNote('');
+            }}
+            className="rounded border-slate-300"
+          />
+          <span className={viaServer ? 'text-slate-800 font-medium' : ''}>Send through the mail server</span>
+        </label>
+        {viaServer !== viaDefault && (
+          <button
+            type="button"
+            className="text-[#0b57d0] hover:underline"
+            onClick={() => {
+              const next = viaServer;
+              mailFetch(token, '/settings', { method: 'PUT', body: { sendViaServer: next } })
+                .then(() => {
+                  setViaDefault(next);
+                  setViaNote(next ? 'Saved: new mails will go through the mail server.' : 'Saved: new mails will stay inside CredenceHR.');
+                })
+                .catch((e: any) => setViaNote(e.message || 'Could not save.'));
+            }}
+          >
+            {viaServer ? 'Always use this for new mails' : 'Back to inside delivery for new mails'}
+          </button>
+        )}
+        {viaNote && <span className="text-emerald-700">{viaNote}</span>}
+      </div>
       {route && (route.internal.length > 0 || route.external.length > 0 || route.groups.length > 0) && (
         <div className="mx-4 py-1 border-b border-slate-200 text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5" title={[...route.internal.map((x) => `${x}: inside CredenceHR`), ...route.external.map((x) => `${x}: through the mail server`)].join('\n')}>
           {route.groups.map((g) =>

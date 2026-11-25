@@ -1609,6 +1609,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
   // "Set Division from Branch" (BranchTools.ts): preview, then apply.
   const [divisionSync, setDivisionSync] = useState<null | { loading: boolean; busy: boolean; data?: any; error?: string }>(null);
+  // Projects -> Merge projects (layer "merge_projects"): a duplicate Project's data moves onto the real one.
+  const [mergeProject, setMergeProject] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string }>(null);
+  const [mergeProjectLog, setMergeProjectLog] = useState<null | any[]>(null);
   const [mergeBranch, setMergeBranch] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string; needsConfirm?: boolean }>(null);
   // Site location pin for the project being added/edited (free OpenStreetMap/
   // Leaflet picker — see LocationMapPicker). Null lat/lng = no pin set yet.
@@ -2386,6 +2389,56 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setMessage({ type: 'success', text: `Division set from the Branch for ${data.changed} employee${data.changed === 1 ? '' : 's'}. Each change is in their history.` });
     } catch (err: any) {
       setDivisionSync({ ...divisionSync, busy: false, error: err.message });
+    }
+  };
+
+  const loadProjectMergePreview = async (from: any, intoId: string) => {
+    if (!intoId) {
+      setMergeProject({ from, intoId: '', preview: null, busy: false });
+      return;
+    }
+    setMergeProject({ from, intoId, preview: null, busy: true });
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${from.id}/merge-preview?into=${intoId}`), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setMergeProject({ from, intoId, preview: data, busy: false });
+    } catch (err: any) {
+      setMergeProject({ from, intoId, preview: null, busy: false, error: err.message });
+    }
+  };
+  const confirmProjectMerge = async () => {
+    if (!mergeProject) return;
+    const into = projects.find((p) => String(p.id) === mergeProject.intoId);
+    if (!(await confirmDialog(`Merge "${mergeProject.from.project_name}" into "${into?.project_name || 'the chosen Project'}"? Everything of "${mergeProject.from.project_name}" moves over and it is archived. This can't be undone.`, { tone: 'danger', confirmLabel: 'Merge' }))) return;
+    setMergeProject({ ...mergeProject, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${mergeProject.from.id}/merge`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ into_id: Number(mergeProject.intoId) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not merge.');
+      const total = Object.values(data.moved || {}).reduce((a: number, b: any) => a + Number(b), 0);
+      const left = Object.values(data.left || {}).reduce((a: number, b: any) => a + Number(b), 0);
+      setMergeProject(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `Merged: ${total} item${total === 1 ? '' : 's'} moved to "${into?.project_name}". "${mergeProject.from.project_name}" is archived (not deleted).${left ? ` ${left} attendance record${left === 1 ? '' : 's'} stayed on it (the person already had one that day on the kept Project).` : ''}` });
+    } catch (err: any) {
+      setMergeProject({ ...mergeProject, busy: false, error: err.message });
+    }
+  };
+  const openProjectMergeLog = async () => {
+    setMergeProjectLog([]);
+    try {
+      const res = await fetch(apiUrl('/api/projects/merge/log'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load.');
+      setMergeProjectLog(data);
+    } catch (err: any) {
+      setMergeProjectLog(null);
+      setMessage({ type: 'error', text: err.message });
     }
   };
 
@@ -3360,6 +3413,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const employeesLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.employees;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // Projects module layers: "merge_projects" is explicit-only.
+  const projectsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.projects;
     return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
   const usersLayer = (key: PermissionLayerKey) => {
@@ -5946,9 +6005,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <h3 className="text-lg font-bold text-slate-900">Approved Projects List</h3>
                     <p className="text-xs text-slate-500">Users select projects strictly from this list</p>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
-                    {activeProjects.length} Project{activeProjects.length === 1 ? '' : 's'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {projectsLayer('merge_projects') && (
+                      <button
+                        type="button"
+                        onClick={openProjectMergeLog}
+                        className="text-xs px-2.5 py-1 rounded-full bg-white text-slate-600 font-medium border border-slate-200 hover:bg-slate-50 whitespace-nowrap"
+                        title="Projects merged so far"
+                      >
+                        Merge log
+                      </button>
+                    )}
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
+                      {activeProjects.length} Project{activeProjects.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -6055,6 +6126,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
+                        {!isArchived(p) && projectsLayer('merge_projects') && (
+                          <button
+                            onClick={() => setMergeProject({ from: p, intoId: '', preview: null, busy: false })}
+                            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Merge into another Project"
+                          >
+                            <GitMerge className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleArchive('projects', p)}
                           className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
@@ -8827,6 +8907,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               >
                 {linkByName.busy ? 'Linking…' : `Link ${linkByName.picked.size} Branch${linkByName.picked.size === 1 ? '' : 'es'}`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeProject && projectsLayer('merge_projects') && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Merge "{mergeProject.from.project_name}" into another Project</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Use this when two Projects are the same place. Its attendance, check-in lists, access, budgets and entries move to the Project you keep, and this one is archived, not deleted.
+            </p>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mt-4 mb-1">Keep this Project</label>
+            <SearchSelect
+              value={mergeProject.intoId}
+              onChange={(e) => loadProjectMergePreview(mergeProject.from, e.target.value)}
+              className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              <option value="">— Select Project —</option>
+              {activeProjects
+                .filter((p) => p.id !== mergeProject.from.id)
+                .map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.project_name}
+                    {p.linked_branch_type ? ` · ${p.linked_branch_type === 'head_office' ? 'Head Office' : 'Project Side'}` : ''}
+                  </option>
+                ))}
+            </SearchSelect>
+            {mergeProject.busy && !mergeProject.preview && <p className="text-sm text-slate-500 mt-3">Checking…</p>}
+            {mergeProject.preview && (
+              <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-3 text-[13px] text-slate-800 space-y-1">
+                {mergeProject.preview.rows.length === 0 ? (
+                  <div>Nothing points at "{mergeProject.preview.from.name}" — it will just be archived.</div>
+                ) : (
+                  <>
+                    <div className="font-semibold">Moves to "{mergeProject.preview.into.name}":</div>
+                    {mergeProject.preview.rows.map((r: any) => (
+                      <div key={r.label} className="flex justify-between gap-3">
+                        <span>{r.label}</span>
+                        <span className="font-semibold tabular-nums">{r.count}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {mergeProject.preview.rows.some((r: any) => r.collide > 0 && r.mode === 'unique-keep') && (
+                  <div className="text-amber-700 font-medium">
+                    {mergeProject.preview.rows.filter((r: any) => r.mode === 'unique-keep').reduce((n: number, r: any) => n + r.collide, 0)} attendance record(s) can't move: the person already has a record that day on the kept Project. They stay on the archived one.
+                  </div>
+                )}
+                {mergeProject.preview.rows.some((r: any) => r.collide > 0 && r.mode === 'unique-drop') && (
+                  <div className="text-slate-600">
+                    Where a person already has the kept Project in a list, the duplicate entry is dropped.
+                  </div>
+                )}
+                {mergeProject.preview.branch_moves && <div className="text-slate-600">The Branch "{mergeProject.preview.branch_moves}" stays linked, now to "{mergeProject.preview.into.name}".</div>}
+                {mergeProject.preview.budget_names > 0 && <div className="text-slate-600">{mergeProject.preview.budget_names} budget line(s) take the kept Project's name.</div>}
+                {mergeProject.preview.blocked.map((t: string) => (
+                  <div key={t} className="text-rose-600 font-medium">{t}</div>
+                ))}
+              </div>
+            )}
+            {mergeProject.error && <p className="text-sm text-rose-600 mt-3">{mergeProject.error}</p>}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setMergeProject(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={mergeProject.busy || !mergeProject.preview || mergeProject.preview.blocked.length > 0}
+                onClick={confirmProjectMerge}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ '--g-accent': '#dc2626' } as React.CSSProperties}
+              >
+                {mergeProject.busy ? 'Working…' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeProjectLog && projectsLayer('merge_projects') && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold text-slate-900">Projects merged so far</h3>
+              <button type="button" onClick={() => setMergeProjectLog(null)} className="liquid-glass-chip rounded-full w-9 h-9 flex items-center justify-center text-slate-700" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="liquid-glass-inset rounded-2xl mt-3 divide-y divide-slate-200/60">
+              {mergeProjectLog.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-slate-500">No merges yet.</p>
+              ) : (
+                mergeProjectLog.map((l: any) => (
+                  <div key={l.id} className="px-4 py-2.5 text-[13px] text-slate-800">
+                    <div className="font-semibold">{l.from_name} → {l.into_name}</div>
+                    <div className="text-slate-500 text-[12px]">
+                      {new Date(l.merged_at).toLocaleString()} · {l.merged_by_name || '—'} · {Object.values(l.moved?.moved || {}).reduce((a: number, b: any) => a + Number(b), 0)} moved
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

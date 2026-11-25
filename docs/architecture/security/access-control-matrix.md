@@ -7,7 +7,7 @@
 |---|---|---|
 | Admin Dashboard | `admin_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Reports | `reports` | `read` Read Only<br>`edit_add` Edit<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`submission_status` Budget Submission Status<br>🔒`dispatch_material` Dispatch Material (own)<br>🔒`dispatch_all` Dispatch Material: see all<br>🔒`po_import` P.O Import<br>🔒`close_short` Undelivered MPR & Close short |
-| Projects | `projects` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
+| Projects | `projects` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`merge_projects` Merge projects |
 | Branches | `branches` | শুধু মডিউলের অনুমতি (layer নেই) |
 | MPR Numbers | `mprs` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Data Import | `imports` | শুধু মডিউলের অনুমতি (layer নেই) |

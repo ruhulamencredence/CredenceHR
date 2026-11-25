@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useElementHeight } from '../lib/useElementHeight';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
@@ -2878,12 +2879,36 @@ const EmployeeSearchSelect: React.FC<{
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The list is drawn on the page (fixed, via a portal) — not inside the popup —
+  // so a popup's own scroll/clip never cuts it off and rows never sit on top of
+  // the fields below. It opens upward when there is no room underneath.
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number; maxH: number } | null>(null);
+  const place = useCallback(() => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom - 12;
+    const above = r.top - 12;
+    const up = below < 260 && above > below;
+    const room = Math.max(160, up ? above : below);
+    setPos(up
+      ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 4, maxH: room }
+      : { left: r.left, width: r.width, top: r.bottom + 4, maxH: room });
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, place]);
 
   const selected = employees.find((emp) => String(emp.id) === value) || null;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+      const n = e.target as Node;
+      if (wrapRef.current && !wrapRef.current.contains(n) && !panelRef.current?.contains(n)) {
         setOpen(false);
         setQuery('');
       }
@@ -2908,8 +2933,12 @@ const EmployeeSearchSelect: React.FC<{
         </span>
         <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
       </div>
-      {open && (
-        <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+      {open && pos && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, zIndex: 100000 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden flex flex-col"
+        >
           <input
             autoFocus
             type="text"
@@ -2924,7 +2953,7 @@ const EmployeeSearchSelect: React.FC<{
             placeholder={placeholder}
             className="block w-full px-3 py-2 text-sm border-b border-slate-100 focus:outline-none"
           />
-          <div className="max-h-52 overflow-y-auto">
+          <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: Math.min(pos.maxH - 48, 340) }}>
             {value && (
               <button
                 type="button"
@@ -2942,19 +2971,23 @@ const EmployeeSearchSelect: React.FC<{
                   key={emp.id}
                   type="button"
                   onClick={() => { onChange(String(emp.id)); setQuery(''); setOpen(false); }}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
-                    String(emp.id) === value ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'
+                  className={`block w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors border-b border-slate-50 last:border-0 ${
+                    String(emp.id) === value ? 'bg-blue-50' : ''
                   }`}
                 >
-                  {emp.name}
-                  {[emp.employee_id, (emp as any).designation, (emp as any).department].some(Boolean) ? (
-                    <span className="text-slate-400 font-normal"> · {[emp.employee_id, (emp as any).designation, (emp as any).department].filter(Boolean).join(' · ')}</span>
+                  <span className={`block text-sm leading-snug ${String(emp.id) === value ? 'font-semibold text-blue-700' : 'font-medium text-slate-800'}`}>
+                    {emp.name}
+                    {emp.employee_id ? <span className="text-slate-400 font-normal"> ({emp.employee_id})</span> : null}
+                  </span>
+                  {[(emp as any).designation, (emp as any).department].some(Boolean) ? (
+                    <span className="block text-[11px] leading-snug text-slate-500 truncate">{[(emp as any).designation, (emp as any).department].filter(Boolean).join(' · ')}</span>
                   ) : null}
                 </button>
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
