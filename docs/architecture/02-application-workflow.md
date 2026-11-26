@@ -1384,3 +1384,7 @@ Notices → Who has read it → "Send again ▾"-এ দুটো পছন্�
 
 ## Holiday Calendar: একসাথে কয়েক দিন (২৫ নভেম্বর)
 Add Date-এ এখন From আর To (ঐচ্ছিক)। To দিলে From থেকে To পর্যন্ত প্রতিটি দিন বাছা calendar-এ (Head Office / Project Side) একই ধরন ও নামে যোগ হয়; আগে থেকে থাকা দিন যেমন আছে থাকে এবং বার্তায় নাম দেখায়; সর্বোচ্চ ৬২ দিন। To খালি রাখলে এক দিন, আগের মতো; Edit আগের মতো এক দিনের। `POST /api/holidays` ঐচ্ছিক `end_date` নেয়।
+
+## Check In/Out (Admin Panel): Department অনুযায়ী সীমা (২৬ নভেম্বর)
+
+Bill Claim-এর মতো Check In/Out মডিউলেও এখন Users → Module Access-এ "Departments on Check In/Out" আছে (`claim_department_access`, `GET/PUT /api/users/:id/claim-departments`)। কোনো Department না বাছলে আগের মতোই সব Department; বাছলে সেই অ্যাকাউন্ট `GET /api/claims` (পাতা-ভাগ করা ও না-করা দুই রকমেই) আর `DELETE /api/claims/:id`-এ শুধু ওই Department-গুলোর কর্মীদের Check In/Out দেখে ও মোছে — সার্ভারে SQL-এ ছাঁকা। Supervisor যে Department-এ টিম চালান সেটা প্রথমবার আগে থেকে tick করা থাকে। Superadmin কখনো সীমিত নয়। Department-এর নাম বদলালে, অ্যাকাউন্ট মুছলে বা merge করলে এই সারিও সঙ্গে চলে।
