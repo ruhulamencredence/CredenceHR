@@ -5157,38 +5157,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                       <tr>
-                        <th className="px-4 py-2.5 text-left">User</th>
-                        <th className="px-4 py-2.5 text-left">Source</th>
-                        <th className="px-4 py-2.5 text-left">Project</th>
-                        <th className="px-4 py-2.5 text-left">Check In</th>
-                        <th className="px-4 py-2.5 text-left">Check Out</th>
-                        <th className="px-4 py-2.5 text-left">Remarks</th>
+                        <th className="px-3 py-2.5 text-left">User</th>
+                        <th className="px-3 py-2.5 text-left">Check In</th>
+                        <th className="px-3 py-2.5 text-left">Check Out</th>
+                        <th className="px-3 py-2.5 text-left">Remarks</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {dailyReport.present.map((r: any) => (
                         <tr key={r.user_id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{r.user_name}</td>
-                          <td className="px-4 py-3 whitespace-nowrap text-xs">
-                            {/* "Which way" the attendance was given — GPS (Remote
-                                Attendance, Self Service Check In/Out) or ZKT
-                                (the office biometric device). */}
-                            {r.source === 'office' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
-                                ZKT
-                              </span>
-                            ) : r.source === 'site' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
-                                Team
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
-                                GPS
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
-                            {r.source === 'office' || r.source === 'site' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
+                          <td className="px-3 py-2.5 text-xs">
+                            <div className="font-semibold text-slate-900 whitespace-nowrap">{r.user_name}</div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+                              {/* "Which way" the attendance was given — GPS (Remote Attendance), ZKT (office device) or Team. */}
+                              {r.source === 'office' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
+                                  ZKT
+                                </span>
+                              ) : r.source === 'site' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
+                                  Team
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                                  GPS
+                                </span>
+                              )}
+                              {r.source !== 'office' && r.source !== 'site' && r.project_name && <span className="truncate max-w-[150px]" title={r.project_name}>{r.project_name}</span>}
+                            </div>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-xs">
                             {r.check_in_at ? (
@@ -5234,16 +5230,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   ) : (
                     <table className="w-full text-xs">
                     <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                      <tr><th className="px-4 py-2.5">Name</th><th className="px-3 py-2.5">ID</th><th className="px-3 py-2.5">Designation</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                      <tr><th className="px-3 py-2.5">Name</th><th className="px-3 py-2.5">Department / Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {dailyReport.on_holiday.map((u: any) => (
                         <tr key={u.user_id}>
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{u.user_name}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">{u.employee_code || '—'}</td>
-                          <td className="px-3 py-2.5">{u.designation || '—'}</td>
-                          <td className="px-3 py-2.5">{u.department || '—'}</td>
-                          <td className="px-3 py-2.5">{u.branch || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium whitespace-nowrap">{u.user_name}</div>
+                            <div className="text-[10px] text-slate-500">{[u.employee_code, u.designation].filter(Boolean).join(' · ') || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div>{u.department || '—'}</div>
+                            {u.branch && <div className="text-[10px] text-slate-500">{u.branch}</div>}
+                          </td>
                           <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
                           <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
                         </tr>
@@ -5256,16 +5255,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 ) : (
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                      <tr><th className="px-4 py-2.5">Name</th><th className="px-3 py-2.5">ID</th><th className="px-3 py-2.5">Designation</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                      <tr><th className="px-3 py-2.5">Name</th><th className="px-3 py-2.5">Department / Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {dailyReport.absent.map((u: any) => (
                         <tr key={u.user_id}>
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{u.user_name}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">{u.employee_code || '—'}</td>
-                          <td className="px-3 py-2.5">{u.designation || '—'}</td>
-                          <td className="px-3 py-2.5">{u.department || '—'}</td>
-                          <td className="px-3 py-2.5">{u.branch || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium whitespace-nowrap">{u.user_name}</div>
+                            <div className="text-[10px] text-slate-500">{[u.employee_code, u.designation].filter(Boolean).join(' · ') || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div>{u.department || '—'}</div>
+                            {u.branch && <div className="text-[10px] text-slate-500">{u.branch}</div>}
+                          </td>
                           <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
                           <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
                         </tr>
