@@ -493,6 +493,12 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         } catch {
           // Non-fatal — see comment above.
         }
+        // Same for the Check In/Out per-user Department scope (claim_department_access).
+        try {
+          await queryDB("UPDATE claim_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+        } catch {
+          // Non-fatal.
+        }
         // Same for the Duty Roster's per-user Department scope
         // (duty_roster_department_access, RosterRoutes.ts).
         try {

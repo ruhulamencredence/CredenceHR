@@ -184,6 +184,7 @@
   "bill_claim_rule_versions",
   "bill_claims",
   "claim_approval_signatures",
+  "claim_department_access",
   "claims",
   "conveyance_bill_items",
   "conveyance_bills",

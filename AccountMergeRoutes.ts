@@ -36,6 +36,7 @@ const ACCESS_TABLES = new Set([
   "tracking_department_access",
   "bill_claim_department_access",
   "duty_roster_department_access",
+  "claim_department_access",
   "leave_application_department_access",
   "attendance_report_department_access",
   "user_app_access"

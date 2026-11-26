@@ -344,3 +344,5 @@ Joiner & Probation নিয়ম বদলানো (`PUT /api/leave-policies/
 
 ## Notice "Send again" সবাইকে (২৫ নভেম্বর)
 `POST /api/notices/:id/remind` `{ to: "everyone" }` আগের reminder-এর মতোই Notices মডিউল ও `notice_read_report` layer চায় (মালিকের সিদ্ধান্তে আলাদা অনুমতি নয়), শুধু live notice-এ চলে, আর কেবল notice যাদের জন্য তাদের কাছেই push যায় — নতুন কেউ যোগ হয় না, কারও read রেকর্ড বদলায় না। UI পাঠানোর আগে মোট সংখ্যা দেখিয়ে নিশ্চিত করে।
+
+**Check In/Out Department সীমা (২৬ নভেম্বর):** Admin Panel-এর Check In/Out তালিকা (GPS অবস্থান, remarks সহ) এখন চাইলে Department অনুযায়ী সীমিত করা যায় (`claim_department_access`, মালিক Module Access-এ ঠিক করেন)। সীমা সার্ভারে SQL-এ বসে — তালিকা আর মোছা দুটোতেই — তাই UI লুকিয়ে নয়, API-ই অন্য Department-এর রেকর্ড দেয় না। সারি না থাকলে আগের আচরণ (সব Department)।

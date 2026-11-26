@@ -199,6 +199,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["asset_requisition_events", ["requisition_id", "asset_requisitions"]],
   ["attendance_report_department_access", ["user_id", "users"]],
   ["duty_roster_department_access", ["user_id", "users"]],
+  ["claim_department_access", ["user_id", "users"]],
   ["guard_post_needs", ["post_id", "guard_posts"]],
   ["department_teams", ["department_id", "departments"]],
   ["department_team_members", ["team_id", "department_teams"]],

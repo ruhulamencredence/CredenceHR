@@ -21,6 +21,32 @@ export interface RegisterMovementClaimRoutesDeps {
 
 export function registerMovementClaimRoutes(app: Express, deps: RegisterMovementClaimRoutesDeps) {
   const { authenticateToken, haversineMeters, queryDB, requireAdmin, requireModule, requireMovementClaimAccess, toDateOnlyString } = deps;
+
+  // Department scope for the Admin Panel Check In/Out tab (same convention as
+  // bill_claim_department_access): ticked Departments = this account sees (and
+  // may remove) only those Departments' Check In/Out; no rows = every
+  // Department, exactly like granting the module alone. A Superadmin is never
+  // restricted. Set in Users -> Module Access -> Check In/Out.
+  queryDB(
+    `CREATE TABLE IF NOT EXISTS claim_department_access (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      department VARCHAR(150) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY unique_user_department (user_id, department),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`
+  ).catch(() => {});
+  async function claimDeptScope(user: any): Promise<string[] | null> {
+    if (user?.role === "superadmin") return null;
+    try {
+      const rows: any[] = (await queryDB("SELECT department FROM claim_department_access WHERE user_id = ?", [user.id])) || [];
+      return rows.length ? rows.map((r) => String(r.department)) : null;
+    } catch {
+      return null;
+    }
+  }
+  const inScopeSql = (scope: string[]) => `user_id IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL AND department IN (${scope.map(() => "?").join(",")}))`;
   // 2c. Check In/Out — a free-form (no fixed Project geofence) point A -> point
   // B travel check-in/check-out: a User checks in with a Purpose (why/where
   // they're heading out for office work), then later checks out once they reach
@@ -155,6 +181,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
     try {
       // ?page=&limit= : one page, filtered in SQL — { rows, total, page, limit }. (The unpaged
       // call below stops at the newest 1,000 claims, so it can't show anything older.)
+      const scope = await claimDeptScope(req.user);
       if (req.query.limit !== undefined) {
         const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
         const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
@@ -176,6 +203,10 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
           where.push("DATE(c.check_in_at) <= ?");
           params.push(String(req.query.to));
         }
+        if (scope) {
+          where.push(`c.${inScopeSql(scope)}`);
+          params.push(...scope);
+        }
         const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
         const [totalRows, pageRows]: any[] = await Promise.all([
           queryDB(`SELECT COUNT(*) AS n FROM claims c ${w}`, params),
@@ -187,7 +218,8 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         return res.json({ rows: pageRows, total: Number(totalRows[0]?.n || 0), page, limit });
       }
       const rows = await queryDB(
-        "SELECT c.*, u.name AS user_name FROM claims c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.id DESC"
+        `SELECT c.*, u.name AS user_name FROM claims c LEFT JOIN users u ON u.id = c.user_id ${scope ? `WHERE c.${inScopeSql(scope)}` : ""} ORDER BY c.id DESC`,
+        scope || []
       );
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const from = req.query.from ? String(req.query.from) : null;
@@ -212,10 +244,13 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
 
   // Admin cleanup — remove a mistaken/duplicate claim entirely (not a soft delete,
   // since a claim carries no downstream data the way an MPR Entry does).
-  app.delete("/api/claims/:id", authenticateToken, requireAdmin, requireModule("claims"), async (req, res) => {
+  app.delete("/api/claims/:id", authenticateToken, requireAdmin, requireModule("claims"), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const result = await queryDB("DELETE FROM claims WHERE id = ?", [id]);
+      const scope = await claimDeptScope(req.user);
+      const result = scope
+        ? await queryDB(`DELETE FROM claims WHERE id = ? AND ${inScopeSql(scope)}`, [id, ...scope])
+        : await queryDB("DELETE FROM claims WHERE id = ?", [id]);
       if (result.affectedRows === 0) return res.status(404).json({ error: "Claim not found" });
       res.json({ success: true });
     } catch (err: any) {
