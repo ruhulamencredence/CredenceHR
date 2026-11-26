@@ -449,7 +449,7 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `timezone` | varchar(80) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 | `picture_senders_json` | text | হ্যাঁ |  | |
-| `send_via_server` | tinyint(1) | না | default 0 | |
+| `send_via_server` | tinyint(1) | না | default 1 | |
 
 ### `mail_signature_images`
 
