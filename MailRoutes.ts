@@ -306,6 +306,20 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_server", "ALTER TABLE mail_messages ADD COLUMN via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("mail_settings.send_via_server", "ALTER TABLE mail_settings ADD COLUMN send_via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // "Send through the mail server" is on by default for everyone (26 Nov 2026,
+  // owner's decision); a person who wants an inside (internal) mail unticks it,
+  // or turns off "Always use this for new mails". Once: while the column's
+  // default is still 0, nobody had chosen it yet (the option is a day old), so
+  // everyone moves to 1 and the default becomes 1.
+  try {
+    const [col]: any = await dbPool.query("SELECT COLUMN_DEFAULT AS d FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'mail_settings' AND column_name = 'send_via_server'");
+    if (col.length && String(col[0].d ?? col[0].D) === "0") {
+      await dbPool.query("UPDATE mail_settings SET send_via_server = 1");
+      await dbPool.query("ALTER TABLE mail_settings ALTER COLUMN send_via_server SET DEFAULT 1");
+    }
+  } catch (e: any) {
+    console.warn(`⚠️ Credence Mail (send_via_server default): ${e.message}`);
+  }
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // A colleague who hasn't connected their mailbox in Credence Mail (or
   // can't open it): 'server' = the mail goes through the mail server to
@@ -869,7 +883,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       language: r.language || "en",
       timezone: r.timezone || "Asia/Dhaka",
       // The person's own default for "Send through the mail server" in Compose.
-      sendViaServer: !!Number(r.send_via_server),
+      sendViaServer: r.send_via_server == null ? true : !!Number(r.send_via_server),
       // What the Credence design signature links to (Mail Administration -> Signature).
       signatureLinks: (await systemSettings()).signatureLinks
     };
