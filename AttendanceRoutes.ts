@@ -1343,7 +1343,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // ?project_id= still work. Empty = no filter on that.
   //   project_ids : attendance given at any of those Projects (as before for one);
   //   branch_ids  : people whose own Branch is one of those;
-  //   branch_type : people whose Branch is of that type (no Branch = Head Office).
+  //   branch_type : people whose Branch is of that type (no Branch = Head Office, so with
+  //                 Head Office picked, people with no Branch stay in even when branch_ids lists the Branches).
   const listOf = (v: any) => String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
   function reportFilters(query: any) {
     const departments = [...new Set([...listOf(query.departments), ...listOf(query.department)])];
@@ -1446,7 +1447,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         (!user_id || u.id === user_id) &&
         (!filt.departments.length || filt.departments.includes(departmentByUserId.get(u.id) || "")) &&
         (!branchInfo || !filt.branchType || (branchInfo.get(Number(u.id))?.type || "head_office") === filt.branchType) &&
-        (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId))) &&
+        (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId)) || (filt.branchType === "head_office" && branchInfo.get(Number(u.id))?.branchId == null)) &&
         statusMatches(u.id) &&
         // Department-wise scope, unfiltered-request case: `department` was
         // already validated to be within deptScope above when given, so
@@ -1823,7 +1824,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           (!user_id || u.id === user_id) &&
           (!filt.departments.length || filt.departments.includes(departmentByUserId.get(u.id) || "")) &&
           (!branchInfo || !filt.branchType || (branchInfo.get(Number(u.id))?.type || "head_office") === filt.branchType) &&
-          (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId))) &&
+          (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId)) || (filt.branchType === "head_office" && branchInfo.get(Number(u.id))?.branchId == null)) &&
           statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case — see the monthly
           // report route's identical comment above.

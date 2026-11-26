@@ -4808,7 +4808,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">Office / Project</label>
                 <SearchSelect
                   value={reportBranchType}
-                  onChange={(e) => setReportBranchType(e.target.value as '' | 'head_office' | 'project_site')}
+                  onChange={(e) => {
+                    // Choosing Head Office / Project Side ticks every Branch / Site of that kind
+                    // (untick any you don't want); All clears the Branch / Site pick.
+                    const kind = e.target.value as '' | 'head_office' | 'project_site';
+                    setReportBranchType(kind);
+                    setReportBranchFilter(kind ? (branches as any[]).filter((b) => !Number(b.is_archived) && b.branch_type === kind).map((b) => String(b.id)) : []);
+                    setReportProjectFilter([]);
+                  }}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">All</option>
@@ -4833,7 +4840,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <span className="block text-[10px] font-semibold text-slate-500 mb-1">Project (check-ins at)</span>
                 <MultiSelectFilter
                   label="Project"
-                  options={projects.filter((p) => !Number((p as any).is_archived)).map((p) => ({ value: String(p.id), label: p.project_name }))}
+                  options={projects
+                    .filter((p) => !Number((p as any).is_archived) && (!reportBranchType || (p as any).linked_branch_type === reportBranchType))
+                    .map((p) => ({ value: String(p.id), label: p.project_name }))}
                   selected={reportProjectFilter}
                   onChange={setReportProjectFilter}
                 />
