@@ -14,6 +14,7 @@ import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 import { confirmDialog } from '../lib/confirmDialog';
+import { AttachmentViewer } from './AttachmentViewer';
 
 interface BillClaimsReviewPanelProps {
   token: string;
@@ -36,6 +37,8 @@ export const BillClaimsReviewPanel: React.FC<BillClaimsReviewPanelProps> = ({ to
   const [statusFilter, setStatusFilter] = useState<'pending' | 'all'>('pending');
   const [expanded, setExpanded] = useState(true);
   const [actingId, setActingId] = useState<number | null>(null);
+  // The attachment opens in the app's own viewer (a plain link carries no sign-in).
+  const [viewingFileId, setViewingFileId] = useState<BillClaim | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   const [error, setError] = useState('');
 
@@ -400,14 +403,13 @@ export const BillClaimsReviewPanel: React.FC<BillClaimsReviewPanelProps> = ({ to
                         </div>
                       )}
                       {c.has_file && (
-                        <a
-                          href={apiUrl(`/api/bill-claims/${c.id}/file`)}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => setViewingFileId(c)}
                           className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold mt-1 hover:underline"
                         >
                           <Paperclip className="w-3 h-3" /> View attachment
-                        </a>
+                        </button>
                       )}
                     </>
                   )}
@@ -474,6 +476,9 @@ export const BillClaimsReviewPanel: React.FC<BillClaimsReviewPanelProps> = ({ to
           claim={refToClaimRecord(viewingRef.ref, viewingRef.userId, viewingRef.userName)}
           onClose={() => setViewingRef(null)}
         />
+      )}
+      {viewingFileId && (
+        <AttachmentViewer token={token} src={`/api/bill-claims/${viewingFileId.id}/file`} name={viewingFileId.file_name || 'Attachment'} onClose={() => setViewingFileId(null)} />
       )}
     </div>
   );

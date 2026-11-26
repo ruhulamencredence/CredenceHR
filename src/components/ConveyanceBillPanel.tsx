@@ -30,6 +30,7 @@ import { NewBillClaimModal } from './NewBillClaimModal';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { SearchSelect } from './Combobox';
+import { AttachmentViewer } from './AttachmentViewer';
 import { personLabel } from '../lib/personLabel';
 interface ConveyanceBillPanelProps {
   token: string;
@@ -1213,6 +1214,8 @@ const AdminBillClaimDetailModal: React.FC<{
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState('');
   const [viewingRef, setViewingRef] = useState<BillClaimReference | null>(null);
+  // The attachment opens in the app's own viewer (a plain link carries no sign-in).
+  const [viewingFile, setViewingFile] = useState(false);
 
   const hasRefs = !!claim.claim_refs && claim.claim_refs.length > 0;
   const hasItems = !!claim.items && claim.items.length > 0;
@@ -1489,14 +1492,16 @@ const AdminBillClaimDetailModal: React.FC<{
               )}
 
               {claim.has_file && (
-                <a
-                  href={apiUrl(`/api/bill-claims/${claim.id}/file`)}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => setViewingFile(true)}
                   className="inline-flex items-center gap-1 text-[11px] text-blue-600 font-semibold hover:underline"
                 >
                   <Paperclip className="w-3 h-3" /> View attachment
-                </a>
+                </button>
+              )}
+              {viewingFile && (
+                <AttachmentViewer token={token} src={`/api/bill-claims/${claim.id}/file`} name={claim.file_name || 'Attachment'} onClose={() => setViewingFile(false)} />
               )}
 
               {claim.status !== 'pending' && claim.admin_remarks && (
