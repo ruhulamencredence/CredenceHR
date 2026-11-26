@@ -1336,7 +1336,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             const isHoliday = !!d.day_type;
             return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '-';
           });
-          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
+          return [u.department ? `${u.user_name} (${u.department})` : u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
         }),
         styles: { ...STD_STYLES, fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
         columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
@@ -5027,7 +5027,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <tbody className="divide-y divide-slate-100 text-sm">
                     {monthlyReport.users.map((u: any) => (
                       <tr key={u.user_id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}{u.department && <span className="block text-[10px] font-normal text-slate-400">{u.department}</span>}</td>
                         {u.days.map((d: any) => {
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
