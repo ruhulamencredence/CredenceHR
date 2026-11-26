@@ -234,7 +234,7 @@ export const LeavePhoneCard: React.FC<{ app: LeaveApplication; typeLabel: string
       sub={`${dates} ${end.slice(0, 4)} · ${days} day${days === 1 ? '' : 's'}`}
       chips={[{ label: st.label, tone }]}
     >
-      {a.purpose && <p className="text-xs text-slate-700 truncate">{a.purpose}</p>}
+      {a.purpose && <p className="text-xs text-slate-700 whitespace-pre-wrap break-words"><span className="font-semibold">Purpose:</span> {a.purpose}</p>}
       <div className="text-[11px] flex items-start gap-1.5" style={{ color: a.status === 'pending' ? '#92400e' : a.status === 'rejected' ? '#9f1239' : '#3f3f46' }}>
         <Icon className="w-3.5 h-3.5 shrink-0 mt-px" style={a.status === 'approved' ? { color: '#16a34a' } : undefined} />
         <span className="min-w-0 break-words">{note}</span>
