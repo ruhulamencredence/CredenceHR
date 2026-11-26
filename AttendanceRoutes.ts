@@ -1723,7 +1723,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       };
     });
 
-    result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+    // Department by department (people with no Department last), then by name.
+    result.sort((a: any, b: any) => {
+      if (!a.department !== !b.department) return a.department ? -1 : 1;
+      return String(a.department || "").localeCompare(String(b.department || "")) || a.user_name.localeCompare(b.user_name);
+    });
     // ?slim=dashboard : the Admin Dashboard only needs each day's Present / Absent totals
     // (worked out here, as day_counts) and today's + yesterday's full cell per person
     // (check-in / out times); every other day's cell is sent as null.
