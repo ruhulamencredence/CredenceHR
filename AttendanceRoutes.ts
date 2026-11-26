@@ -1406,7 +1406,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
     const [projects, users] = await Promise.all([
       queryDB("SELECT * FROM projects"),
-      queryDB("SELECT id, name, email, role, created_at FROM users")
+      queryDB("SELECT id, name, email, role, created_at, COALESCE(is_blocked, 0) AS is_blocked FROM users")
     ]);
     const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
@@ -1438,6 +1438,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
       if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
     }
+    // A blocked login (Users -> Block) can't work: it counts like a left employee,
+    // not under "Active" and not marked Absent.
+    for (const u of users) if (Number(u.is_blocked)) inactiveUserIds.add(Number(u.id));
     const statusMatches = (id: number) =>
       empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
@@ -1792,7 +1795,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // still filtered by date below.
       const rows = await queryDB("SELECT * FROM attendance WHERE attendance_date = ?", [date]);
       const projects = await queryDB("SELECT * FROM projects");
-      const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
+      const users = await queryDB("SELECT id, name, email, role, created_at, COALESCE(is_blocked, 0) AS is_blocked FROM users");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
       // Same Employee Directory lookup GET /api/attendance/report/monthly and
@@ -1813,6 +1816,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
         if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
       }
+      for (const u of users) if (Number(u.is_blocked)) inactiveUserIds.add(Number(u.id));
       const statusMatches = (id: number) =>
         empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
