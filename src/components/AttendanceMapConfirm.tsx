@@ -9,7 +9,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
+import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, GOOD_ACCURACY_M, type AttendanceFix } from '../lib/attendanceFix';
 import { X, MapPin, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl } from '../lib/api';
@@ -112,7 +112,8 @@ const nowLabel = () => new Date().toLocaleTimeString('en-US', { hour: 'numeric',
 // browser permission prompt inside the WebView), plain navigator.geolocation
 // on the web build. Kept as its own copy here (not imported) matching the
 // existing convention in this codebase of each file owning its own copy.
-async function getCurrentCoords(): Promise<AttendanceFix> {
+// fresh = a new reading only (no fix the phone kept from earlier).
+async function getCurrentCoords(fresh = false): Promise<AttendanceFix> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {
@@ -131,10 +132,10 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
       throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
     }
     // The APK's own fix says whether it is fake GPS (mock location).
-    const fix = await nativeAttendanceFix();
+    const fix = await nativeAttendanceFix(fresh ? 0 : 30000);
     if (fix) return fix;
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
   }
 
   return new Promise((resolve, reject) => {
@@ -143,9 +144,9 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }),
       () => reject(new Error("Couldn't get your location. Please allow location access and try again.")),
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
 }
@@ -190,6 +191,12 @@ export default function AttendanceMapConfirm({
   const [liveCoords, setLiveCoords] = useState(coords);
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
+  // How sure the phone is of the spot (metres). Until it is within
+  // GOOD_ACCURACY_M the map keeps reading GPS (up to REFINE_MS) and Submit
+  // waits, so a coarse first fix can't mark someone "outside".
+  const accuracyCircleRef = useRef<L.Circle | null>(null);
+  const goodFix = (c: AttendanceFix) => c.accuracy != null && c.accuracy <= GOOD_ACCURACY_M;
+  const [refining, setRefining] = useState(() => !goodFix(coords));
   // Every OTHER Project with a set site location, for context on this same
   // map (muted gray — see otherProjectPinIcon). Fetched from GET
   // /api/projects/all, which is open to any signed-in role and doesn't touch
@@ -243,6 +250,15 @@ export default function AttendanceMapConfirm({
     userMarkerRef.current = L.marker([liveCoords.latitude, liveCoords.longitude], { icon: userDotIcon })
       .addTo(map)
       .bindPopup('You are here');
+    // The phone's own "somewhere in here" circle around the blue dot.
+    accuracyCircleRef.current = L.circle([liveCoords.latitude, liveCoords.longitude], {
+      radius: Math.max(1, Number(liveCoords.accuracy) || 0),
+      color: '#2563eb',
+      weight: 1,
+      fillColor: '#3b82f6',
+      fillOpacity: 0.08,
+      interactive: false
+    }).addTo(map);
 
     // Show the whole attendance area and where you are (the status line
     // covers the top of the map, hence the larger top padding).
@@ -263,6 +279,7 @@ export default function AttendanceMapConfirm({
       map.remove();
       mapRef.current = null;
       userMarkerRef.current = null;
+      accuracyCircleRef.current = null;
       circleRef.current = null;
       otherProjectsLayerRef.current = null;
     };
@@ -325,6 +342,56 @@ export default function AttendanceMapConfirm({
     otherProjectsLayerRef.current = layer;
   }, [otherProjects]);
 
+  // Shows a fix: blue dot, its accuracy circle, and hands it to the parent
+  // (which re-picks the Project / off-site from it; that fix is what is sent).
+  const showFix = (f: AttendanceFix) => {
+    setLiveCoords(f);
+    onCoordsChange?.(f);
+    userMarkerRef.current?.setLatLng([f.latitude, f.longitude]);
+    accuracyCircleRef.current?.setLatLng([f.latitude, f.longitude]).setRadius(Math.max(1, Number(f.accuracy) || 0));
+  };
+
+  // A coarse first fix (cell towers / Wi-Fi) is often hundreds of metres off:
+  // read fresh GPS every 1.5 s, keep the most accurate, stop once it is within
+  // GOOD_ACCURACY_M or after REFINE_MS. A fix without an accuracy figure (some
+  // browsers) is taken once, as before.
+  useEffect(() => {
+    if (!refining) return;
+    let gone = false;
+    const REFINE_MS = 15000;
+    const start = Date.now();
+    let best = coords;
+    let flat = 0;
+    (async () => {
+      while (!gone && Date.now() - start < REFINE_MS) {
+        try {
+          const f = await getCurrentCoords(true);
+          if (gone) return;
+          if (f.mock) {
+            setLocateError(MOCK_LOCATION_MESSAGE);
+            break;
+          }
+          if ((f.accuracy ?? Infinity) < (best.accuracy ?? Infinity) - 2 || best.accuracy == null) {
+            best = f;
+            flat = 0;
+            showFix(f);
+          } else flat += 1;
+          // Good enough, no accuracy figure, or not getting any better (a
+          // desktop with Wi-Fi only): stop waiting.
+          if (goodFix(best) || f.accuracy == null || flat >= 3) break;
+        } catch {
+          break;
+        }
+        await new Promise((r) => window.setTimeout(r, 1500));
+      }
+      if (!gone) setRefining(false);
+    })();
+    return () => {
+      gone = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Re-reads GPS (same permission/flow as the initial fix) and moves the
   // existing marker + recenters the map in place, instead of forcing the user
   // to cancel and re-tap Check In/Out just to pick up a better fix — useful
@@ -334,11 +401,9 @@ export default function AttendanceMapConfirm({
     setLocating(true);
     setLocateError(null);
     try {
-      const fresh = await getCurrentCoords();
+      const fresh = await getCurrentCoords(true);
       if (fresh.mock) throw new Error(MOCK_LOCATION_MESSAGE);
-      setLiveCoords(fresh);
-      onCoordsChange?.(fresh);
-      userMarkerRef.current?.setLatLng([fresh.latitude, fresh.longitude]);
+      showFix(fresh);
       if (mapRef.current) {
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
@@ -361,42 +426,6 @@ export default function AttendanceMapConfirm({
     }
   };
 
-  // The phone's first fix is often a coarse one (cell towers / Wi-Fi, a few
-  // hundred metres off) and the map used to keep it until the person pressed
-  // the locate button — so people standing inside the area were shown "491 m
-  // away". While the position reads as outside the area, quietly read GPS again
-  // a few times (3 s apart) and move the marker; stops at once when it is inside,
-  // when the person is already submitting, or after 4 tries. The fix that is
-  // sent is always the last one shown, and the server still checks it.
-  const autoTriesRef = useRef(0);
-  const insideRef = useRef<boolean | null>(null);
-  insideRef.current = inside;
-  const busyRef = useRef(false);
-  busyRef.current = locating || submitting;
-  useEffect(() => {
-    if (!hasRadius || offsite) return;
-    let gone = false;
-    const timer = window.setInterval(() => {
-      if (gone || insideRef.current !== false || busyRef.current || autoTriesRef.current >= 4) {
-        if (insideRef.current === true || autoTriesRef.current >= 4) window.clearInterval(timer);
-        return;
-      }
-      autoTriesRef.current += 1;
-      getCurrentCoords()
-        .then((fresh) => {
-          if (gone || fresh.mock || busyRef.current) return;
-          setLiveCoords(fresh);
-          onCoordsChange?.(fresh);
-          userMarkerRef.current?.setLatLng([fresh.latitude, fresh.longitude]);
-        })
-        .catch(() => undefined);
-    }, 3000);
-    return () => {
-      gone = true;
-      window.clearInterval(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRadius, offsite]);
 
 
   // Rendered via a portal straight onto document.body instead of in place —
@@ -410,15 +439,19 @@ export default function AttendanceMapConfirm({
   // portal sidesteps that ancestor entirely, so this now behaves like a real
   // full-screen modal on every Android version.
   // One line on the map: where you stand against the area.
-  const status: { tone: 'ok' | 'warn' | 'bad' | 'plain'; text: string } = !hasSite
+  const accText = liveCoords.accuracy != null ? ` (GPS ±${Math.round(liveCoords.accuracy)} m)` : '';
+  const poorFix = liveCoords.accuracy != null && liveCoords.accuracy > GOOD_ACCURACY_M;
+  const status: { tone: 'ok' | 'warn' | 'bad' | 'plain'; text: string } = refining && !inside
+    ? { tone: 'plain', text: `Finding your exact location…${accText}` }
+    : !hasSite
     ? { tone: 'plain', text: `No site location set for ${project.project_name}` }
     : !hasRadius
       ? { tone: 'plain', text: `${formatDistance(distance as number)} from ${project.location_label || project.project_name} · no area set` }
       : inside
         ? { tone: 'ok', text: `You're inside ${project.project_name}'s area · ${formatDistance(distance as number)}` }
         : offsite
-          ? { tone: 'warn', text: `${formatDistance(distance as number)} from ${project.project_name} — goes for approval` }
-          : { tone: 'bad', text: `${formatDistance(distance as number)} away — outside the ${formatDistance(Number(project.location_radius))} area` };
+          ? { tone: 'warn', text: `${formatDistance(distance as number)} from ${project.project_name} — goes for approval${poorFix ? `${accText}. GPS is weak here — if you are at the site, step near a window or outside, turn on Wi-Fi, then tap ⊙` : ''}` }
+          : { tone: 'bad', text: `${formatDistance(distance as number)} away — outside the ${formatDistance(Number(project.location_radius))} area${poorFix ? `${accText}. GPS is weak here — step near a window or outside, turn on Wi-Fi, then tap ⊙` : ''}` };
   const toneCls = {
     ok: 'bg-emerald-50/95 text-emerald-700',
     warn: 'bg-orange-50/95 text-orange-700',
@@ -538,11 +571,11 @@ export default function AttendanceMapConfirm({
               <button
                 type="button"
                 onClick={() => onConfirm(remarks.trim())}
-                disabled={submitting || (offsite && !remarks.trim())}
+                disabled={submitting || refining || (offsite && !remarks.trim())}
                 className="liquid-glass-button h-12 rounded-full text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:active:scale-100"
               >
-                {submitting && <Spinner size={16} />}
-                Submit
+                {(submitting || refining) && <Spinner size={16} />}
+                {refining ? 'Locating…' : 'Submit'}
               </button>
             </div>
           </div>
