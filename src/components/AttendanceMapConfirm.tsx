@@ -361,6 +361,43 @@ export default function AttendanceMapConfirm({
     }
   };
 
+  // The phone's first fix is often a coarse one (cell towers / Wi-Fi, a few
+  // hundred metres off) and the map used to keep it until the person pressed
+  // the locate button — so people standing inside the area were shown "491 m
+  // away". While the position reads as outside the area, quietly read GPS again
+  // a few times (3 s apart) and move the marker; stops at once when it is inside,
+  // when the person is already submitting, or after 4 tries. The fix that is
+  // sent is always the last one shown, and the server still checks it.
+  const autoTriesRef = useRef(0);
+  const insideRef = useRef<boolean | null>(null);
+  insideRef.current = inside;
+  const busyRef = useRef(false);
+  busyRef.current = locating || submitting;
+  useEffect(() => {
+    if (!hasRadius || offsite) return;
+    let gone = false;
+    const timer = window.setInterval(() => {
+      if (gone || insideRef.current !== false || busyRef.current || autoTriesRef.current >= 4) {
+        if (insideRef.current === true || autoTriesRef.current >= 4) window.clearInterval(timer);
+        return;
+      }
+      autoTriesRef.current += 1;
+      getCurrentCoords()
+        .then((fresh) => {
+          if (gone || fresh.mock || busyRef.current) return;
+          setLiveCoords(fresh);
+          onCoordsChange?.(fresh);
+          userMarkerRef.current?.setLatLng([fresh.latitude, fresh.longitude]);
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => {
+      gone = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRadius, offsite]);
+
 
   // Rendered via a portal straight onto document.body instead of in place —
   // this component gets mounted deep inside UserPanel's dashboard tree,
