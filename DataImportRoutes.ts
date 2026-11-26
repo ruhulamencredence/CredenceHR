@@ -196,6 +196,8 @@ export const IMPORT_KINDS: Kind[] = [
       { key: "purpose", label: "Purpose", type: "text", aliases: ["visited company"], example: "Site visit - Mirpur", note: "Empty = \"Movement\"" },
       { key: "distance_km", label: "Distance (km)", type: "number", aliases: ["distance", "km"], example: 12.5 },
       { key: "remarks", label: "Remarks", type: "text", aliases: ["check in remarks"] },
+      { key: "location", label: "Location (Latitude, Longitude)", type: "text", aliases: ["location", "coordinates", "latlng", "lat lng", "check in location"], example: "23.7196951, 90.4238284", note: "Shown on the map; used for Check In and, if the row has a Check Out, for Check Out too (unless Check Out Location is given)" },
+      { key: "check_out_location", label: "Check Out Location", type: "text", aliases: ["check out coordinates"], note: "Latitude, Longitude - only when different from Location" },
       { key: "check_in_place", label: "Check In Address", type: "text", aliases: ["check in place"] },
       { key: "check_out_remarks", label: "Check Out Remarks", type: "text" },
       { key: "check_out_place", label: "Check Out Address", type: "text", aliases: ["check out place"] }
@@ -971,6 +973,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const dist = str(v.distance_km) ? parseNumber(v.distance_km) : null;
         if (dist !== null && (!Number.isFinite(dist) || dist < 0)) fail(`Distance "${str(v.distance_km)}" isn't a number.`);
         const inAt = tin ? `${date} ${tin}` : tout ? `${outDate} ${tout}` : `${date} 00:00:00`;
+        // "latitude, longitude" (as copied from a map) -> the two numbers, or a clear row error.
+        const coords = (raw: any, label: string): [number, number] | null => {
+          const t = str(raw);
+          if (!t) return null;
+          const m = /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/.exec(t);
+          const la = m ? Number(m[1]) : NaN;
+          const lo = m ? Number(m[2]) : NaN;
+          if (!m || Math.abs(la) > 90 || Math.abs(lo) > 180) fail(`${label} "${t}" isn't "latitude, longitude" (for example 23.7196951, 90.4238284).`);
+          return [la, lo];
+        };
+        const locIn = coords(v.location, "Location");
+        const locOut = coords(v.check_out_location, "Check Out Location") || (tout ? locIn : null);
         const who = `${emp.name} (${str(v.employee_id)})`;
         if (prep.existing.some((c: any) => Number(c.user_id) === userId && String(c.check_in_at).slice(0, 16) === inAt.slice(0, 16)))
           return { status: "skip", message: `Already has a claim checked in at ${inAt.slice(0, 16)}.`, employee: who };
@@ -981,8 +995,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           // time) — an imported 'open' claim would stop the employee from
           // checking in to a new one.
           await queryDB(
-            `INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_remarks, check_out_at, check_out_remarks, distance_km)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_remarks, check_out_at, check_out_remarks, distance_km, check_in_lat, check_in_lng, check_out_lat, check_out_lng)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               userId,
               str(v.purpose).slice(0, 255) || "Movement",
@@ -991,7 +1005,11 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
               [note(str(v.remarks), str(v.check_in_place)) || "Imported from Excel", missing].filter(Boolean).join("\n"),
               tout ? `${outDate} ${tout}` : null,
               tout ? note(str(v.check_out_remarks), str(v.check_out_place)) : null,
-              dist
+              dist,
+              locIn ? locIn[0] : null,
+              locIn ? locIn[1] : null,
+              locOut ? locOut[0] : null,
+              locOut ? locOut[1] : null
             ]
           );
         }

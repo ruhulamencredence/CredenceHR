@@ -1387,3 +1387,7 @@ Add Date-এ এখন From আর To (ঐচ্ছিক)। To দিলে Fr
 ## Check In/Out (Admin Panel): Department অনুযায়ী সীমা (২৬ নভেম্বর)
 
 Bill Claim-এর মতো Check In/Out মডিউলেও এখন Users → Module Access-এ "Departments on Check In/Out" আছে (`claim_department_access`, `GET/PUT /api/users/:id/claim-departments`)। কোনো Department না বাছলে আগের মতোই সব Department; বাছলে সেই অ্যাকাউন্ট `GET /api/claims` (পাতা-ভাগ করা ও না-করা দুই রকমেই) আর `DELETE /api/claims/:id`-এ শুধু ওই Department-গুলোর কর্মীদের Check In/Out দেখে ও মোছে — সার্ভারে SQL-এ ছাঁকা। Supervisor যে Department-এ টিম চালান সেটা প্রথমবার আগে থেকে tick করা থাকে। Superadmin কখনো সীমিত নয়। Department-এর নাম বদলালে, অ্যাকাউন্ট মুছলে বা merge করলে এই সারিও সঙ্গে চলে।
+
+## HR Data Import: Check In/Out-এ Location (২৬ নভেম্বর)
+
+Check In/Out ইম্পোর্ট ফাইলে এখন ঐচ্ছিক "Location (Latitude, Longitude)" কলাম আছে (`23.7196951, 90.4238284` ধরনের, ম্যাপ থেকে কপি করা)। এটা Check In-এর `check_in_lat/lng`-এ যায়, আর সারিতে Check Out থাকলে Check Out-এও (আলাদা "Check Out Location" দিলে সেটা)। ভুল ফরম্যাট হলে ওই সারি পরিষ্কার বার্তায় ব্যর্থ হয়, বাকিগুলো চলে। কলাম না থাকলে আগের মতোই, ম্যাপে পিন থাকে না। আগের মতো `import_movement_claims` layer লাগে (`DataImportRoutes.ts`)।
