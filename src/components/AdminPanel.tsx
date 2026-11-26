@@ -40,6 +40,7 @@ import { retryImport } from '../lib/chunkReload';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { SearchSelect } from './Combobox';
 import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
 import { ProjectAccessPopup } from './ProjectAccessPopup';
@@ -1169,9 +1170,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
   // This just switches which one is visible; both hit their own APIs.
   const [approvalsSection, setApprovalsSection] = useState<'queue' | 'templates'>('queue');
-  const [reportProjectFilter, setReportProjectFilter] = useState('');
+  // Month Wise / Date Wise filters: several Projects, Departments or Branches can be ticked at once.
+  const [reportProjectFilter, setReportProjectFilter] = useState<string[]>([]);
+  const [reportBranchFilter, setReportBranchFilter] = useState<string[]>([]);
+  const [reportBranchType, setReportBranchType] = useState<'' | 'head_office' | 'project_site'>('');
   const [reportEmployeeFilter, setReportEmployeeFilter] = useState('');
-  const [reportDepartmentFilter, setReportDepartmentFilter] = useState('');
+  const [reportDepartmentFilter, setReportDepartmentFilter] = useState<string[]>([]);
   const [reportDepartments, setReportDepartments] = useState<string[]>([]);
   // Active / Inactive employees (by their Employee record); '' = everyone.
   // Active by default (the server's default too); Inactive / All when picked.
@@ -1216,13 +1220,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [monthGridPageSize, setMonthGridPageSize] = useState(50);
   const [exportingMonthlyReport, setExportingMonthlyReport] = useState(false);
   const monthlyReportReq = useRef(0);
+  // The filters both reports share, as query parameters.
+  const reportFilterParams = (params: URLSearchParams) => {
+    if (reportProjectFilter.length) params.set('project_ids', reportProjectFilter.join(','));
+    if (reportBranchFilter.length) params.set('branch_ids', reportBranchFilter.join(','));
+    if (reportBranchType) params.set('branch_type', reportBranchType);
+    if (reportDepartmentFilter.length) params.set('departments', reportDepartmentFilter.join(','));
+    return params;
+  };
   const monthlyReportParams = () => {
     const params = new URLSearchParams();
     params.set('year', String(reportYear));
     params.set('month', String(reportMonth));
-    if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+    reportFilterParams(params);
     if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-    if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
     if (reportStatusFilter) params.set('status', reportStatusFilter);
     return params;
   };
@@ -1253,9 +1264,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     try {
       const params = new URLSearchParams();
       params.set('date', reportDate);
-      if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+      reportFilterParams(params);
       if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-      if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
       if (reportStatusFilter) params.set('status', reportStatusFilter);
       const res = await fetch(apiUrl(`/api/attendance/report/daily?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setDailyReport(await res.json());
@@ -1271,15 +1281,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // raw id/value the API call itself used).
   const activeReportFilters = (): [string, string][] => {
     const filters: [string, string][] = [];
-    if (reportProjectFilter) {
-      const proj = projects.find((p) => String(p.id) === reportProjectFilter);
-      filters.push(['Project', proj?.project_name || reportProjectFilter]);
+    if (reportBranchType) filters.push(['Office / Project', reportBranchType === 'head_office' ? 'Head Office' : 'Project Side']);
+    if (reportProjectFilter.length) {
+      filters.push(['Project', reportProjectFilter.map((id) => projects.find((p) => String(p.id) === id)?.project_name || id).join(', ')]);
+    }
+    if (reportBranchFilter.length) {
+      filters.push(['Branch', reportBranchFilter.map((id) => (branches as any[]).find((b) => String(b.id) === id)?.branch_name || id).join(', ')]);
     }
     if (reportEmployeeFilter) {
       const emp = people.find((u) => String(u.id) === reportEmployeeFilter);
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
-    if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
+    if (reportDepartmentFilter.length) filters.push(['Department', reportDepartmentFilter.join(', ')]);
     filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : reportStatusFilter === 'inactive' ? 'Inactive employees' : 'All employees']);
     return filters;
   };
@@ -4792,17 +4805,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               {attendanceReportView !== 'dept' && attendanceReportView !== 'custom' && (<>
               <div>
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Office / Project</label>
                 <SearchSelect
-                  value={reportProjectFilter}
-                  onChange={(e) => setReportProjectFilter(e.target.value)}
+                  value={reportBranchType}
+                  onChange={(e) => {
+                    // Choosing Head Office / Project Side ticks every Branch / Site of that kind
+                    // (untick any you don't want); All clears the Branch / Site pick.
+                    const kind = e.target.value as '' | 'head_office' | 'project_site';
+                    setReportBranchType(kind);
+                    setReportBranchFilter(kind ? (branches as any[]).filter((b) => !Number(b.is_archived) && b.branch_type === kind).map((b) => String(b.id)) : []);
+                    setReportProjectFilter([]);
+                  }}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
-                  <option value="">All Projects</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.project_name}</option>
-                  ))}
+                  <option value="">All</option>
+                  <option value="head_office">Head Office</option>
+                  <option value="project_site">Project Side</option>
                 </SearchSelect>
+              </div>
+
+              <div>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Branch / Site</span>
+                <MultiSelectFilter
+                  label="Branch / Site"
+                  options={(branches as any[])
+                    .filter((b) => !Number(b.is_archived) && (!reportBranchType || b.branch_type === reportBranchType))
+                    .map((b) => ({ value: String(b.id), label: b.branch_name }))}
+                  selected={reportBranchFilter}
+                  onChange={setReportBranchFilter}
+                />
+              </div>
+
+              <div>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Project (check-ins at)</span>
+                <MultiSelectFilter
+                  label="Project"
+                  options={projects
+                    .filter((p) => !Number((p as any).is_archived) && (!reportBranchType || (p as any).linked_branch_type === reportBranchType))
+                    .map((p) => ({ value: String(p.id), label: p.project_name }))}
+                  selected={reportProjectFilter}
+                  onChange={setReportProjectFilter}
+                />
               </div>
 
               <div>
@@ -4824,17 +4867,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
 
               <div>
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Department</label>
-                <SearchSelect
-                  value={reportDepartmentFilter}
-                  onChange={(e) => setReportDepartmentFilter(e.target.value)}
-                  className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
-                >
-                  <option value="">All Departments</option>
-                  {reportDepartments.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </SearchSelect>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Department</span>
+                <MultiSelectFilter
+                  label="Department"
+                  options={reportDepartments.map((d) => ({ value: d, label: d }))}
+                  selected={reportDepartmentFilter}
+                  onChange={setReportDepartmentFilter}
+                />
               </div>
 
               <div>

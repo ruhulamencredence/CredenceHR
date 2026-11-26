@@ -1336,15 +1336,49 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // Department Summary (PayrollRoutes.ts), so both count the same way.
   // `query`: year, month, project_id, user_id, department, status, limit,
   // page, slim. Throws an Error with statusCode 400/403 on bad input.
+  // ---- Filters shared by the Monthly (Month Wise) and Date Wise reports ----
+  // Several Departments / Projects / Branches can be picked at once (comma
+  // separated: ?departments=A,B &project_ids=1,2 &branch_ids=3,4), and the
+  // Branch type (Head Office / Project Side). The single ?department= and
+  // ?project_id= still work. Empty = no filter on that.
+  //   project_ids : attendance given at any of those Projects (as before for one);
+  //   branch_ids  : people whose own Branch is one of those;
+  //   branch_type : people whose Branch is of that type (no Branch = Head Office, so with
+  //                 Head Office picked, people with no Branch stay in even when branch_ids lists the Branches).
+  const listOf = (v: any) => String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  function reportFilters(query: any) {
+    const departments = [...new Set([...listOf(query.departments), ...listOf(query.department)])];
+    const projectIds = [...new Set([...listOf(query.project_ids), ...listOf(query.project_id)].map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+    const branchIds = [...new Set(listOf(query.branch_ids).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+    const bt = String(query.branch_type || "");
+    const branchType: "head_office" | "project_site" | null = bt === "head_office" || bt === "project_site" ? bt : null;
+    return { departments, projectIds, branchIds, branchType };
+  }
+  // user id -> the Branch id and type of their Employee record (active one first).
+  async function branchInfoByUser(): Promise<Map<number, { branchId: number | null; type: "head_office" | "project_site" }>> {
+    const [emps, branches]: any[] = await Promise.all([
+      queryDB("SELECT user_id, branch_id, is_active FROM all_employees WHERE user_id IS NOT NULL ORDER BY is_active ASC"),
+      queryDB("SELECT id, branch_type FROM branches")
+    ]);
+    const typeOf = new Map<number, "head_office" | "project_site">((branches || []).map((b: any) => [Number(b.id), b.branch_type === "project_site" ? "project_site" : "head_office"]));
+    const out = new Map<number, { branchId: number | null; type: "head_office" | "project_site" }>();
+    // ORDER BY is_active ASC: a later (active) record overwrites an older inactive copy.
+    for (const e of emps || []) {
+      const bid = e.branch_id != null ? Number(e.branch_id) : null;
+      out.set(Number(e.user_id), { branchId: bid, type: (bid != null && typeOf.get(bid)) || "head_office" });
+    }
+    return out;
+  }
+
   const computeMonthlyReport = async (user: any, query: any): Promise<any> => {
     const year = Number(query.year);
     const month = Number(query.month); // 1-12
     if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
       throw Object.assign(new Error("A valid year and month (1-12) are required."), { statusCode: 400 });
     }
-    const project_id = query.project_id ? Number(query.project_id) : null;
+    const filt = reportFilters(query);
+    const projectFilter = filt.projectIds.length > 0;
     const user_id = query.user_id ? Number(query.user_id) : null;
-    const department = query.department ? String(query.department).trim() : null;
     // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
     // Active employees unless "inactive" / "all" is asked for — someone who
     // has left no longer shows up in reports by default.
@@ -1358,9 +1392,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     // (GET /api/attendance/report/departments) already only offers
     // Departments they're allowed to see.
     const deptScope = user.role === "superadmin" ? null : await getAttendanceReportDeptScope(user.id);
-    if (deptScope && department && !deptScope.includes(department)) {
+    if (deptScope && filt.departments.some((d) => !deptScope.includes(d))) {
       throw Object.assign(new Error("You don't have access to this Department's Attendance Report."), { statusCode: 403 });
     }
+    const branchInfo = filt.branchType || filt.branchIds.length ? await branchInfoByUser() : null;
 
     const monthStr = String(month).padStart(2, "0");
     const prefix = `${year}-${monthStr}`;
@@ -1410,7 +1445,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       (u: any) =>
         (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
         (!user_id || u.id === user_id) &&
-        (!department || departmentByUserId.get(u.id) === department) &&
+        (!filt.departments.length || filt.departments.includes(departmentByUserId.get(u.id) || "")) &&
+        (!branchInfo || !filt.branchType || (branchInfo.get(Number(u.id))?.type || "head_office") === filt.branchType) &&
+        (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId)) || (filt.branchType === "head_office" && branchInfo.get(Number(u.id))?.branchId == null)) &&
         statusMatches(u.id) &&
         // Department-wise scope, unfiltered-request case: `department` was
         // already validated to be within deptScope above when given, so
@@ -1463,7 +1500,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     for (const r of rows) {
       const dateStr = String(r.attendance_date).slice(0, 10);
       if (!dateStr.startsWith(prefix)) continue;
-      if (project_id && Number(r.project_id) !== project_id) continue;
+      if (projectFilter && !filt.projectIds.includes(Number(r.project_id))) continue;
       if (!byUser.has(r.user_id)) byUser.set(r.user_id, new Map());
       byUser.get(r.user_id)!.set(dateStr, r);
     }
@@ -1477,7 +1514,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     const officeByUserDate = new Map<string, any>();
     // Office machine double punch: a punch within N minutes of the In isn't the Out.
     const punchGap = await loadPunchGap(queryDB);
-    if (!project_id) {
+    if (!projectFilter) {
       const employees = await queryDB(
         "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
       );
@@ -1531,7 +1568,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     // person that day; a Leave entry is a leave day; never on a Weekend /
     // Holiday. Skipped when filtering by Project, like the office device.
     const siteByUserDate = new Map<string, any>();
-    if (!project_id && pageUserIds.size) {
+    if (!projectFilter && pageUserIds.size) {
       const userIdByEmployeeId = new Map<number, number>();
       for (const [uid, eid] of employeeIdByUserId) if (pageUserIds.has(uid)) userIdByEmployeeId.set(eid, uid);
       if (userIdByEmployeeId.size) {
@@ -1733,18 +1770,19 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ error: "A valid date (YYYY-MM-DD) is required." });
       }
-      const project_id = req.query.project_id ? Number(req.query.project_id) : null;
+      const filt = reportFilters(req.query);
+      const projectFilter = filt.projectIds.length > 0;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
-      const department = req.query.department ? String(req.query.department).trim() : null;
       // ?status=active|inactive : by the linked Employee record's status (no record counts as active); anything else = everyone.
       const empStatus = String(req.query.status || "active");
 
       // Department-wise scope (see the deps comment above / the monthly
       // report route's own copy of this check). null = unrestricted.
       const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
-      if (deptScope && department && !deptScope.includes(department)) {
+      if (deptScope && filt.departments.some((d) => !deptScope.includes(d))) {
         return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
       }
+      const branchInfo = filt.branchType || filt.branchIds.length ? await branchInfoByUser() : null;
 
       // Just this day's rows (idx_attendance_date), not the whole history;
       // still filtered by date below.
@@ -1775,7 +1813,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
       const dayRows = rows.filter(
-        (r: any) => String(r.attendance_date).slice(0, 10) === date && (!project_id || Number(r.project_id) === project_id)
+        (r: any) => String(r.attendance_date).slice(0, 10) === date && (!projectFilter || filt.projectIds.includes(Number(r.project_id)))
       );
       const withApprovals = await attachApprovalStatuses("attendance", dayRows);
       const byUserId = new Map<number, any>(withApprovals.map((r: any) => [r.user_id, r]));
@@ -1784,7 +1822,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         (u: any) =>
           (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
           (!user_id || u.id === user_id) &&
-          (!department || departmentByUserId.get(u.id) === department) &&
+          (!filt.departments.length || filt.departments.includes(departmentByUserId.get(u.id) || "")) &&
+          (!branchInfo || !filt.branchType || (branchInfo.get(Number(u.id))?.type || "head_office") === filt.branchType) &&
+          (!branchInfo || !filt.branchIds.length || filt.branchIds.includes(Number(branchInfo.get(Number(u.id))?.branchId)) || (filt.branchType === "head_office" && branchInfo.get(Number(u.id))?.branchId == null)) &&
           statusMatches(u.id) &&
           // Department-wise scope, unfiltered-request case — see the monthly
           // report route's identical comment above.
@@ -1797,7 +1837,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const officeByUserId = new Map<number, any>();
       // Office machine double punch: a punch within N minutes of the In isn't the Out.
       const dayGap = (await loadPunchGap(queryDB))(date);
-      if (!project_id) {
+      if (!projectFilter) {
         const officeRows = await queryDB(
           // Same single-punch guard — see the other zk_attendance_logs
           // queries above.
@@ -1885,7 +1925,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // Site Attendance (supervisor muster roll): a confirmed Present / Late
       // entry makes the day present for someone nothing else shows (as
       // payroll counts it); not on their Weekend / Holiday.
-      if (!project_id) {
+      if (!projectFilter) {
         const userIdByEmployeeId = new Map<number, number>([...employeeIdByUserIdToday].map(([uid, eid]) => [eid, uid]));
         const already = new Set(present.map((p: any) => p.user_id));
         const relevantIds = new Set(relevantUsers.map((u: any) => Number(u.id)));
