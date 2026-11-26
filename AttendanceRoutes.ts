@@ -1958,9 +1958,34 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       }
 
       const presentIds = new Set(present.map((p: any) => p.user_id));
+      // Who they are (Employee ID, Designation, Branch, Phone) and whether the
+      // day is an approved leave, so the Absent list says more than a name.
+      const detailByUser = new Map<number, any>();
+      for (const e of ((await queryDB(
+        `SELECT e.user_id, e.employee_id, e.designation, e.phone, COALESCE(NULLIF(TRIM(e.branch), ''), br.branch_name) AS branch
+           FROM all_employees e LEFT JOIN branches br ON br.id = e.branch_id
+          WHERE e.user_id IS NOT NULL ORDER BY e.is_active ASC`
+      ).catch(() => [])) as any[])) detailByUser.set(Number(e.user_id), e);
+      const leaveToday = new Map<number, string>();
+      for (const l of ((await queryDB("SELECT user_id, leave_type FROM leave_applications WHERE status = 'approved' AND start_date <= ? AND end_date >= ?", [date, date]).catch(() => [])) as any[])) {
+        leaveToday.set(Number(l.user_id), String(l.leave_type));
+      }
       const absentOrHoliday = relevantUsers
         .filter((u: any) => !presentIds.has(u.id))
-        .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null, on_holiday: isHolidayForUser(u.id) }));
+        .map((u: any) => {
+          const d = detailByUser.get(Number(u.id));
+          return {
+            user_id: u.id,
+            user_name: u.name,
+            department: departmentByUserId.get(u.id) || null,
+            employee_code: d?.employee_id || null,
+            designation: d?.designation || null,
+            branch: d?.branch || null,
+            phone: d?.phone || null,
+            leave_type: leaveToday.get(Number(u.id)) || null,
+            on_holiday: isHolidayForUser(u.id)
+          };
+        });
       const absent = absentOrHoliday.filter((u: any) => !u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
       const onHoliday = absentOrHoliday.filter((u: any) => u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
 

@@ -5232,20 +5232,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   dailyReport.on_holiday.length === 0 ? (
                     <p className="text-xs text-slate-400 text-center py-8">Everyone checked in this day.</p>
                   ) : (
-                    <ul className="divide-y divide-slate-100 text-xs">
+                    <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <tr><th className="px-4 py-2.5">Name</th><th className="px-3 py-2.5">ID</th><th className="px-3 py-2.5">Designation</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
                       {dailyReport.on_holiday.map((u: any) => (
-                        <li key={u.user_id} className="px-4 py-2.5 text-slate-700">{u.user_name}</li>
+                        <tr key={u.user_id}>
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{u.user_name}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.employee_code || '—'}</td>
+                          <td className="px-3 py-2.5">{u.designation || '—'}</td>
+                          <td className="px-3 py-2.5">{u.department || '—'}</td>
+                          <td className="px-3 py-2.5">{u.branch || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
+                        </tr>
                       ))}
-                    </ul>
+                    </tbody>
+                  </table>
                   )
                 ) : dailyReport.absent.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-8">Everyone checked in this day.</p>
                 ) : (
-                  <ul className="divide-y divide-slate-100 text-xs">
-                    {dailyReport.absent.map((u: any) => (
-                      <li key={u.user_id} className="px-4 py-2.5 text-slate-700">{u.user_name}</li>
-                    ))}
-                  </ul>
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <tr><th className="px-4 py-2.5">Name</th><th className="px-3 py-2.5">ID</th><th className="px-3 py-2.5">Designation</th><th className="px-3 py-2.5">Department</th><th className="px-3 py-2.5">Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {dailyReport.absent.map((u: any) => (
+                        <tr key={u.user_id}>
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{u.user_name}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.employee_code || '—'}</td>
+                          <td className="px-3 py-2.5">{u.designation || '—'}</td>
+                          <td className="px-3 py-2.5">{u.department || '—'}</td>
+                          <td className="px-3 py-2.5">{u.branch || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </div>
             </div>
