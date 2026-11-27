@@ -8,6 +8,7 @@ import type { User } from './types.ts';
 import { applyBackgroundTheme, applyHeaderGlow, getSavedBackgroundTheme, getSavedHeaderGlow } from './lib/backgroundTheme.ts';
 import { Capacitor } from '@capacitor/core';
 import './index.css';
+import './stoneOlive.css';
 import { installCompanyHeader } from './lib/company.ts';
 import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
 import { installChunkReload, retryImport } from './lib/chunkReload.ts';

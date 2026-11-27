@@ -93,7 +93,8 @@ function initialsOf(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
 }
 
-const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+// --g-av-2…8 are set only by a theme that recolours avatars (Stone & Olive).
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', 'var(--g-av-2, #059669)', 'var(--g-av-3, #0891b2)', 'var(--g-av-4, #d97706)', 'var(--g-av-5, #dc2626)', 'var(--g-av-6, #4f46e5)', 'var(--g-av-7, #be185d)', 'var(--g-av-8, #0d9488)'];
 function avatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -1732,6 +1733,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <div
               ref={messagesContainerRef}
               className="chat-thread flex-1 overflow-y-auto p-4 space-y-2"
+              data-wallpaper={activeRoom.wallpaper || 'soft'}
               style={{ background: wallpaperCss(activeRoom.wallpaper) }}
             >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}

@@ -4,7 +4,8 @@
  */
 
 import { useLiveRefresh } from '../lib/liveRefresh';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useStoneCarve } from '../lib/stoneTheme';
 import { useCachedState } from '../lib/screenCache';
 import { CalendarDays } from 'lucide-react';
 import { Lottie, useLottieJson } from './LazyLottie';
@@ -69,6 +70,10 @@ const LeaveRing: React.FC<{ label: string; left: number; used: number; fmt: (n: 
 // live in LeaveReviewPage — mirrors how the Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
+  // Stone & Olive: the head is cut out around the leave card (stoneTheme.ts).
+  const headRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
+  useStoneCarve(headRef, stripRef);
   const beachAnimation = useLottieJson(loadBeachAnimation);
   // The Total Leave strip's blur is on in the app too (half the old
   // strength: 20px), with glass-mask-fix + translateZ(0) keeping the strip
@@ -162,7 +167,7 @@ useLiveRefresh(() => load());
           glow from the top-right corner and a thin orange line along the top
           edge (.leave-card in index.css). Light and plain Dark keep the band. */}
       <div className="leave-glow" aria-hidden="true" />
-      <div className="leave-head relative px-5 pt-5 pb-6 sm:px-6 text-white" style={{ background: 'var(--g-gradient)' }}>
+      <div ref={headRef} className="leave-head relative px-5 pt-5 pb-6 sm:px-6 text-white" style={{ background: 'var(--g-gradient)' }}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-bold flex items-center gap-2">
@@ -191,8 +196,9 @@ useLiveRefresh(() => load());
           independent of whether blur is present at all. */}
       <div className="relative px-5 sm:px-6 -mt-4 pb-5">
         <div
+          ref={stripRef}
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-          className={`glass-mask-fix bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
+          className={`leave-strip glass-mask-fix bg-[radial-gradient(90%_70%_at_100%_100%,rgba(var(--g-accent-rgb,127,0,255),0.12)_0%,rgba(var(--g-accent-rgb,127,0,255),0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(var(--g-accent-rgb,127,0,255),0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(var(--g-accent-rgb,127,0,255),0.2)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
         >
           <div className="flex gap-3 mt-0.5">
             <LeaveRing label="Casual" left={casualLeft} used={casualUsed} fmt={fmt} />

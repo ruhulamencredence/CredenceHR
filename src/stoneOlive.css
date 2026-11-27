@@ -1,0 +1,349 @@
+/*
+  Stone & Olive — Profile -> Appearance (backgroundTheme.ts 'stone').
+  Built on Minimal Mono (html[data-ui="mono"]), then this file, keyed on
+  html[data-bg="stone"]. Light modes only: with Dark / Dark Glass on, Mono's
+  dark look applies as before. Every other theme is untouched by this file.
+
+  - page: a soft, blurred photo of a Credence building, warm stone greys
+  - cards: frosted stone glass (blur scaled by --glass-k on Android, as in
+    index.css); a card inside a card is a lighter, unblurred pane
+  - popups: a light, almost opaque card so long text stays easy to read
+  - phone Dashboard: the header and welcome banner show the building
+  - olive for accents; status colours (present / late / absent / danger) stay
+*/
+
+html[data-bg='stone']:not([data-dark]) {
+  --stone-1: #f8f6f1;
+  --stone-2: #f3f0ea;
+  --stone-3: #ece7df;
+  --stone-line: #e3ddd3;
+  --olive-1: #e5eac6;
+  --olive-2: #9cb030;
+  --olive-3: #7d8f22;
+  --olive-4: #5a6630;
+  --olive-5: #4a5524;
+  --olive-6: #3f4a1d;
+  --stone-glass: rgba(226, 222, 208, 0.58);
+  --stone-pop: rgba(248, 246, 240, 0.95);
+  --stone-blur: blur(calc(32px * var(--glass-k, 1))) saturate(1.6);
+  --stone-safe-top: var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px));
+
+  --g-bg: var(--stone-3);
+  --g-bg-gradient: linear-gradient(180deg, rgba(246, 243, 237, 0.35) 0%, rgba(246, 243, 237, 0.6) 45%, rgba(240, 236, 228, 0.72) 100%),
+    url('./assets/stone-olive/building-soft.jpg') center top / cover;
+  --g-surface: #fbfaf7;
+  --g-surface-muted: var(--stone-2);
+  --g-border: var(--stone-line);
+  --g-text: #1c1b17;
+  --g-text-muted: #7a766c;
+  --g-accent: #151512;
+  --g-accent-rgb: 90, 102, 48;
+  --g-accent-soft: #e9edd0;
+  --g-gradient: linear-gradient(90deg, #6f8a34 0%, #556b26 50%, #3d4b1b 100%);
+  --g-banner-1: #6f8a34;
+  --g-banner-2: #556b26;
+  --g-banner-3: #3d4b1b;
+  --g-header-gradient: var(--stone-1);
+  --mt-50: #f0f2e2;
+  --mt-100: var(--olive-1);
+  --mt-200: #d6e08f;
+  --mt-500: var(--olive-2);
+  --mt-600: #76881f;
+  --mt-800: #465214;
+  --mono-500: var(--olive-5);
+  --mono-600: var(--olive-6);
+  --mono-700: #1c1b17;
+
+  /* Avatars, Leave's Casual colour (UserAvatar / ChatPanel / LeavePhone) */
+  --g-avatar-1: var(--olive-4);
+  --g-avatar-2: var(--olive-3);
+  --g-avatar-3: #8a6d3b;
+  --g-avatar-4: var(--olive-6);
+  --g-avatar-5: #9c8456;
+  --g-av-2: var(--olive-3);
+  --g-av-3: var(--olive-5);
+  --g-av-4: #9c8456;
+  --g-av-5: #8a6d3b;
+  --g-av-6: var(--olive-4);
+  --g-av-7: #6b5a3a;
+  --g-av-8: var(--olive-6);
+  --g-leave-casual: var(--olive-3);
+  --g-leave-casual-soft: var(--olive-1);
+  --g-leave-casual-fg: var(--olive-6);
+
+  /* Cool slate greys become warm stone greys; sky and orange accents olive. */
+  --color-slate-50: #fafaf9;
+  --color-slate-100: #f5f5f4;
+  --color-slate-200: #e7e5e4;
+  --color-slate-300: #d6d3d1;
+  --color-slate-400: #a8a29e;
+  --color-slate-500: #78716c;
+  --color-slate-600: #57534e;
+  --color-slate-700: #44403c;
+  --color-slate-800: #292524;
+  --color-slate-900: #1c1917;
+  --color-slate-950: #0c0a09;
+  --color-gray-400: #a8a29e;
+  --color-gray-500: #78716c;
+  --color-gray-600: #57534e;
+  --color-gray-700: #44403c;
+  --color-gray-800: #292524;
+  --color-sky-50: #f0f2e2;
+  --color-sky-100: var(--olive-1);
+  --color-sky-200: #d6e08f;
+  --color-sky-500: var(--olive-3);
+  --color-sky-600: var(--olive-4);
+  --color-sky-700: var(--olive-5);
+  --color-sky-800: var(--olive-6);
+  --color-orange-500: var(--olive-3);
+}
+
+/* ---- Page ---------------------------------------------------------------- */
+html[data-bg='stone']:not([data-dark]) body::before {
+  background: var(--g-bg-gradient) !important;
+}
+html[data-bg='stone']:not([data-dark]) .page-glow {
+  background: linear-gradient(180deg, rgba(248, 246, 241, 0.92) 0%, rgba(248, 246, 241, 0) 100%) !important;
+}
+/* Computer: the building, faint, across the top right of every page. */
+@media (min-width: 768px) {
+  html[data-bg='stone']:not([data-dark]) body::after {
+    content: '';
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 300px;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    background: linear-gradient(180deg, rgba(246, 243, 237, 0) 40%, rgba(246, 243, 237, 1) 100%),
+      linear-gradient(90deg, rgba(246, 243, 237, 0.97) 0%, rgba(246, 243, 237, 0.9) 42%, rgba(246, 243, 237, 0.25) 62%, rgba(246, 243, 237, 0) 80%),
+      url('./assets/stone-olive/building.jpg') right -40px top 38% / auto 520px no-repeat;
+  }
+  /* The Dashboard shows it a little stronger. */
+  html[data-bg='stone']:not([data-dark]):has([data-tour='dash-greeting'].md\:block) body::after {
+    opacity: 0.9;
+  }
+  html[data-bg='stone']:not([data-dark]) #root {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/* ---- Glass cards ---------------------------------------------------------- */
+html[data-bg='stone']:not([data-dark]) #root :is(.bg-white, [class*='bg-white/'], [class*='md:bg-white'], .gemini-card, .att-card):not(button, input, select, textarea, .chat-bubble-me, .chat-bubble-them) {
+  background-color: var(--stone-glass) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+}
+html[data-bg='stone']:not([data-dark])
+  #root
+  :is(.bg-white, [class*='bg-white/'], [class*='md:bg-white'], .gemini-card, .leave-card, .att-card):is([class*='rounded-2xl'], [class*='rounded-3xl'], [class*='rounded-[2'], [class*='rounded-[3']):not(button, input, select, textarea, .chat-bubble-me, .chat-bubble-them) {
+  background-image: none !important;
+  background-color: var(--stone-glass) !important;
+  -webkit-backdrop-filter: var(--stone-blur);
+  backdrop-filter: var(--stone-blur);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 12px 30px -18px rgba(40, 45, 20, 0.5) !important;
+}
+/* A pane inside a card: lighter, no second blur. */
+html[data-bg='stone']:not([data-dark])
+  #root
+  :is(.bg-white, [class*='bg-white/'], [class*='md:bg-white'], .gemini-card, .leave-card, .att-card)
+  :is(.bg-white, [class*='bg-white/'], [class*='md:bg-white'], .gemini-card, .leave-strip):not(button, input, select, textarea, .chat-bubble-me, .chat-bubble-them) {
+  background-image: none !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none !important;
+}
+html[data-bg='stone']:not([data-dark]) .gsidebar {
+  background: var(--stone-glass) !important;
+  -webkit-backdrop-filter: var(--stone-blur);
+  backdrop-filter: var(--stone-blur);
+  border-right: 1px solid rgba(255, 255, 255, 0.7) !important;
+}
+@media (min-width: 768px) {
+  html[data-bg='stone']:not([data-dark]) .app-header {
+    background: rgba(255, 255, 255, 0.45) !important;
+    -webkit-backdrop-filter: blur(calc(18px * var(--glass-k, 1)));
+    backdrop-filter: blur(calc(18px * var(--glass-k, 1)));
+  }
+}
+
+/* ---- Popups: light and nearly opaque, so long text reads easily ----------- */
+html[data-bg='stone']:not([data-dark]) .liquid-glass,
+html[data-bg='stone']:not([data-dark]) .fixed :is(.bg-white, [class*='bg-white/'], .gemini-card)[class*='rounded-']:not(button, input, select, textarea, .chat-bubble-me, .chat-bubble-them) {
+  background: var(--stone-pop) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+}
+html[data-bg='stone']:not([data-dark]) :is(.liquid-glass, .fixed) :is(.liquid-glass, .fixed) :is(.bg-white, [class*='bg-white/'], .gemini-card):not(button, input, select, textarea),
+html[data-bg='stone']:not([data-dark]) .liquid-glass :is(.bg-white, [class*='bg-white/']):not(button, input, select, textarea) {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 1px 2px rgba(40, 45, 20, 0.08) !important;
+}
+html[data-bg='stone']:not([data-dark]) .fixed.inset-0:is([class*='bg-slate-950/'], [class*='bg-slate-900/'], [class*='bg-black/']) {
+  background-color: rgba(50, 48, 36, 0.3) !important;
+}
+/* A destructive confirm stays red (confirmDialog tone 'danger'). */
+html[data-bg='stone']:not([data-dark]) .liquid-glass-button[style*='#e11d48'] {
+  background: #e11d48 !important;
+  color: #fff !important;
+}
+
+/* ---- Phone Dashboard: header + welcome banner show the building ----------- */
+@media (max-width: 767.98px) {
+  html[data-bg='stone']:not([data-dark]) .app-header-colour {
+    background: linear-gradient(90deg, rgba(248, 246, 241, 0.94) 0%, rgba(248, 246, 241, 0.8) 30%, rgba(248, 246, 241, 0.25) 47%, rgba(248, 246, 241, 0) 58%),
+      url('./assets/stone-olive/building.jpg') calc(87vw - 419px) 0 / auto calc(300px + var(--stone-safe-top)) no-repeat,
+      var(--stone-1) !important;
+    color: #1c1b17 !important;
+    box-shadow: none !important;
+    border-bottom: 0 !important;
+  }
+  html[data-bg='stone']:not([data-dark]) .app-header-colour [class*='text-white'] {
+    color: #1c1b17 !important;
+  }
+  html[data-bg='stone']:not([data-dark]) .app-header-colour .hdr-logo-on-colour {
+    filter: none !important;
+  }
+  html[data-bg='stone']:not([data-dark]) .app-header-colour button:not(:has(img)) {
+    background: rgba(255, 255, 255, 0.72) !important;
+    -webkit-backdrop-filter: blur(calc(10px * var(--glass-k, 1)));
+    backdrop-filter: blur(calc(10px * var(--glass-k, 1)));
+    border-radius: 999px !important;
+    box-shadow: 0 4px 14px -6px rgba(40, 50, 20, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.8) !important;
+  }
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero {
+  background: linear-gradient(180deg, rgba(248, 246, 241, 0) 62%, rgba(248, 246, 241, 0.55) 100%),
+    linear-gradient(90deg, rgba(248, 246, 241, 0.94) 0%, rgba(248, 246, 241, 0.8) 30%, rgba(248, 246, 241, 0.25) 47%, rgba(248, 246, 241, 0) 58%),
+    url('./assets/stone-olive/building.jpg') calc(87vw - 419px) calc(-4rem - var(--stone-safe-top)) / auto calc(300px + var(--stone-safe-top)) no-repeat,
+    var(--stone-1) !important;
+  box-shadow: 0 18px 30px -22px rgba(50, 60, 25, 0.55) !important;
+  border-bottom-left-radius: 32px !important;
+  border-bottom-right-radius: 32px !important;
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero-text {
+  text-align: left !important;
+  padding-top: 1.5rem !important;
+  padding-bottom: 5.2rem !important;
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--olive-5) !important;
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase;
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero-eyebrow::before {
+  content: '';
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--olive-3);
+  display: inline-block;
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero-name {
+  color: #1c1b17 !important;
+  font-size: 30px !important;
+  line-height: 1.08 !important;
+  letter-spacing: -0.02em;
+  max-width: 58%;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  text-shadow: 0 0 18px rgba(248, 246, 241, 0.9), 0 0 2px rgba(248, 246, 241, 0.9);
+  margin-top: 6px !important;
+}
+html[data-bg='stone']:not([data-dark]) .welcome-hero-tagline {
+  display: block !important;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #57534e;
+  margin-top: 8px;
+  text-shadow: 0 0 12px rgba(248, 246, 241, 0.9);
+}
+
+/* ---- Chat: a doodle wallpaper like a messaging app (only when the chat
+        has no wallpaper of its own) and tailed bubbles ---------------------- */
+html[data-bg='stone']:not([data-dark]) .chat-thread:is([data-wallpaper='soft'], [data-wallpaper='frosted']) {
+  background: url('./assets/stone-olive/chat-doodle.svg') 0 0 / 260px 260px, linear-gradient(180deg, #efe9dc 0%, #e8e1d1 100%) !important;
+}
+html[data-bg='stone']:not([data-dark]) #root .chat-bubble-me.chat-bubble-me,
+html[data-bg='stone']:not([data-dark]) .chat-bubble-me {
+  background: #e2ebc4 !important;
+  border-color: #d3deaa !important;
+  box-shadow: 0 1px 1.5px rgba(60, 55, 30, 0.18) !important;
+  border-radius: 12px !important;
+  border-top-right-radius: 2px !important;
+}
+html[data-bg='stone']:not([data-dark]) #root .chat-bubble-them.chat-bubble-them,
+html[data-bg='stone']:not([data-dark]) .chat-bubble-them {
+  background: #fff !important;
+  border-color: #fff !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: 0 1px 1.5px rgba(60, 55, 30, 0.18) !important;
+  border-radius: 12px !important;
+  border-top-left-radius: 2px !important;
+}
+html[data-bg='stone']:not([data-dark]) .chat-bubble-me::after,
+html[data-bg='stone']:not([data-dark]) .chat-bubble-them::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  width: 10px;
+  height: 12px;
+}
+html[data-bg='stone']:not([data-dark]) .chat-bubble-me::after {
+  right: -8px;
+  background: #e2ebc4;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+html[data-bg='stone']:not([data-dark]) .chat-bubble-them::after {
+  left: -8px;
+  background: #fff;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+/* ---- Accents ---------------------------------------------------------------- */
+html[data-bg='stone']:not([data-dark]) :is([class*='bg-emerald-600'], [class*='bg-emerald-500'], [class*='bg-green-600']):is(button, a, [role='button']) {
+  background-color: var(--olive-4) !important;
+}
+html[data-bg='stone']:not([data-dark]) :is([class*='bg-emerald-600'], [class*='bg-emerald-500'], [class*='bg-green-600']):is(button, a, [role='button']):hover {
+  background-color: var(--olive-6) !important;
+}
+html[data-bg='stone']:not([data-dark]) :is([class*='text-orange-6'], [class*='text-orange-7']) {
+  color: var(--olive-4) !important;
+}
+html[data-bg='stone']:not([data-dark]) :is([class*='border-orange-2'], [class*='border-orange-3']) {
+  border-color: #d6e08f !important;
+}
+html[data-bg='stone']:not([data-dark]) [class*='bg-orange-50'] {
+  background-color: #f0f2e2 !important;
+}
+/* Mail's sender avatars (MailReader avatarColor) */
+html[data-bg='stone']:not([data-dark]) .mail-avatar:is(.bg-rose-500, .bg-fuchsia-500) {
+  background-color: #8a6d3b !important;
+}
+html[data-bg='stone']:not([data-dark]) .mail-avatar:is(.bg-amber-500) {
+  background-color: #9c8456 !important;
+}
+html[data-bg='stone']:not([data-dark]) .mail-avatar:is(.bg-emerald-500, .bg-teal-500) {
+  background-color: var(--olive-3) !important;
+}
+html[data-bg='stone']:not([data-dark]) .mail-avatar:is(.bg-violet-500, .bg-indigo-500, .bg-sky-500) {
+  background-color: var(--olive-5) !important;
+}
+/* Maps: warmer, the area circle olive. */
+html[data-bg='stone']:not([data-dark]) .leaflet-tile-pane {
+  filter: grayscale(0.45) sepia(0.12) contrast(1.02) !important;
+}
+html[data-bg='stone']:not([data-dark]) .leaflet-container path.leaflet-interactive {
+  stroke: var(--olive-5) !important;
+}

@@ -338,7 +338,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             <section className="gemini-card overflow-hidden">
               <ColorModePicker selected={colorMode} onPick={handlePickColorMode} />
               <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} />
-              <HeaderGlowPicker selected={headerGlow} onPick={handlePickHeaderGlow} />
+              {bgTheme !== 'stone' && <HeaderGlowPicker selected={headerGlow} onPick={handlePickHeaderGlow} />}
             </section>
           </div>
 
@@ -690,7 +690,7 @@ const BackgroundThemePicker: React.FC<{
               className="w-10 h-10 rounded-full flex items-center justify-center transition-shadow"
               style={{
                 background: theme.swatch,
-                boxShadow: isSelected ? `0 0 0 2.5px var(--g-surface), 0 0 0 4.5px ${theme.swatch}` : 'none'
+                boxShadow: isSelected ? `0 0 0 2.5px var(--g-surface), 0 0 0 4.5px ${theme.swatch.startsWith('#') ? theme.swatch : '#4a5524'}` : 'none'
               }}
             >
               {isSelected && <BadgeCheck className="w-4 h-4 text-white" />}

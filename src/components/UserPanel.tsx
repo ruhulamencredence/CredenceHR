@@ -3239,10 +3239,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           before. Shown only on the Dashboard (mobileActiveSection === null). */}
       {!isDesktop && (
       <div className={`${mobileActiveSection === null ? 'block mobile-page-in' : 'hidden'} md:hidden relative`}>
-        <div className="relative rounded-b-[28px] shadow-sm" style={{ background: 'var(--g-gradient)' }}>
-          <div className="px-6 pt-6 pb-10 sm:px-8 sm:pb-10 text-center">
-            <p className="text-xs font-medium tracking-wide text-white/70">Welcome back</p>
-            <p className="mt-1 text-2xl sm:text-3xl font-extrabold text-white truncate">{user.name}!</p>
+        <div className="welcome-hero relative rounded-b-[28px] shadow-sm" style={{ background: 'var(--g-gradient)' }}>
+          <div className="welcome-hero-text px-6 pt-6 pb-10 sm:px-8 sm:pb-10 text-center">
+            <p className="welcome-hero-eyebrow text-xs font-medium tracking-wide text-white/70">Welcome back</p>
+            <p className="welcome-hero-name mt-1 text-2xl sm:text-3xl font-extrabold text-white truncate">{user.name}!</p>
+            {/* Shown by the Stone & Olive theme only (stoneOlive.css). */}
+            <p className="welcome-hero-tagline hidden">Work smart. Stay connected.</p>
           </div>
         </div>
 

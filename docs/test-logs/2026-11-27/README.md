@@ -30,3 +30,42 @@ ALL PASS
 ```
 
 Screens: `bill-claim-by-day.png`, `bill-claim-keyboard.png`, `bill-claim-review.png`.
+
+# 2026-11-27 — Stone & Olive theme (branch `claude/attendance-device-rule`)
+
+Profile → Appearance → Stone & Olive (`src/stoneOlive.css`, `src/lib/stoneTheme.ts`).
+`scripts/stone-olive-ui.cjs` picks the theme the way a user does
+(`mpr_bg_theme_v2 = stone`, no injected CSS), opens 21 screens on phone and
+computer, and on each one looks for page errors and for colours outside the
+theme (violet / blue / orange; `scripts/stone-olive-scan.js`):
+
+```
+ok m-dash off-theme colours: 1 errors: 0 {"bg":"stone","ui":"mono"}
+ok m-dash2 off-theme colours: 5 errors: 0
+ok m-leave off-theme colours: 4 errors: 0
+ok m-billclaim off-theme colours: 6 errors: 0
+ok m-myteam off-theme colours: 5 errors: 0
+ok m-chat off-theme colours: 1 errors: 0
+ok m-more off-theme colours: 1 errors: 0
+ok m-confirm off-theme colours: 1 errors: 0
+ok m-danger off-theme colours: 1 errors: 0
+ok m-appearance off-theme colours: 2 errors: 0
+ok m-approve off-theme colours: 2 errors: 0
+ok m-map off-theme colours: 2 errors: 0
+ok d-dash off-theme colours: 7 errors: 0
+ok d-mail off-theme colours: 6 errors: 0
+ok d-chat off-theme colours: 1 errors: 0
+ok d-approve off-theme colours: 1 errors: 0
+ok d-employees off-theme colours: 2 errors: 0
+ok d-access off-theme colours: 0 errors: 0
+ok d-dept off-theme colours: 0 errors: 0
+ok m-login off-theme colours: 0 errors: 0
+ok d-login off-theme colours: 0 errors: 0
+```
+
+No page errors. What the scan still counts is mostly on purpose: the earth-tone
+avatar, amber for late / pending / "No pay", the attendance dial's hand.
+`THEME=orange` with the same script: Orange looks as before (`data-ui="orange"`).
+
+Screens: `stone-olive-phone.jpg` (Dashboard, Chat, a confirm popup,
+Appearance), `stone-olive-web.jpg` (computer Dashboard).

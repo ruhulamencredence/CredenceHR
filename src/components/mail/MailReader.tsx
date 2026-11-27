@@ -45,7 +45,7 @@ export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | '
   const box = size === 'sm' ? 'w-8 h-8 text-[11px]' : 'w-10 h-10 text-xs';
   if (photo) return <img src={photo} alt={name || email} className={`${box} rounded-full object-cover shrink-0 bg-slate-100`} onError={() => setPhoto(null)} />;
   return (
-    <span className={`${box} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
+    <span className={`mail-avatar ${box} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
       {initials(name || email)}
     </span>
   );

@@ -36,7 +36,7 @@ export const givenOf = (t: LeaveTypeInfo): number | null => (t.left == null ? nu
 const num = (n: number) => String(Math.round(n * 10) / 10);
 
 const PALETTE: Record<string, { color: string; soft: string; fg: string }> = {
-  casual: { color: '#2563eb', soft: '#dbeafe', fg: '#1e40af' },
+  casual: { color: 'var(--g-leave-casual, #2563eb)', soft: 'var(--g-leave-casual-soft, #dbeafe)', fg: 'var(--g-leave-casual-fg, #1e40af)' },
   sick: { color: '#0d9488', soft: '#ccfbf1', fg: '#115e59' },
   without_pay: { color: '#d97706', soft: '#fef3c7', fg: '#92400e' }
 };
@@ -140,7 +140,7 @@ export const LeaveGauge: React.FC<{
                 key={a.key}
                 d={ARC}
                 fill="none"
-                stroke={leaveTypeStyle(a.key, keys).color}
+                style={{ stroke: leaveTypeStyle(a.key, keys).color }}
                 strokeWidth="14"
                 strokeLinecap={a.first ? 'round' : 'butt'}
                 strokeDasharray={a.dash}

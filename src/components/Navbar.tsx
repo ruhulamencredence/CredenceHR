@@ -283,7 +283,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     <>
     {blend && createPortal(<div className="page-glow" aria-hidden="true" />, document.body)}
     <header
-      className={`sticky top-0 z-50 ${blend ? `hdr-blend${scrolled ? ' hdr-blend-scrolled' : ''}` : ''}`}
+      className={`app-header sticky top-0 z-50 ${blend ? `hdr-blend${scrolled ? ' hdr-blend-scrolled' : ''}` : ''} ${purple ? 'app-header-colour' : ''}`}
       style={{
         // On the native Android APK the header no longer sits on plain
         // transparent/page background — it's filled with the same violet

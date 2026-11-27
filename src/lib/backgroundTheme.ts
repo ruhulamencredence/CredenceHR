@@ -17,7 +17,9 @@
 // index.css's body::before (a position: fixed, window-sized layer) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'orange' | 'default' | 'apple-glow' | 'mono';
+import { THEME_CHANGE_EVENT } from './stoneTheme';
+
+export type BackgroundThemeId = 'orange' | 'default' | 'apple-glow' | 'mono' | 'stone';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -88,6 +90,18 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     swatch: '#18181B',
     gradient: 'linear-gradient(180deg, #f6f6f7 0%, #f1f1f2 100%)',
     ui: 'mono'
+  },
+  {
+    // Stone & Olive: warm stone greys, olive accents and frosted glass cards
+    // over a soft photo of a Credence building; the phone Dashboard's welcome
+    // banner shows the building itself. Built on Minimal Mono (data-ui="mono")
+    // plus src/stoneOlive.css, keyed on <html data-bg="stone">. Its colours
+    // are fixed, so Mono's colour touch and the header glow don't apply.
+    id: 'stone',
+    label: 'Stone & Olive',
+    swatch: 'linear-gradient(160deg, #cfe0f2 0%, #f4f1ea 45%, #9cb030 75%, #4a5524 100%)',
+    gradient: 'linear-gradient(180deg, #f3f0ea 0%, #ece7df 100%)',
+    ui: 'mono'
   }
 ];
 
@@ -147,9 +161,9 @@ const monoGradient = (accent: MonoAccentId) => {
     : base;
 };
 export function applyMonoAccent(id: MonoAccentId, remember = false): void {
-  if (id === 'none') delete document.documentElement.dataset.accent;
+  if (id === 'none' || document.documentElement.dataset.bg === 'stone') delete document.documentElement.dataset.accent;
   else document.documentElement.dataset.accent = id;
-  if (document.documentElement.dataset.ui === 'mono') document.documentElement.style.setProperty('--g-bg-gradient', monoGradient(id));
+  if (document.documentElement.dataset.ui === 'mono' && document.documentElement.dataset.bg !== 'stone') document.documentElement.style.setProperty('--g-bg-gradient', monoGradient(id));
   if (!remember) return;
   try {
     localStorage.setItem(ACCENT_KEY, id);
@@ -169,8 +183,11 @@ export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): v
   document.documentElement.dataset.bg = theme.id;
   if (theme.ui) document.documentElement.dataset.ui = theme.ui;
   else delete document.documentElement.dataset.ui;
-  document.documentElement.style.setProperty('--g-bg-gradient', theme.ui === 'mono' ? monoGradient(getSavedMonoAccent()) : theme.gradient);
-  if (theme.ui === 'mono') applyMonoAccent(getSavedMonoAccent());
+  const stone = theme.id === 'stone';
+  document.documentElement.style.setProperty('--g-bg-gradient', theme.ui === 'mono' && !stone ? monoGradient(getSavedMonoAccent()) : theme.gradient);
+  if (stone) delete document.documentElement.dataset.accent;
+  else if (theme.ui === 'mono') applyMonoAccent(getSavedMonoAccent());
+  window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme.id }));
   if (!remember) return;
   try {
     localStorage.setItem(STORAGE_KEY, theme.id);
@@ -205,6 +222,7 @@ export function getSavedHeaderGlow(): HeaderGlowId | null {
 // own (Classic -> sky blue, Apple Glow -> violet, Orange -> warm orange; Minimal Mono's grey has no
 // match here).
 export function effectiveHeaderGlow(theme: BackgroundThemeId): HeaderGlowId | null {
+  if (theme === 'stone') return null; // its header is fixed (stoneOlive.css)
   return getSavedHeaderGlow() ?? (theme === 'default' ? 'sky' : theme === 'apple-glow' ? 'violet' : theme === 'orange' ? 'orange' : null);
 }
 export function applyHeaderGlow(id: HeaderGlowId | null, remember = false): void {

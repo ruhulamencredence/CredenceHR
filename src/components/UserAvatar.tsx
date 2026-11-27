@@ -15,7 +15,8 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
-const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+// --g-av-2…8 are set only by a theme that recolours avatars (Stone & Olive).
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', 'var(--g-av-2, #059669)', 'var(--g-av-3, #0891b2)', 'var(--g-av-4, #d97706)', 'var(--g-av-5, #dc2626)', 'var(--g-av-6, #4f46e5)', 'var(--g-av-7, #be185d)', 'var(--g-av-8, #0d9488)'];
 
 export function avatarColorFor(seed: string): string {
   let hash = 0;
