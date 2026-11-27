@@ -84,6 +84,11 @@ erDiagram
     mediumblob image
     datetime signed_at
   }
+  claim_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
   claims {
     int id PK
     int user_id FK
@@ -184,6 +189,7 @@ erDiagram
   users ||..o{ bill_claim_rule_reads : "user_id"
   users ||--o{ bill_claims : "user_id"
   approval_requests ||..o{ claim_approval_signatures : "approval_request_id"
+  users ||--o{ claim_department_access : "user_id"
   users ||--o{ claims : "user_id"
   bill_claims ||--o{ conveyance_bill_items : "bill_claim_id"
   conveyance_bills ||--o{ conveyance_bill_items : "bill_id"

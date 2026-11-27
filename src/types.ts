@@ -1569,7 +1569,7 @@ export interface MprUsage {
 // server only accepts it if the device's GPS coordinates fall inside that Project's
 // location_radius circle (see projects.location_lat/lng/radius). One row per
 // (user_id, project_id, attendance_date) — check-in and check-out share the same row.
-// GET /api/attendance/report/monthly?year=&month=&project_id=&user_id=&department=
+// GET /api/attendance/report/monthly?year=&month=&project_ids=&branch_ids=&branch_type=&user_id=&departments=
 // (Admin Panel -> Monthly Attendance Report -> Month Wise, gated by the
 // 'attendance_reports' module — separate from the raw 'attendance' log
 // module so a Superadmin can grant just the summary report to a role
@@ -1629,7 +1629,7 @@ export interface MonthlyAttendanceReport {
   users: MonthlyAttendanceReportRow[];
 }
 
-// GET /api/attendance/report/daily?date=&project_id=&user_id=&department=
+// GET /api/attendance/report/daily?date=&project_ids=&branch_ids=&branch_type=&user_id=&departments=
 // (Admin Panel -> Monthly Attendance Report -> Date Wise) — every User split
 // into who checked in/out that single calendar day vs. who didn't, gated by
 // 'attendance_reports'. user_id narrows present/absent/on_holiday to a single

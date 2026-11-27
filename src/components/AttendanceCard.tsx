@@ -66,7 +66,7 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
     const fix = await nativeAttendanceFix();
     if (fix) return fix;
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
-    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
   }
 
   if (!navigator.geolocation) {
@@ -77,9 +77,9 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
     throw new Error('This page is not secure (http://), so the browser blocks location. Open the site with https:// and try again.');
   }
   const ask = (highAccuracy: boolean, timeout: number) =>
-    new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
+    new Promise<AttendanceFix>((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy }),
         (err) => reject(err),
         { enableHighAccuracy: highAccuracy, timeout, maximumAge: 30000 }
       );
@@ -389,6 +389,22 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
     }
   };
 
+  // Which Project a fix is at: the one whose area it is inside; outside every
+  // own Project = off-site (for approval, the map shows the nearest); no
+  // Project with a location = the first (the server says what's missing).
+  // Worked out again for every better fix the map gets (a coarse first fix
+  // must not decide it).
+  const placeOf = (coords: AttendanceFix): { projectId: string; offsite: boolean } => {
+    const placed = projects
+      .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
+      .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
+      .sort((a, b) => a.d - b.d);
+    const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
+    if (inside.length) return { projectId: String(inside[0].p.id), offsite: false };
+    if (!placed.length) return { projectId: String(projects[0].id), offsite: false };
+    return { projectId: String(placed[0].p.id), offsite: true };
+  };
+
   const handleMark = async (kind: 'in' | 'out') => {
     // A device that can't give attendance (Android browser / computer): say why, send nothing.
     if (block) {
@@ -403,25 +419,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
     try {
       const coords = await getCurrentCoords();
       if (coords.mock) throw new Error(MOCK_LOCATION_MESSAGE);
-      const placed = projects
-        .filter((p) => p.location_lat != null && p.location_lng != null && p.location_radius)
-        .map((p) => ({ p, d: distanceMeters(coords.latitude, coords.longitude, Number(p.location_lat), Number(p.location_lng)) }))
-        .sort((a, b) => a.d - b.d);
-      const inside = placed.filter((x) => x.d <= Number(x.p.location_radius));
-      if (inside.length) {
-        setProjectId(String(inside[0].p.id));
-        setPending({ kind, coords });
-      } else if (!placed.length) {
-        // No Project with a location to measure against: as before, the
-        // server says what's missing.
-        setProjectId(String(projects[0].id));
-        setPending({ kind, coords });
-      } else {
-        // Outside every own Project: it can still be given, for approval
-        // (the map shows the nearest one).
-        setProjectId(String(placed[0].p.id));
-        setPending({ kind, coords, offsite: true });
-      }
+      const at = placeOf(coords);
+      setProjectId(at.projectId);
+      setPending({ kind, coords, offsite: at.offsite });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || `Failed to check ${kind}` });
     } finally {
@@ -833,6 +833,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
       {pending && selectedProject && (
         <Suspense fallback={null}>
         <AttendanceMapConfirm
+          // A better fix that lands at another Project redraws the map for it.
+          key={selectedProject.id}
           kind={pending.kind}
           offsite={!!pending.offsite}
           project={selectedProject}
@@ -844,7 +846,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
             setPending(null);
           }}
           onConfirm={handleConfirmPending}
-          onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
+          onCoordsChange={(coords) => {
+            const at = placeOf(coords);
+            setProjectId(at.projectId);
+            setPending((p) => (p ? { ...p, coords, offsite: at.offsite } : p));
+          }}
         />
         </Suspense>
       )}

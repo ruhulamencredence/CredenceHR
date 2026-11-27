@@ -283,7 +283,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
                     key={c.id}
                     className={`hover:bg-slate-50/80 transition-colors ${hasPlace(c) ? 'cursor-pointer' : ''}`}
                     onClick={() => hasPlace(c) && setViewing(c)}
-                    title={hasPlace(c) ? 'Show the Check In / Out location on the map' : undefined}
+                    title={hasPlace(c) ? 'Show the Check In / Out location on the map' : 'No location saved for this Check In/Out (e.g. imported without a Location)'}
                   >
                     <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{c.user_name || '—'}</td>
                     <td className="px-4 py-3 text-slate-700 text-xs max-w-[220px]">

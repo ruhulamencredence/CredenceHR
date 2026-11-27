@@ -40,6 +40,7 @@ import { retryImport } from '../lib/chunkReload';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
+import { MultiSelectFilter } from './MultiSelectFilter';
 import { SearchSelect } from './Combobox';
 import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
 import { ProjectAccessPopup } from './ProjectAccessPopup';
@@ -1169,9 +1170,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the NEW per-Employee/per-Request-Type Templates (ApprovalTemplateManager).
   // This just switches which one is visible; both hit their own APIs.
   const [approvalsSection, setApprovalsSection] = useState<'queue' | 'templates'>('queue');
-  const [reportProjectFilter, setReportProjectFilter] = useState('');
+  // Month Wise / Date Wise filters: several Projects, Departments or Branches can be ticked at once.
+  const [reportProjectFilter, setReportProjectFilter] = useState<string[]>([]);
+  const [reportBranchFilter, setReportBranchFilter] = useState<string[]>([]);
+  const [reportBranchType, setReportBranchType] = useState<'' | 'head_office' | 'project_site'>('');
   const [reportEmployeeFilter, setReportEmployeeFilter] = useState('');
-  const [reportDepartmentFilter, setReportDepartmentFilter] = useState('');
+  const [reportDepartmentFilter, setReportDepartmentFilter] = useState<string[]>([]);
   const [reportDepartments, setReportDepartments] = useState<string[]>([]);
   // Active / Inactive employees (by their Employee record); '' = everyone.
   // Active by default (the server's default too); Inactive / All when picked.
@@ -1216,13 +1220,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [monthGridPageSize, setMonthGridPageSize] = useState(50);
   const [exportingMonthlyReport, setExportingMonthlyReport] = useState(false);
   const monthlyReportReq = useRef(0);
+  // The filters both reports share, as query parameters.
+  const reportFilterParams = (params: URLSearchParams) => {
+    if (reportProjectFilter.length) params.set('project_ids', reportProjectFilter.join(','));
+    if (reportBranchFilter.length) params.set('branch_ids', reportBranchFilter.join(','));
+    if (reportBranchType) params.set('branch_type', reportBranchType);
+    if (reportDepartmentFilter.length) params.set('departments', reportDepartmentFilter.join(','));
+    return params;
+  };
   const monthlyReportParams = () => {
     const params = new URLSearchParams();
     params.set('year', String(reportYear));
     params.set('month', String(reportMonth));
-    if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+    reportFilterParams(params);
     if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-    if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
     if (reportStatusFilter) params.set('status', reportStatusFilter);
     return params;
   };
@@ -1253,9 +1264,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     try {
       const params = new URLSearchParams();
       params.set('date', reportDate);
-      if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+      reportFilterParams(params);
       if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-      if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
       if (reportStatusFilter) params.set('status', reportStatusFilter);
       const res = await fetch(apiUrl(`/api/attendance/report/daily?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setDailyReport(await res.json());
@@ -1271,15 +1281,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // raw id/value the API call itself used).
   const activeReportFilters = (): [string, string][] => {
     const filters: [string, string][] = [];
-    if (reportProjectFilter) {
-      const proj = projects.find((p) => String(p.id) === reportProjectFilter);
-      filters.push(['Project', proj?.project_name || reportProjectFilter]);
+    if (reportBranchType) filters.push(['Office / Project', reportBranchType === 'head_office' ? 'Head Office' : 'Project Side']);
+    if (reportProjectFilter.length) {
+      filters.push(['Project', reportProjectFilter.map((id) => projects.find((p) => String(p.id) === id)?.project_name || id).join(', ')]);
+    }
+    if (reportBranchFilter.length) {
+      filters.push(['Branch', reportBranchFilter.map((id) => (branches as any[]).find((b) => String(b.id) === id)?.branch_name || id).join(', ')]);
     }
     if (reportEmployeeFilter) {
       const emp = people.find((u) => String(u.id) === reportEmployeeFilter);
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
-    if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
+    if (reportDepartmentFilter.length) filters.push(['Department', reportDepartmentFilter.join(', ')]);
     filters.push(['Status', reportStatusFilter === 'active' ? 'Active employees' : reportStatusFilter === 'inactive' ? 'Inactive employees' : 'All employees']);
     return filters;
   };
@@ -1323,7 +1336,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             const isHoliday = !!d.day_type;
             return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '-';
           });
-          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
+          return [u.department ? `${u.user_name} (${u.department})` : u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
         }),
         styles: { ...STD_STYLES, fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
         columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
@@ -1606,6 +1619,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projectBranchFilter, setProjectBranchFilter] = useState<'all' | 'head_office' | 'project_site' | 'none' | 'archived'>('all');
   // Branches list: which slice to show, the "Link by name" preview and the "Merge" popup.
   const [branchListFilter, setBranchListFilter] = useState<'active' | 'head_office' | 'project_site' | 'no_project' | 'archived'>('active');
+  // Branches -> "Link Branches…": pick the Project for each Branch whose name differs from it.
+  const [linkChoose, setLinkChoose] = useState<null | { loading: boolean; branches: any[]; projects: any[]; choice: Record<number, string>; busy: boolean; error?: string }>(null);
   const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
   // "Set Division from Branch" (BranchTools.ts): preview, then apply.
   const [divisionSync, setDivisionSync] = useState<null | { loading: boolean; busy: boolean; data?: any; error?: string }>(null);
@@ -2335,6 +2350,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  const openLinkChoose = async () => {
+    setLinkChoose({ loading: true, branches: [], projects: [], choice: {}, busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-suggestions'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the Branches.');
+      const choice: Record<number, string> = {};
+      for (const b of data.branches || []) if (b.sure && b.suggested_project_id) choice[b.branch_id] = String(b.suggested_project_id);
+      setLinkChoose({ loading: false, branches: data.branches || [], projects: data.projects || [], choice, busy: false });
+    } catch (err: any) {
+      setLinkChoose({ loading: false, branches: [], projects: [], choice: {}, busy: false, error: err.message });
+    }
+  };
+  const confirmLinkChoose = async () => {
+    if (!linkChoose) return;
+    const pairs = Object.entries(linkChoose.choice).filter(([, v]) => v).map(([b, v]) => ({ branch_id: Number(b), project_id: Number(v) }));
+    if (!pairs.length) return;
+    const twice = pairs.length - new Set(pairs.map((p) => p.project_id)).size;
+    if (twice > 0) {
+      setLinkChoose({ ...linkChoose, error: 'A Project can be linked to only one Branch — two Branches have the same Project picked.' });
+      return;
+    }
+    setLinkChoose({ ...linkChoose, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-pairs'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ pairs })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not link.');
+      setLinkChoose(null);
+      fetchAllData();
+      setMessage({ type: data.skipped?.length ? 'error' : 'success', text: `${data.linked} Branch${data.linked === 1 ? '' : 'es'} linked.${data.skipped?.length ? ` ${data.skipped.length} skipped: ${data.skipped.slice(0, 3).join('; ')}${data.skipped.length > 3 ? '…' : ''}` : ''}` });
+    } catch (err: any) {
+      setLinkChoose({ ...linkChoose, busy: false, error: err.message });
+    }
+  };
   const openLinkByName = async () => {
     setLinkByName({ loading: true, pairs: [], skipped: [], picked: new Set(), busy: false });
     try {
@@ -4752,17 +4805,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               {attendanceReportView !== 'dept' && attendanceReportView !== 'custom' && (<>
               <div>
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Project</label>
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Office / Project</label>
                 <SearchSelect
-                  value={reportProjectFilter}
-                  onChange={(e) => setReportProjectFilter(e.target.value)}
+                  value={reportBranchType}
+                  onChange={(e) => {
+                    // Choosing Head Office / Project Side ticks every Branch / Site of that kind
+                    // (untick any you don't want); All clears the Branch / Site pick.
+                    const kind = e.target.value as '' | 'head_office' | 'project_site';
+                    setReportBranchType(kind);
+                    setReportBranchFilter(kind ? (branches as any[]).filter((b) => !Number(b.is_archived) && b.branch_type === kind).map((b) => String(b.id)) : []);
+                    setReportProjectFilter([]);
+                  }}
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
-                  <option value="">All Projects</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.project_name}</option>
-                  ))}
+                  <option value="">All</option>
+                  <option value="head_office">Head Office</option>
+                  <option value="project_site">Project Side</option>
                 </SearchSelect>
+              </div>
+
+              <div>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Branch / Site</span>
+                <MultiSelectFilter
+                  label="Branch / Site"
+                  options={(branches as any[])
+                    .filter((b) => !Number(b.is_archived) && (!reportBranchType || b.branch_type === reportBranchType))
+                    .map((b) => ({ value: String(b.id), label: b.branch_name }))}
+                  selected={reportBranchFilter}
+                  onChange={setReportBranchFilter}
+                />
+              </div>
+
+              <div>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Project (check-ins at)</span>
+                <MultiSelectFilter
+                  label="Project"
+                  options={projects
+                    .filter((p) => !Number((p as any).is_archived) && (!reportBranchType || (p as any).linked_branch_type === reportBranchType))
+                    .map((p) => ({ value: String(p.id), label: p.project_name }))}
+                  selected={reportProjectFilter}
+                  onChange={setReportProjectFilter}
+                />
               </div>
 
               <div>
@@ -4784,17 +4867,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
 
               <div>
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Department</label>
-                <SearchSelect
-                  value={reportDepartmentFilter}
-                  onChange={(e) => setReportDepartmentFilter(e.target.value)}
-                  className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
-                >
-                  <option value="">All Departments</option>
-                  {reportDepartments.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </SearchSelect>
+                <span className="block text-[10px] font-semibold text-slate-500 mb-1">Department</span>
+                <MultiSelectFilter
+                  label="Department"
+                  options={reportDepartments.map((d) => ({ value: d, label: d }))}
+                  selected={reportDepartmentFilter}
+                  onChange={setReportDepartmentFilter}
+                />
               </div>
 
               <div>
@@ -4948,7 +5027,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <tbody className="divide-y divide-slate-100 text-sm">
                     {monthlyReport.users.map((u: any) => (
                       <tr key={u.user_id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}{u.department && <span className="block text-[10px] font-normal text-slate-400">{u.department}</span>}</td>
                         {u.days.map((d: any) => {
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
@@ -5078,38 +5157,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <table className="min-w-full divide-y divide-slate-200">
                     <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                       <tr>
-                        <th className="px-4 py-2.5 text-left">User</th>
-                        <th className="px-4 py-2.5 text-left">Source</th>
-                        <th className="px-4 py-2.5 text-left">Project</th>
-                        <th className="px-4 py-2.5 text-left">Check In</th>
-                        <th className="px-4 py-2.5 text-left">Check Out</th>
-                        <th className="px-4 py-2.5 text-left">Remarks</th>
+                        <th className="px-3 py-2.5 text-left">User</th>
+                        <th className="px-3 py-2.5 text-left">Check In</th>
+                        <th className="px-3 py-2.5 text-left">Check Out</th>
+                        <th className="px-3 py-2.5 text-left">Remarks</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {dailyReport.present.map((r: any) => (
                         <tr key={r.user_id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{r.user_name}</td>
-                          <td className="px-4 py-3 whitespace-nowrap text-xs">
-                            {/* "Which way" the attendance was given — GPS (Remote
-                                Attendance, Self Service Check In/Out) or ZKT
-                                (the office biometric device). */}
-                            {r.source === 'office' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
-                                ZKT
-                              </span>
-                            ) : r.source === 'site' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
-                                Team
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
-                                GPS
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
-                            {r.source === 'office' || r.source === 'site' ? <span className="text-slate-300">—</span> : r.project_name || '—'}
+                          <td className="px-3 py-2.5 text-xs">
+                            <div className="font-semibold text-slate-900 whitespace-nowrap">{r.user_name}</div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+                              {/* "Which way" the attendance was given — GPS (Remote Attendance), ZKT (office device) or Team. */}
+                              {r.source === 'office' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
+                                  ZKT
+                                </span>
+                              ) : r.source === 'site' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700">
+                                  Team
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                                  GPS
+                                </span>
+                              )}
+                              {r.source !== 'office' && r.source !== 'site' && r.project_name && <span className="truncate max-w-[150px]" title={r.project_name}>{r.project_name}</span>}
+                            </div>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap text-xs">
                             {r.check_in_at ? (
@@ -5153,20 +5228,52 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   dailyReport.on_holiday.length === 0 ? (
                     <p className="text-xs text-slate-400 text-center py-8">Everyone checked in this day.</p>
                   ) : (
-                    <ul className="divide-y divide-slate-100 text-xs">
+                    <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <tr><th className="px-3 py-2.5">Name</th><th className="px-3 py-2.5">Department / Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
                       {dailyReport.on_holiday.map((u: any) => (
-                        <li key={u.user_id} className="px-4 py-2.5 text-slate-700">{u.user_name}</li>
+                        <tr key={u.user_id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium whitespace-nowrap">{u.user_name}</div>
+                            <div className="text-[10px] text-slate-500">{[u.employee_code, u.designation].filter(Boolean).join(' · ') || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div>{u.department || '—'}</div>
+                            {u.branch && <div className="text-[10px] text-slate-500">{u.branch}</div>}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
+                        </tr>
                       ))}
-                    </ul>
+                    </tbody>
+                  </table>
                   )
                 ) : dailyReport.absent.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-8">Everyone checked in this day.</p>
                 ) : (
-                  <ul className="divide-y divide-slate-100 text-xs">
-                    {dailyReport.absent.map((u: any) => (
-                      <li key={u.user_id} className="px-4 py-2.5 text-slate-700">{u.user_name}</li>
-                    ))}
-                  </ul>
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      <tr><th className="px-3 py-2.5">Name</th><th className="px-3 py-2.5">Department / Branch</th><th className="px-3 py-2.5">Phone</th><th className="px-3 py-2.5">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {dailyReport.absent.map((u: any) => (
+                        <tr key={u.user_id}>
+                          <td className="px-3 py-2.5">
+                            <div className="font-medium whitespace-nowrap">{u.user_name}</div>
+                            <div className="text-[10px] text-slate-500">{[u.employee_code, u.designation].filter(Boolean).join(' · ') || '—'}</div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div>{u.department || '—'}</div>
+                            {u.branch && <div className="text-[10px] text-slate-500">{u.branch}</div>}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.phone || '—'}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{u.leave_type ? <span className="text-sky-700 font-semibold">On leave · {u.leave_type}</span> : <span className="text-rose-600">No check-in</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </div>
             </div>
@@ -6342,6 +6449,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <p className="text-xs text-slate-500">Company branches — Phase 1 (management only)</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {canSee('projects') && projectsLayer('edit_add') && (
+                      <button
+                        type="button"
+                        onClick={openLinkChoose}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                        title="Pick the Project for each Branch that has none (the closest-named one is suggested)"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Link Branches…
+                      </button>
+                    )}
                     {canSee('projects') && (
                       <button
                         type="button"
@@ -8826,6 +8944,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {divisionSync.busy ? 'Changing…' : `Change ${divisionSync.data.will_change} Division${divisionSync.data.will_change === 1 ? '' : 's'}`}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {linkChoose && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Link Branches to Projects</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              These Branches have active staff but no Project, so people on "Their Branch" check-in see no Project to check in at. Pick the Project for each Branch; the clearly-best match is already picked, the rest you choose. Names and map pins are never changed. Leave a row empty to skip it.
+            </p>
+            {linkChoose.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Looking at the Branches…</p>
+            ) : linkChoose.branches.length === 0 && !linkChoose.error ? (
+              <p className="text-sm text-slate-500 mt-4">Every Branch with active staff already has a Project.</p>
+            ) : (
+              <div className="mt-3 space-y-1.5">
+                {linkChoose.branches.map((b) => (
+                  <div key={b.branch_id} className="liquid-glass-inset rounded-2xl px-3.5 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-slate-800">
+                    <div className="min-w-[180px] flex-1">
+                      <div className="font-semibold">{b.branch_name}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {b.staff} staff{b.their_branch_users > 0 ? ` · ${b.their_branch_users} on "Their Branch"` : ''}
+                      </div>
+                      {b.suggested_project_id && !b.sure && !linkChoose.choice[b.branch_id] && (
+                        <button
+                          type="button"
+                          className="mt-0.5 text-left text-[11px] text-blue-700 hover:underline"
+                          onClick={() => setLinkChoose({ ...linkChoose, error: undefined, choice: { ...linkChoose.choice, [b.branch_id]: String(b.suggested_project_id) } })}
+                        >
+                          Closest name: {linkChoose.projects.find((p) => p.id === b.suggested_project_id)?.name || '—'} — click to pick
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-slate-400">→</span>
+                    <div className="min-w-[220px] flex-[1.4]">
+                      <SearchSelect
+                        value={linkChoose.choice[b.branch_id] || ''}
+                        onChange={(e) => setLinkChoose({ ...linkChoose, error: undefined, choice: { ...linkChoose.choice, [b.branch_id]: e.target.value } })}
+                        className="block w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="">— No Project (skip) —</option>
+                        {linkChoose.projects.map((p) => (
+                          <option key={p.id} value={String(p.id)}>{p.name}</option>
+                        ))}
+                      </SearchSelect>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {linkChoose.error && <p className="text-sm text-rose-600 mt-3">{linkChoose.error}</p>}
+            <div className="mt-5 flex items-center justify-between gap-2.5">
+              <span className="text-[12px] text-slate-500">{Object.values(linkChoose.choice).filter(Boolean).length} of {linkChoose.branches.length} picked</span>
+              <div className="flex gap-2.5">
+                <button type="button" onClick={() => setLinkChoose(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={linkChoose.busy || Object.values(linkChoose.choice).filter(Boolean).length === 0}
+                  onClick={confirmLinkChoose}
+                  className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {linkChoose.busy ? 'Linking…' : `Link ${Object.values(linkChoose.choice).filter(Boolean).length} Branch${Object.values(linkChoose.choice).filter(Boolean).length === 1 ? '' : 'es'}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

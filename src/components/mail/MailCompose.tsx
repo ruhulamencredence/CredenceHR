@@ -442,8 +442,9 @@ export const MailCompose: React.FC<{
   const [bcc, setBcc] = useState(init.bcc || '');
   // "Send through the mail server": this mail skips inside delivery and goes by
   // SMTP to everyone. New mail starts from the person's own saved default.
-  const [viaServer, setViaServer] = useState(!!init.viaServer);
-  const [viaDefault, setViaDefault] = useState(false);
+  // On by default (owner's decision, 26 Nov 2026): unticking sends it inside.
+  const [viaServer, setViaServer] = useState(init.viaServer !== undefined ? !!init.viaServer : !init.draftId);
+  const [viaDefault, setViaDefault] = useState(true);
   useEffect(() => {
     let gone = false;
     mailFetch<{ sendViaServer?: boolean }>(token, '/settings')

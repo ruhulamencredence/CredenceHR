@@ -325,6 +325,7 @@ useLiveRefresh(() => load(true));
                   <th className="px-4 py-3">Start Date</th>
                   <th className="px-4 py-3">End Date</th>
                   <th className="px-4 py-3">Days</th>
+                  <th className="px-4 py-3">Purpose</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Approver / Decided By</th>
                 </tr>
@@ -339,6 +340,7 @@ useLiveRefresh(() => load(true));
                       <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
                       <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
                       <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-[260px] whitespace-pre-wrap break-words">{a.purpose || '—'}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
                           a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
@@ -407,6 +409,11 @@ useLiveRefresh(() => load(true));
                     </p>
                   </div>
                 </div>
+                {a.purpose && (
+                  <div className="mt-2 text-[11px] text-slate-600 whitespace-pre-wrap break-words">
+                    <span className="font-medium text-slate-700">Purpose:</span> {a.purpose}
+                  </div>
+                )}
                 {a.status === 'pending' ? (
                   <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center gap-1.5 text-[11px] text-amber-700">
                     <Clock className="w-3 h-3" /> {a.no_approver ? 'No approver set yet — tell HR' : `Awaiting approval${a.approver_name ? ` from ${a.approver_name}` : ''}`}

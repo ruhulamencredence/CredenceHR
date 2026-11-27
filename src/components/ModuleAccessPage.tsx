@@ -211,11 +211,12 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
 };
 
 const LAYER_MODULES = PERMISSION_LAYER_MODULES as readonly string[];
-type DeptKind = 'attendance_reports' | 'leave_applications' | 'bill_claim' | 'duty_roster';
+type DeptKind = 'attendance_reports' | 'leave_applications' | 'bill_claim' | 'claims' | 'duty_roster';
 const DEPT_KINDS: { module: DeptKind; endpoint: string; title: string; hint: string; preTick: boolean }[] = [
   { module: 'attendance_reports', endpoint: 'attendance-report-departments', title: 'Departments on the Monthly Attendance Report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'leave_applications', endpoint: 'leave-application-departments', title: 'Departments on the Monthly Leave Application report', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'bill_claim', endpoint: 'bill-claim-departments', title: 'Departments on Bill Claim', hint: 'Nothing ticked = every Department.', preTick: true },
+  { module: 'claims', endpoint: 'claim-departments', title: 'Departments on Check In/Out', hint: 'Nothing ticked = every Department.', preTick: true },
   { module: 'duty_roster', endpoint: 'roster-departments', title: 'Departments whose roster they set', hint: 'Nothing ticked = every Department and the shifts too (full setup, e.g. HR). Ticked = only those, shifts read only.', preTick: false }
 ];
 
