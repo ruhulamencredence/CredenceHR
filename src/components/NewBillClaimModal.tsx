@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, ShieldCheck } from 'lucide-react';
+import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Trash2, Lock, ShieldCheck, ArrowRight, ArrowLeft } from 'lucide-react';
 import { ClaimRecord, MyBillClaimPolicy, BillClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
@@ -101,7 +101,15 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   const claimDate = today;
   const [fromDate, setFromDate] = useState(todayDateOnlyString());
   const [toDate, setToDate] = useState(todayDateOnlyString());
-  const [bills, setBills] = useState<BillDraft[]>(() => [newBill(todayDateOnlyString())]);
+  const [bills, setBills] = useState<BillDraft[]>([]);
+  // The form is two steps: the bills, day by day, then a Review with the
+  // description, the attachment and Submit.
+  const [step, setStep] = useState<'bills' | 'review'>('bills');
+  // The bill being added / changed (its key), and how it was before — Cancel
+  // puts it back (or drops it, when it was just added).
+  const [editing, setEditing] = useState<number | null>(null);
+  const [snapshot, setSnapshot] = useState<{ bill: BillDraft; refs: Record<number, string> } | null>(null);
+  const [editError, setEditError] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
@@ -152,7 +160,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             amount: String(it.amount),
             description: it.description || ''
           }));
-          setBills(lines.length ? lines : [newBill(day(editClaim.from_date))]);
+          setBills(lines);
           setDescription(editClaim.description || '');
           const refs: Record<number, string> = {};
           for (const r of editClaim.claim_refs || []) refs[r.claim_id] = String(r.amount);
@@ -172,7 +180,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           } else {
             setFromDate(data.today);
             setToDate(data.today);
-            setBills([newBill(data.today)]);
+            setBills([]);
           }
         }
         setDraftReady(true);
@@ -210,7 +218,9 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     const day = policy?.today || todayDateOnlyString();
     setFromDate(day);
     setToDate(day);
-    setBills([newBill(day)]);
+    setBills([]);
+    setEditing(null);
+    setStep('bills');
     setDescription('');
     setSelectedRefs({});
     setFile(null);
@@ -228,8 +238,6 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
 
   const updateBill = (key: number, patch: Partial<BillDraft>) => setBills((prev) => prev.map((b) => (b.key === key ? { ...b, ...patch } : b)));
   const removeBill = (key: number) => setBills((prev) => prev.filter((b) => b.key !== key));
-  const addBill = () =>
-    setBills((prev) => (prev.length >= maxBills ? prev : [...prev, newBill(prev[prev.length - 1]?.bill_date || fromDate)]));
 
   // Changing the range pulls any bill date that falls outside it back inside,
   // and drops picked check-in/outs that are now outside it.
@@ -313,6 +321,259 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     (receiptAbove > 0 && claimTotal > receiptAbove) ||
     (!!policy?.values.enforce_category_limits && bills.some((b) => categories.find((c) => String(c.id) === b.category_id)?.receipt_required));
 
+  // ---- Day-by-day form ----------------------------------------------------
+  // Every date of the From–To range (a range is a few days; capped anyway).
+  const days: string[] = [];
+  if (fromDate && toDate && fromDate <= toDate) {
+    const d = new Date(`${fromDate}T00:00:00Z`);
+    while (days.length < 93) {
+      const iso = d.toISOString().slice(0, 10);
+      if (iso > toDate) break;
+      days.push(iso);
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  }
+  const dayLabel = (iso: string) => `${new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}, ${formatDate(iso)}`;
+  // A chip per category; no second Transport when the policy allows one.
+  const chipCategories = categories.filter((c) => !(transportFromRefs && isTransportName(c.name) && transportBill));
+  const addBillOn = (day: string, categoryId: string) => {
+    if (bills.length >= maxBills) return;
+    const b = { ...newBill(day), category_id: categoryId };
+    setBills((prev) => [...prev, b]);
+    setSnapshot(null);
+    setEditError('');
+    setError('');
+    setEditing(b.key);
+  };
+  // "Same as <the day before>": its bills (not Transport — that one comes from
+  // Check In/Out) on this day too, as far as the bill limit allows.
+  const copyDay = (from: string, to: string) => {
+    const src = bills.filter((b) => b.bill_date === from && b.category_id && !isTransportBill(b));
+    const room = maxBills - bills.length;
+    setBills((prev) => [...prev, ...src.slice(0, room).map((b) => ({ ...b, key: nextBillKey++, bill_date: to }))]);
+  };
+  const startEdit = (key: number) => {
+    const b = bills.find((x) => x.key === key);
+    if (!b) return;
+    setSnapshot({ bill: { ...b }, refs: { ...selectedRefs } });
+    setEditError('');
+    setError('');
+    setEditing(key);
+  };
+  const editingBill = editing !== null ? bills.find((b) => b.key === editing) || null : null;
+  const editingIsNew = editing !== null && snapshot === null;
+  const cancelEdit = () => {
+    if (editing === null) return;
+    if (snapshot) {
+      const before = snapshot.bill;
+      setBills((prev) => prev.map((b) => (b.key === before.key ? before : b)));
+      setSelectedRefs(snapshot.refs);
+    } else removeBill(editing);
+    setEditing(null);
+    setSnapshot(null);
+    setEditError('');
+  };
+  const finishEdit = () => {
+    const b = editingBill;
+    if (!b) return setEditing(null);
+    const cat = categories.find((c) => String(c.id) === b.category_id);
+    const amt = billAmount(b);
+    let msg = '';
+    if (!cat) msg = 'Choose a category.';
+    else if (refsDriveBill(b)) {
+      if (transportFromRefs && !hasRefs) msg = 'Tick the check-in/out(s) this travel was for.';
+      else if (Object.values(selectedRefs).some((v) => !(Number(v) > 0))) msg = 'Enter the amount of each ticked check-in/out.';
+    } else if (!(amt > 0)) msg = 'Enter an amount greater than 0.';
+    if (!msg && policy?.values.enforce_category_limits && cat?.max_per_bill != null && amt > cat.max_per_bill) msg = `${cat.name} bills can be at most ${money(cat.max_per_bill)} each.`;
+    if (msg) return setEditError(msg);
+    setEditing(null);
+    setSnapshot(null);
+    setEditError('');
+  };
+  // What is left of the category's daily limit on that day (this bill counted).
+  const leftToday = (b: BillDraft): number | null => {
+    const cat = categories.find((c) => String(c.id) === b.category_id);
+    if (!policy?.values.enforce_category_limits || cat?.daily_limit == null) return null;
+    const used = bills.filter((x) => x.bill_date === b.bill_date && x.category_id === b.category_id).reduce((s, x) => s + billAmount(x), 0);
+    return Math.round((cat.daily_limit - used) * 100) / 100;
+  };
+  const editingLeft = editingBill ? leftToday(editingBill) : null;
+  const goReview = () => {
+    if (editing !== null) return;
+    const v = validate(true);
+    if (v) return setError(v);
+    setError('');
+    setStep('review');
+  };
+  // Review: the total by category.
+  const reviewRows: { name: string; count: number; total: number; trips: number }[] = [];
+  for (const b of bills) {
+    const name = categories.find((c) => String(c.id) === b.category_id)?.name || 'Other';
+    let row = reviewRows.find((r) => r.name === name);
+    if (!row) reviewRows.push((row = { name, count: 0, total: 0, trips: 0 }));
+    row.count += 1;
+    row.total += billAmount(b);
+    if (refsDriveBill(b)) row.trips += Object.keys(selectedRefs).length;
+  }
+
+  // One bill being added / changed: its category, amount and note, its limits,
+  // and — for the Transport bill — the check-in/outs it is made of.
+  const renderEditor = (b: BillDraft, n: number) => {
+    const cat = categories.find((c) => String(c.id) === b.category_id);
+    const left = leftToday(b);
+    return (
+      <div className="rounded-xl border-2 border-blue-400 bg-white p-2.5 space-y-2" aria-label={`Bill ${n}`} data-testid="bill-editor">
+        <div className="flex items-center gap-2">
+          <SearchSelect
+            value={b.category_id}
+            onChange={(e) => updateBill(b.key, { category_id: e.target.value })}
+            aria-label={`Bill ${n} category`}
+            className="flex-1 text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            <option value="">Category…</option>
+            {categories
+              .filter((c) => !(transportFromRefs && isTransportName(c.name) && transportBill && transportBill.key !== b.key))
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </SearchSelect>
+          <button
+            type="button"
+            onClick={() => {
+              removeBill(b.key);
+              setEditing(null);
+              setSnapshot(null);
+              setEditError('');
+            }}
+            className="p-1.5 text-slate-400 hover:text-rose-600"
+            aria-label={`Remove bill ${n}`}
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              enterKeyHint="done"
+              autoComplete="off"
+              autoFocus={!refsDriveBill(b)}
+              min="0.01"
+              step="0.01"
+              value={refsDriveBill(b) ? String(refsTotal || '') : b.amount}
+              readOnly={refsDriveBill(b)}
+              onChange={(e) => !refsDriveBill(b) && updateBill(b.key, { amount: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), finishEdit())}
+              placeholder={refsDriveBill(b) ? 'From check-in/out' : 'Amount'}
+              aria-label={`Bill ${n} amount`}
+              className={`w-full text-sm font-semibold px-2.5 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none pl-6 ${
+                refsDriveBill(b) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'
+              }`}
+            />
+          </div>
+          <input
+            value={b.description}
+            onChange={(e) => updateBill(b.key, { description: e.target.value })}
+            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), finishEdit())}
+            enterKeyHint="done"
+            maxLength={200}
+            placeholder="Note (optional)"
+            aria-label={`Bill ${n} note`}
+            className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          />
+        </div>
+        {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null || cat.receipt_required) && (
+          <p className="text-[10px] text-slate-500">
+            {cat.limits_for ? `For ${cat.limits_for}: ` : ''}
+            {[
+              cat.max_per_bill != null ? `up to ${money(cat.max_per_bill)} per bill` : '',
+              cat.daily_limit != null ? `${money(cat.daily_limit)} a day` : '',
+              cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
+              cat.receipt_required ? 'receipt needed' : ''
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+            {left != null && <span className={left < 0 ? 'text-rose-600 font-semibold' : 'text-blue-600 font-semibold'}> · {left < 0 ? `${money(-left)} over` : `${money(left)} left`} today</span>}
+          </p>
+        )}
+        {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = the ticked check-in/outs below ({money(refsTotal)}){transportFromRefs ? " — it can't be typed in." : '.'}</p>}
+        {transportBill && transportBill.key !== b.key && isTransportBill(b) && (
+          <p className="text-[10px] text-slate-500">Check In/Out go with the first Transport bill.</p>
+        )}
+        {transportBill?.key === b.key && (
+          <div className="rounded-lg border border-blue-200 bg-white p-2">
+            <div className="text-[11px] font-semibold text-blue-700 mb-1 flex items-center gap-1.5">
+              <Route className="w-3.5 h-3.5" /> Check In/Out {formatDate(fromDate)}
+              {toDate !== fromDate ? ` – ${formatDate(toDate)}` : ''} {transportFromRefs ? '(required)' : '(optional)'}
+            </div>
+            {loadingClaims ? (
+              <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
+                <Spinner size={14} /> {'Loading your check-in/out history\u2026'}
+              </div>
+            ) : claimsInRange.length === 0 ? (
+              <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
+                {transportFromRefs && ' A Transport bill comes from your Check In/Out — check in and out for the trip first, or choose another category.'}
+              </p>
+            ) : (
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+                {claimsInRange.map((c) => {
+                  const checked = c.id in selectedRefs;
+                  return (
+                    <div key={c.id} className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-start gap-2 cursor-pointer min-w-0 flex-1">
+                          <input type="checkbox" checked={checked} onChange={() => toggleRef(c.id)} className="mt-0.5 w-3.5 h-3.5 accent-blue-600 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-medium text-slate-800 truncate">{c.purpose}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {formatDate(c.check_in_at)}
+                              {c.check_out_at
+                                ? ` \u00b7 ${new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} \u2192 ${new Date(c.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                : ''}
+                              {c.distance_km != null ? ` \u00b7 ${c.distance_km} km` : ''}
+                            </div>
+                          </div>
+                        </label>
+                        {checked && (
+                          <div className="relative w-24 shrink-0">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              enterKeyHint="done"
+                              autoComplete="off"
+                              min="0.01"
+                              step="0.01"
+                              value={selectedRefs[c.id]}
+                              onChange={(e) => setRefAmount(c.id, e.target.value)}
+                              placeholder="Fare"
+                              aria-label={`Fare for ${c.purpose}`}
+                              className="w-full text-xs font-semibold pl-5 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {editError && (
+          <p className="text-[11px] font-semibold text-rose-600" role="alert">
+            {editError}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const handleFilePick = (f: File | null) => {
     setFileError('');
     if (!f) {
@@ -344,7 +605,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     for (const d of Array.from(locked).sort()) if (d >= fromDate && d <= toDate) rangeClash.push(d);
   }
 
-  const validate = (): string | null => {
+  const validate = (beforeReview = false): string | null => {
     if (!policy) return policyError || 'Loading the Bill Claim Policy\u2026';
     if (!fromDate || !toDate) return 'From Date and To Date are required.';
     if (toDate < fromDate) return 'To Date can\u2019t be before From Date.';
@@ -381,7 +642,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     }
     const maxTotal = Number(policy.values.max_claim_total) || 0;
     if (maxTotal > 0 && claimTotal > maxTotal) return `A claim can add up to at most ${money(maxTotal)}.`;
-    if (needsReceipt && !file && !keepsOldFile) return 'Attach the receipt \u2014 this claim needs one.';
+    if (!beforeReview && needsReceipt && !file && !keepsOldFile) return 'Attach the receipt \u2014 this claim needs one.';
     if (description.length > 500) return 'Description is too long.';
     return null;
   };
@@ -461,7 +722,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
         <div className="px-5 pt-5 pb-3 flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-slate-900">
-              {editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Bill Claim'}
+              {step === 'review' ? 'Review claim' : editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Bill Claim'}
             </h3>
             {editClaim?.edit_mode === 'returned' && editClaim.return_reason && (
               <p className="text-xs text-amber-700 mt-0.5">Returned: {editClaim.return_reason}</p>
@@ -507,6 +768,8 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             </div>
           )}
 
+          {step === 'bills' && (
+            <>
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
             <span className="text-slate-500">
               Claim Date: <span className="font-semibold text-slate-800 whitespace-nowrap">{formatDate(claimDate)}</span>
@@ -580,269 +843,252 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             </p>
           )}
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-semibold text-slate-500">Bills *</label>
-              <span className="text-[11px] text-slate-400">
-                {bills.length} / {maxBills}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {bills.map((b, i) => {
-                const dateClosed = locked.has(b.bill_date);
-                const cat = categories.find((c) => String(c.id) === b.category_id);
-                return (
-                  <div key={b.key} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/60 space-y-2" aria-label={`Bill ${i + 1}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-slate-600">Bill {i + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeBill(b.key)}
-                        disabled={bills.length === 1}
-                        className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"
-                        aria-label={`Remove bill ${i + 1}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <SearchSelect
-                        value={b.category_id}
-                        onChange={(e) => updateBill(b.key, { category_id: e.target.value })}
-                        aria-label={`Bill ${i + 1} category`}
-                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      >
-                        <option value="">Category…</option>
-                        {categories
-                          // One Transport bill per claim (policy): no second one.
-                          .filter((c) => !(transportFromRefs && isTransportName(c.name) && transportBill && transportBill.key !== b.key))
-                          .map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
+            </>
+          )}
+
+          {step === 'bills' ? (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-500">Bills *</label>
+                <span className="text-[11px] text-slate-400">
+                  {bills.length} / {maxBills}
+                </span>
+              </div>
+              {/* One card per day of the From–To range: its bills, the day's
+                  total, and a chip per category — a tap adds a bill of that
+                  category on that day, already dated. */}
+              <div className="space-y-2.5">
+                {days.map((day, di) => {
+                  const dayBills = bills.filter((b) => b.bill_date === day);
+                  const dayTotal = dayBills.reduce((s, b) => s + billAmount(b), 0);
+                  const closed = locked.has(day);
+                  const prevDay = di > 0 ? days[di - 1] : null;
+                  const prevCopyable = prevDay ? bills.filter((b) => b.bill_date === prevDay && b.category_id && !isTransportBill(b)) : [];
+                  return (
+                    <div key={day} data-testid="bill-day" data-day={day} className={`border rounded-2xl overflow-hidden ${closed ? 'border-slate-200 bg-slate-50' : 'border-slate-200 bg-white/70'}`}>
+                      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
+                        <span className="text-xs font-semibold text-slate-700">{dayLabel(day)}</span>
+                        <span className="text-[11px] text-slate-400">
+                          {closed ? 'in another claim' : dayBills.length === 0 ? 'no bills' : `${dayBills.length} bill${dayBills.length === 1 ? '' : 's'}`}
+                        </span>
+                        <span className={`ml-auto text-xs font-bold tabular-nums ${dayTotal > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{money(dayTotal)}</span>
+                      </div>
+                      {closed && (
+                        <p className="px-3 pb-2.5 text-[11px] text-slate-500 flex items-center gap-1">
+                          <Lock className="w-3 h-3" />
+                          {policy?.values.one_claim_per_date ? 'This date is already in another claim — edit that claim.' : 'This date was already claimed on an earlier day.'}
+                        </p>
+                      )}
+                      <div className="px-2.5 space-y-1.5">
+                        {dayBills.map((b) => {
+                          const n = bills.findIndex((x) => x.key === b.key) + 1;
+                          const cat = categories.find((c) => String(c.id) === b.category_id);
+                          if (editing === b.key) return <React.Fragment key={b.key}>{renderEditor(b, n)}</React.Fragment>;
+                          const refCount = refsDriveBill(b) ? Object.keys(selectedRefs).length : 0;
+                          return (
+                            <button
+                              key={b.key}
+                              type="button"
+                              onClick={() => startEdit(b.key)}
+                              aria-label={`Bill ${n}: ${cat?.name || 'no category'} ${money(billAmount(b))} — edit`}
+                              className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300"
+                            >
+                              <span className="min-w-0 flex-1 truncate text-xs">
+                                <span className={`font-semibold ${cat ? 'text-slate-800' : 'text-rose-600'}`}>{cat?.name || 'Choose a category'}</span>
+                                {refCount > 0 ? (
+                                  <span className="text-slate-400"> · {refCount} check-in/out{refCount === 1 ? '' : 's'}</span>
+                                ) : b.description ? (
+                                  <span className="text-slate-400"> · {b.description}</span>
+                                ) : null}
+                              </span>
+                              <span className={`text-xs font-semibold tabular-nums ${billAmount(b) > 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                                {billAmount(b) > 0 ? money(billAmount(b)) : 'add amount'}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {!closed && editing === null && (
+                        <div className="flex flex-wrap gap-1.5 px-3 pt-2 pb-2.5">
+                          {chipCategories.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => addBillOn(day, String(c.id))}
+                              disabled={bills.length >= maxBills}
+                              className="text-[11px] font-semibold px-2.5 py-1 rounded-full border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40"
+                            >
+                              + {c.name}
+                            </button>
                           ))}
-                      </SearchSelect>
-                      <input
-                        type="date"
-                        value={b.bill_date}
-                        min={fromDate}
-                        max={toDate}
-                        onChange={(e) => updateBill(b.key, { bill_date: e.target.value })}
-                        aria-label={`Bill ${i + 1} date`}
-                        className={`w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none ${dateClosed ? 'border-rose-400 ring-1 ring-rose-400' : ''}`}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          min="0.01"
-                          step="0.01"
-                          value={refsDriveBill(b) ? String(refsTotal || '') : b.amount}
-                          readOnly={refsDriveBill(b)}
-                          onChange={(e) => !refsDriveBill(b) && updateBill(b.key, { amount: e.target.value })}
-                          placeholder={refsDriveBill(b) ? 'From check-in/out' : 'Amount'}
-                          title={refsDriveBill(b) ? 'The total of the referenced check-in/outs below' : undefined}
-                          aria-label={`Bill ${i + 1} amount`}
-                          className={`w-full text-xs px-2.5 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none pl-6 ${
-                            refsDriveBill(b) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'
-                          }`}
-                        />
-                      </div>
-                      <input
-                        value={b.description}
-                        onChange={(e) => updateBill(b.key, { description: e.target.value })}
-                        maxLength={200}
-                        placeholder="Note (optional)"
-                        aria-label={`Bill ${i + 1} note`}
-                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      />
-                    </div>
-                    {dateClosed && (
-                      <p className="text-[10px] text-rose-600">
-                        {policy?.values.one_claim_per_date ? 'This date is already in another claim — edit that claim.' : 'This date was already claimed on an earlier day.'}
-                      </p>
-                    )}
-                    {refsDriveBill(b) && (
-                      <p className="text-[10px] text-blue-600">
-                        Amount = its check-in/outs below ({money(refsTotal)}){transportFromRefs ? ' — it can\'t be typed in.' : '.'}
-                      </p>
-                    )}
-                    {transportBill && transportBill.key !== b.key && isTransportBill(b) && (
-                      <p className="text-[10px] text-slate-500">Check In/Out go with the first Transport bill (Bill {bills.findIndex((x) => x.key === transportBill.key) + 1}).</p>
-                    )}
-                    {transportBill?.key === b.key && (
-                      // This Transport bill's own check-in/outs — inside its card,
-                      // so a bill added after it can't come between them.
-                      <div className="mt-1 rounded-lg border border-blue-200 bg-white p-2">
-                        <div className="text-[11px] font-semibold text-blue-700 mb-1 flex items-center gap-1.5">
-                          <Route className="w-3.5 h-3.5" /> Check In/Out for Bill {i + 1} {transportFromRefs ? '(required)' : '(optional)'}
+                          {dayBills.length === 0 && prevCopyable.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => copyDay(prevDay!, day)}
+                              disabled={bills.length >= maxBills}
+                              className="text-[11px] font-semibold px-2.5 py-1 rounded-full border border-dashed border-slate-300 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              ⧉ Same as {formatDate(prevDay!).slice(0, 6)}
+                            </button>
+                          )}
                         </div>
-                        {loadingClaims ? (
-                          <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
-                            <Spinner size={14} /> {'Loading your check-in/out history\u2026'}
-                          </div>
-                        ) : claimsInRange.length === 0 ? (
-                          <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                            No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
-                            {transportFromRefs && ' A Transport bill comes from your Check In/Out — check in and out for the trip first, or choose another category.'}
-                          </p>
-                        ) : (
-                          <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
-                            {claimsInRange.map((c) => {
-                              const checked = c.id in selectedRefs;
-                              return (
-                                <div key={c.id} className="px-3 py-2.5">
-                                  <label className="flex items-start gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() => toggleRef(c.id)}
-                                      className="mt-0.5 w-3.5 h-3.5 accent-blue-600 shrink-0"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-medium text-slate-800 truncate">{c.purpose}</div>
-                                      <div className="text-[11px] text-slate-500 mt-0.5">
-                                        {formatDate(c.check_in_at)}
-                                        {c.check_out_at
-                                          ? ` \u00b7 ${new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} \u2192 ${new Date(
-                                              c.check_out_at
-                                            ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                                          : ''}
-                                        {c.distance_km != null ? ` \u00b7 ${c.distance_km} km` : ''}
-                                      </div>
-                                    </div>
-                                  </label>
-                                  {checked && (
-                                    <div className="mt-2 pl-5 relative">
-                                      <span className="absolute left-8 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
-                                      <input
-                                        type="number"
-                                        inputMode="decimal"
-                                        autoComplete="off"
-                                        min="0.01"
-                                        step="0.01"
-                                        value={selectedRefs[c.id]}
-                                        onChange={(e) => setRefAmount(c.id, e.target.value)}
-                                        placeholder="Amount for this check-in/out"
-                                        className="w-full text-xs pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null || cat.receipt_required) && (
-                      <p className="text-[10px] text-slate-400">
-                        {cat.limits_for ? `For ${cat.limits_for}: ` : ''}
-                        {[
-                          cat.max_per_bill != null ? `Up to ${money(cat.max_per_bill)} per bill` : '',
-                          cat.daily_limit != null ? `${money(cat.daily_limit)} a day` : '',
-                          cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
-                          cat.receipt_required ? 'receipt needed' : ''
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
+                      )}
+                      {(closed || editing !== null) && <div className="h-2" />}
+                    </div>
+                  );
+                })}
+              </div>
+              {!transportBill && chipCategories.some((c) => isTransportName(c.name)) && (
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  Travel on office work? Tap <span className="font-semibold">+ Transport</span> to add your Check In/Out.
+                </p>
+              )}
+              <div className="mt-3 flex items-center justify-between px-3 py-2.5 rounded-xl bg-blue-50 text-sm">
+                <span className="text-slate-600">
+                  Claim total
+                  {hasRefs && <span className="text-[11px] text-slate-400"> (Transport {money(refsTotal)} from check-in/out)</span>}
+                </span>
+                <span className="font-bold text-slate-900" data-testid="bill-claim-total">{money(claimTotal)}</span>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={addBill}
-              disabled={bills.length >= maxBills}
-              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-40"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add another bill
-            </button>
-            {!transportBill && (
-              <p className="mt-1.5 text-[11px] text-slate-400">
-                Travel on office work? Choose <span className="font-semibold">Transport</span> as a bill's category to add your Check In/Out to that bill.
-              </p>
-            )}
-          </div>
+          ) : (
+            <div className="space-y-4" data-testid="bill-claim-review">
+              <div>
+                <div className="text-xs text-slate-500">
+                  {formatDate(fromDate)}
+                  {toDate !== fromDate ? ` – ${formatDate(toDate)}` : ''} · {bills.length} bill{bills.length === 1 ? '' : 's'}
+                </div>
+                <div className="text-3xl font-extrabold text-slate-900 mt-0.5 tabular-nums">{money(claimTotal)}</div>
+                <table className="w-full mt-2 text-[13px]">
+                  <tbody>
+                    {reviewRows.map((r) => (
+                      <tr key={r.name} className="border-b border-slate-100">
+                        <td className="py-1.5 text-slate-700">
+                          {r.name}
+                          {r.trips ? ` (${r.trips} trip${r.trips === 1 ? '' : 's'})` : r.count > 1 ? ` × ${r.count}` : ''}
+                        </td>
+                        <td className="py-1.5 text-right font-semibold tabular-nums">{money(r.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-blue-50 text-sm">
-            <span className="text-slate-600">
-              Claim total
-              {hasRefs && <span className="text-[11px] text-slate-400"> (Transport {money(refsTotal)} from check-in/out)</span>}
-            </span>
-            <span className="font-bold text-slate-900">{money(claimTotal)}</span>
-          </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Description (optional)</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="e.g. CNG fare — site visit to Purbachal project"
+                  className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"
+                />
+              </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Description (optional)</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              maxLength={500}
-              placeholder="e.g. CNG fare — site visit to Purbachal project"
-              className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"
-            />
-          </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                  {needsReceipt ? 'Receipt * (this claim needs one — image/PDF, up to 5MB)' : 'Attachment (optional, image/PDF, up to 5MB)'}
+                </label>
+                <label className="flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
+                  <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="text-slate-600 truncate">{file ? file.name : 'Choose a file…'}</span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,application/pdf"
+                    onChange={(e) => handleFilePick(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                </label>
+                {fileError && <p className="mt-1 text-[11px] text-rose-600">{fileError}</p>}
+                {hadFile && !file && (
+                  <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
+                    <input type="checkbox" checked={removeOldFile} onChange={(e) => setRemoveOldFile(e.target.checked)} />
+                    Remove the current attachment ({editClaim?.file_name || 'file'})
+                  </label>
+                )}
+              </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-              {needsReceipt ? 'Receipt * (this claim needs one — image/PDF, up to 5MB)' : 'Attachment (optional, image/PDF, up to 5MB)'}
-            </label>
-            <label className="flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
-              <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
-              <span className="text-slate-600 truncate">{file ? file.name : 'Choose a file\u2026'}</span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,application/pdf"
-                onChange={(e) => handleFilePick(e.target.files?.[0] || null)}
-                className="hidden"
-              />
-            </label>
-            {fileError && <p className="mt-1 text-[11px] text-rose-600">{fileError}</p>}
-            {hadFile && !file && (
-              <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
-                <input type="checkbox" checked={removeOldFile} onChange={(e) => setRemoveOldFile(e.target.checked)} />
-                Remove the current attachment ({editClaim?.file_name || 'file'})
-              </label>
-            )}
-          </div>
+              {!error && (
+                <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-800">
+                  <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    All dates are inside {formatDate(minDate)} – {formatDate(maxDate)}
+                    {locked.size ? ' and none is in another claim' : ''}.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
-            <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
+            <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700" role="alert">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               <span>{error}</span>
             </div>
           )}
         </div>
 
-        <div className="px-5 pb-5 pt-3 flex justify-end gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={close}
-            disabled={submitting}
-            className="liquid-glass-chip rounded-full px-4 py-2.5 disabled:opacity-50 text-slate-700 text-sm font-semibold"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting || !policy || !!todayClaimId}
-            className="liquid-glass-button rounded-full inline-flex items-center gap-1.5 px-5 py-2.5 disabled:opacity-50 font-semibold text-sm"
-          >
-            {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}
-            {editClaim ? (editClaim.edit_mode === 'pending' ? 'Save Changes' : 'Resubmit') : 'Submit Claim'}
-          </button>
-        </div>
+        {editing !== null && editingBill ? (
+          // Adding / changing one bill: one bar just above the keyboard —
+          // what it is, how much is left today, Cancel and Add. The popup's
+          // own Cancel / Review wait until the bill is done.
+          <div className="px-4 pb-4 pt-3 flex items-center gap-2 shrink-0 border-t border-slate-200/70" data-testid="bill-edit-bar">
+            <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-500">
+              {categories.find((c) => String(c.id) === editingBill.category_id)?.name || 'Bill'} · {formatDate(editingBill.bill_date).slice(0, 6)}
+              {editingLeft != null && <span className={editingLeft < 0 ? 'text-rose-600' : 'text-blue-600'}> · {editingLeft < 0 ? `${money(-editingLeft)} over today` : `${money(editingLeft)} left today`}</span>}
+            </span>
+            <button type="button" onClick={cancelEdit} className="liquid-glass-chip rounded-full px-4 py-2 text-slate-700 text-sm font-semibold">
+              Cancel
+            </button>
+            <button type="button" onClick={finishEdit} className="liquid-glass-button rounded-full inline-flex items-center gap-1.5 px-4 py-2 font-semibold text-sm">
+              <CheckCircle2 className="w-4 h-4" /> {editingIsNew ? 'Add' : 'Done'}
+            </button>
+          </div>
+        ) : step === 'bills' ? (
+          <div className="px-5 pb-5 pt-3 flex justify-end gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={close}
+              disabled={submitting}
+              className="liquid-glass-chip rounded-full px-4 py-2.5 disabled:opacity-50 text-slate-700 text-sm font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={goReview}
+              disabled={!policy || !!todayClaimId}
+              className="liquid-glass-button rounded-full inline-flex items-center gap-1.5 px-5 py-2.5 disabled:opacity-50 font-semibold text-sm"
+            >
+              <ArrowRight className="w-4 h-4" /> Review
+            </button>
+          </div>
+        ) : (
+          <div className="px-5 pb-5 pt-3 flex justify-end gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setStep('bills');
+              }}
+              disabled={submitting}
+              className="liquid-glass-chip rounded-full inline-flex items-center gap-1 px-4 py-2.5 disabled:opacity-50 text-slate-700 text-sm font-semibold"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || !policy || !!todayClaimId}
+              className="liquid-glass-button rounded-full inline-flex items-center gap-1.5 px-5 py-2.5 disabled:opacity-50 font-semibold text-sm"
+            >
+              {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}
+              {editClaim ? (editClaim.edit_mode === 'pending' ? 'Save Changes' : 'Resubmit') : 'Submit Claim'}
+            </button>
+          </div>
+        )}
       </div>
       </div>
     </div>,
