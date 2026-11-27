@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { RefreshCw, ArrowLeft, X, Car } from 'lucide-react';
 import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest, chatAllowed } from './types';
@@ -42,6 +42,12 @@ const UserPanel = lazy(preloadUserPanel);
 // goes from that straight to the Dashboard (with its saved data), not
 // through the skeleton placeholder for a split second.
 export function dashboardCodeReady(maxMs: number): Promise<void> {
+  // Signed in after this file was loaded (main.tsx's web sign-in): start now.
+  try {
+    if (!userPanelLoad && localStorage.getItem('mpr_token')) void preloadUserPanel().catch(() => {});
+  } catch {
+    // storage unavailable
+  }
   if (!userPanelLoad) return Promise.resolve();
   return Promise.race([userPanelLoad.then(() => undefined), new Promise<void>((r) => setTimeout(r, maxMs))]).catch(() => undefined);
 }
@@ -101,7 +107,6 @@ const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendanc
 const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
-import bootIconUrl from './assets/boot/app-icon-336.webp';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
@@ -112,6 +117,7 @@ import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { SelfPageSkeleton } from './components/SelfPageSkeleton';
 import { Spinner } from './components/Spinner';
+import { ThemedInfinity } from './components/ThemedInfinity';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
@@ -146,7 +152,7 @@ import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/Onboardi
 import { isStandalone } from './components/AddToHomeScreen';
 import { OPEN_TUTORIALS_EVENT, START_TOUR_EVENT, TOUR_GO_EVENT, getTutorialsState, setTutorialsState, startTour, toursFor, useTutorialsState, type Tour } from './lib/tutorials';
 
-export default function App() {
+export default function App({ freshLogin = false }: { freshLogin?: boolean } = {}) {
   // Fixed for this mount: switching component type later would remount the Dashboard.
   const [DashboardPanel] = useState(() => LoadedUserPanel || UserPanel);
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -567,6 +573,18 @@ export default function App() {
     }).catch(() => undefined);
   };
 
+  // Signed in on main.tsx's light sign-in screen: land on the Dashboard, the
+  // same as handleLoginSuccess below (before the first paint).
+  useLayoutEffect(() => {
+    if (!freshLogin) return;
+    setViewMode('user');
+    setSelfServiceView(null);
+    setShowProfilePage(false);
+    setShowChat(false);
+    setShowAlertsPage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     // Nothing saved from an earlier sign-in on this device is shown.
     clearScreenCache();
@@ -911,6 +929,10 @@ export default function App() {
   // Navbar's own dropdown menus/switcher instead, untouched, so this state
   // never opens anything on md-and-up screens.
   const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
+  // The phone's Back closes the open menu first (it used to step the page
+  // back, or on the Dashboard count towards leaving the app, with the menu
+  // still open).
+  useBackButtonClose(globalSidebarOpen, () => setGlobalSidebarOpen(false));
   // True only while an account with an Admin Panel (hasAdminPanel) has
   // actively switched viewMode to 'admin' — no more hardcoded "Superadmin
   // always sees Admin Panel" case, since Superadmin now starts on the User
@@ -1041,21 +1063,20 @@ export default function App() {
   // reload fires, so the manual-reload gesture ends the same smooth way
   // every other loading state in the app does.
   const pullToRefreshFullscreenLoader = triggering && (
-    // The same orange screen with the app icon that the app opens on
-    // (index.html's #mpr-boot-spinner), so the reload runs straight into
-    // the normal start-up instead of flashing a grey placeholder page.
+    // The app behind it blurred and veiled in the theme's own background, the
+    // Infinity loader (painted in the theme colour) in the middle.
     <div
-      className="fixed inset-0 z-[110]"
+      className="fixed inset-0 z-[110] flex items-center justify-center"
       role="progressbar"
       aria-label="Reloading CredenceHR"
-      style={{ background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)', animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
+      style={{
+        background: 'color-mix(in srgb, var(--g-bg, #f1f5f9) 80%, transparent)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        animation: 'pullToRefreshFadeIn 220ms ease-out both'
+      }}
     >
-      <img
-        src={bootIconUrl}
-        alt=""
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-        style={{ width: 'clamp(95.2px, 31.111vw, 140px)', height: 'clamp(95.2px, 31.111vw, 140px)' }}
-      />
+      <ThemedInfinity size={115} />
       <style>{`
         @keyframes pullToRefreshFadeIn {
           0% { opacity: 0; }
@@ -1316,7 +1337,8 @@ export default function App() {
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
             style={{
-              bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
+              // Above the bottom bar (it sat on top of it and was easy to miss).
+              bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 104px)',
               background: 'rgba(15, 23, 42, 0.92)'
             }}
           >
@@ -1554,8 +1576,9 @@ export default function App() {
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
       {erp360Error && (
-        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
-          <span className="flex-1">{erp360Error}</span>
+        <div className="fixed top-3 left-3 right-3 sm:left-auto z-[100] sm:max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
+          {/* Long setting names (ERP360_APP_SECRET…) break instead of running off a phone screen. */}
+          <span className="flex-1 min-w-0 [overflow-wrap:anywhere]">{erp360Error}</span>
           <button type="button" onClick={() => setErp360Error(null)} className="shrink-0 opacity-80 hover:opacity-100" aria-label="Dismiss">
             ✕
           </button>
@@ -1694,6 +1717,12 @@ export default function App() {
         variant="overlay"
         open={globalSidebarOpen}
         onClose={() => setGlobalSidebarOpen(false)}
+        onOpen={() => setGlobalSidebarOpen(true)}
+        // Home screen (Dashboard): swipe right from anywhere opens the menu.
+        swipeAnywhere={
+          !showChat && !showAlertsPage && !showProfilePage && !selfServiceView &&
+          (isAdminView ? adminActiveTab === 'dashboard' : userActiveSection.mobile === null)
+        }
         activeKey={computeSidebarActiveKey('mobile')}
         {...sidebarNavProps}
       />
@@ -1861,7 +1890,7 @@ export default function App() {
         ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
           <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
-          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">{!Capacitor.isNativePlatform() && <div className="hidden md:block"><ModulePath path={['Self Service', 'PEPM Operation', 'Material Receive']} /></div>}<MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
         ) : selfServiceView === 'myRequisitions' && canOpenSelfView('myRequisitions', user) ? (
           <MyRequisitions token={token} userName={user.name} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
@@ -2049,8 +2078,7 @@ export default function App() {
       {/* Give feedback (More menu) + the 7-day "How do you like the app?" question. */}
       {token && user && canGiveFeedback(user) && <FeedbackHost key={user.id} token={token} />}
 
-      {/* FloatingChatButton's popup — a centered card sized like
-          NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
+      {/* FloatingChatButton's popup — a large centered card (max-w-6xl, rounded-2xl, its own backdrop)
           instead of taking over the whole screen the way showChat above
           does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
           this needs its own close button + backdrop-click-to-close. */}
@@ -2060,8 +2088,8 @@ export default function App() {
           onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
         >
           <div
-            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
-            style={{ height: '85vh', maxHeight: '720px' }}
+            className="chat-popup bg-white border border-slate-200 rounded-2xl max-w-6xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            style={{ height: '92vh', maxHeight: '920px' }}
           >
             <button
               type="button"
@@ -2088,7 +2116,8 @@ export default function App() {
         <div
           className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
           style={{
-            bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
+            // Above the bottom bar (it sat on top of it and was easy to miss).
+            bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 104px)',
             background: 'rgba(15, 23, 42, 0.92)'
           }}
         >

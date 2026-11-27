@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone, CalendarClock } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2, ChevronDown, ChevronUp, Send, BarChart3, Building2, Smartphone, CalendarClock, Landmark } from 'lucide-react';
 import { LocationPing } from '../types';
 import { cleanPath, ROUGH_LABEL, MAX_ACCURACY_M, RoughReason } from '../lib/trackPath';
 import { apiUrl } from '../lib/api';
@@ -26,6 +26,7 @@ import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { fetchPhoto, photoKnownMissing } from './UserAvatar';
+import { TrackingPlacesReport, StateChip, PROJECT_CHIP, PROJECT_LABEL, BRANCH_CHIP, BRANCH_LABEL, metres } from './TrackingPlacesReport';
 // "18-Aug-2026, 02:19 PM" — same dd-MMM-yyyy date as formatDate, plus a local
 // 12-hour time, for report rows where the exact moment (not just the day)
 // matters. Reads local (not UTC) components, same reasoning as
@@ -192,12 +193,13 @@ const MiniCard: React.FC<{
 );
 
 // A labelled count with a bar sized against the largest row.
-const BarRow: React.FC<{ label: string; count: number; max: number; color: string; onClick?: () => void; hint?: string }> = ({ label, count, max, color, onClick, hint }) => (
+const BarRow: React.FC<{ label: string; count: number; max: number; color: string; onClick?: () => void; hint?: string; detail?: React.ReactNode }> = ({ label, count, max, color, onClick, hint, detail }) => (
   <button type="button" onClick={onClick} disabled={!onClick} title={hint} className="w-full text-left px-4 py-2 hover:bg-slate-50 disabled:hover:bg-transparent disabled:cursor-default">
     <div className="flex items-center justify-between gap-2 text-xs">
       <span className="text-slate-700 truncate">{label}</span>
       <span className="font-semibold text-slate-900 tabular-nums">{count}</span>
     </div>
+    {detail && <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] text-slate-500">{detail}</div>}
     <div className="mt-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
       <div className="h-full rounded-full" style={{ width: `${max ? Math.max(4, (count / max) * 100) : 0}%`, background: color }} />
     </div>
@@ -301,6 +303,18 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const setAllCollapsed = (v: boolean) => saveCollapsed(Object.fromEntries(CARD_IDS.map((id) => [id, v])));
   const [openPhoneRow, setOpenPhoneRow] = useState<string | null>(null);
   const [placeNames, setPlaceNames] = useState<Record<string, string | null>>({});
+  // Nearest project & own branch: the company's project sites (map layer,
+  // and which projects have no location), and the Employees by place report.
+  const [sites, setSites] = useState<{ projects: { id: number; name: string; lat: number; lng: number; radius_m: number }[]; unlocated_projects: string[] } | null>(null);
+  const [showSites, setShowSites] = useState(false);
+  const [placesReportOpen, setPlacesReportOpen] = useState(false);
+  const sitesLayerRef = useRef<L.LayerGroup | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/tracking/sites'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSites({ projects: d.projects || [], unlocated_projects: d.unlocated_projects || [] }))
+      .catch(() => {});
+  }, [token]);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -487,6 +501,9 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     const has = (txt: string) => (r: (typeof employees)[number]) => !r.tracked && !!r.reason && r.reason.includes(txt);
     return [
       { key: 'battery', label: `Battery below ${LOW_BATTERY}%`, color: '#dc2626', names: low },
+      // The phone's app, as it reported when it last opened (anyone, tracked or not).
+      { key: 'oldApp', label: 'Old app — tracking notice stays after the schedule (update needed)', color: '#dc2626', names: names((r) => r.app_status === 'old') },
+      { key: 'appUpdate', label: 'App update available', color: '#d97706', names: names((r) => r.app_status === 'update') },
       { key: 'gps', label: 'Location (GPS) off', color: '#dc2626', names: names(has('GPS) is OFF')) },
       { key: 'saver', label: 'No GPS fix (battery saver / weak signal)', color: '#d97706', names: names(has('no GPS fix')) },
       { key: 'allTime', label: "Location only 'While using the app'", color: '#d97706', names: names(has('Allow all the time')) },
@@ -639,6 +656,28 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     setTimeout(() => map.invalidateSize(), 100);
   }, []);
 
+  // "Projects" on the map: each project with a location as its radius circle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    sitesLayerRef.current?.remove();
+    sitesLayerRef.current = null;
+    if (!showSites || !sites) return;
+    const g = L.layerGroup();
+    sites.projects.forEach((p) => {
+      L.circle([p.lat, p.lng], { radius: p.radius_m, color: '#ea580c', weight: 2, dashArray: '6 5', fillColor: '#ea580c', fillOpacity: 0.08 })
+        .bindTooltip(`${p.name} · ${p.radius_m} m`, { direction: 'top' })
+        .addTo(g);
+      // A dot at its centre too, so a site shows when zoomed out (the radius
+      // is only a few pixels then).
+      L.circleMarker([p.lat, p.lng], { radius: 5, color: '#fff', weight: 2, fillColor: '#ea580c', fillOpacity: 1 })
+        .bindTooltip(`${p.name} · site radius ${p.radius_m} m`, { direction: 'top' })
+        .addTo(g);
+    });
+    g.addTo(map);
+    sitesLayerRef.current = g;
+  }, [showSites, sites]);
+
   // Full screen on/off: Leaflet has to re-measure its box.
   useEffect(() => {
     const t = setTimeout(() => mapRef.current?.invalidateSize(), 60);
@@ -770,26 +809,38 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
   return (
     <div className="space-y-4">
+      {/* One person's path: who, Live Follow / Back to Live, then the date and
+          time range and the reports. Laid out for a phone first (the page
+          header already says "Employee Tracking"): labelled 2 x 2 fields,
+          full-width Apply, the two reports side by side. */}
       {selectedUser && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="hidden sm:flex text-lg font-semibold text-slate-900 items-center gap-2">
               <Navigation className="w-5 h-5 text-emerald-600" /> Employee Tracking
             </h3>
-            <p className="text-sm text-slate-500 mt-0.5">Showing {selectedUser.name}'s movement path</p>
+            <p className="text-[15px] sm:text-sm font-semibold sm:font-normal text-slate-900 sm:text-slate-500 sm:mt-0.5 flex items-center gap-2 min-w-0">
+              <Navigation className="sm:hidden w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="truncate">
+                <span className="hidden sm:inline">Showing </span>
+                {selectedUser.name}
+                <span className="sm:hidden font-normal text-slate-500"> · movement path</span>
+                <span className="hidden sm:inline">'s movement path</span>
+              </span>
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className={`grid ${canLive ? 'grid-cols-2' : 'grid-cols-1'} sm:flex items-center gap-2`}>
             {canLive && (
               <button
                 onClick={() => setFollowing(selectedUser)}
-                className="liquid-glass-button rounded-full flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold"
+                className="liquid-glass-button rounded-full flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:py-2 text-sm font-semibold"
               >
                 <Radio className="w-3.5 h-3.5" /> Live Follow
               </button>
             )}
             <button
               onClick={() => { setSelectedUser(null); setHistory([]); }}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 sm:py-2 text-sm font-medium rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:bg-slate-50"
             >
               <X className="w-3.5 h-3.5" /> Back to Live
             </button>
@@ -798,58 +849,80 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       )}
 
       {selectedUser && (
-        <div className="flex flex-wrap items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-          <span className="text-xs font-medium text-violet-700">Date range:</span>
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs text-slate-400">to</span>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs font-medium text-violet-700 ml-2">Time range:</span>
-          <input type="time" value={fromTime} onChange={e => setFromTime(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <span className="text-xs text-slate-400">to</span>
-          <input type="time" value={toTime} onChange={e => setToTime(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1" />
-          <button
-            onClick={() => fetchHistory(selectedUser.id)}
-            className="text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
-          >
-            Apply
-          </button>
-          {historyLoading && <span className="text-xs text-slate-400">Loading…</span>}
-          {!historyLoading && (
-            <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 flex-wrap">
-              {cleaned.route.length} point{cleaned.route.length === 1 ? '' : 's'}
-              {cleaned.rough.length - mockCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowRough((v) => !v)}
-                  className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${showRough ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-                  title={`Rough fixes (worse than ± ${MAX_ACCURACY_M} m — Wi-Fi / mobile-tower guesses, not GPS) and jumps out of line are left out of the route. Tap to show them in grey.`}
-                >
-                  {showRough ? 'Hide' : 'Show'} {cleaned.rough.length - mockCount} rough
-                </button>
-              )}
-              {mockCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold" title="The phone said these locations came from a mock-location (fake GPS) app.">
-                  {mockCount} fake GPS
-                </span>
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/70 p-3 sm:p-4 space-y-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-3 gap-y-2.5">
+            {(
+              [
+                ['From date', 'date', fromDate, setFromDate],
+                ['To date', 'date', toDate, setToDate],
+                ['From time', 'time', fromTime, setFromTime],
+                ['To time', 'time', toTime, setToTime]
+              ] as const
+            ).map(([label, type, value, set]) => (
+              <label key={label} className="block min-w-0">
+                <span className="block text-[11px] font-semibold text-violet-700 mb-1">{label}</span>
+                <input
+                  type={type}
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                  className="w-full min-w-0 h-10 text-sm bg-white border border-slate-200 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.10),0_1px_2px_rgba(15,23,42,0.06)] rounded-xl px-2.5 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 -mt-1">Leave a date blank for every day, a time blank for the whole day.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <button
+              onClick={() => fetchHistory(selectedUser.id)}
+              className="w-full sm:w-auto h-10 px-5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700"
+            >
+              Apply
+            </button>
+            <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 flex-wrap justify-center sm:justify-start">
+              {historyLoading ? (
+                'Loading…'
+              ) : (
+                <>
+                  <span className="font-semibold text-slate-700">
+                    {cleaned.route.length} point{cleaned.route.length === 1 ? '' : 's'}
+                  </span>
+                  {cleaned.rough.length - mockCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRough((v) => !v)}
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${showRough ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                      title={`Rough fixes (worse than ± ${MAX_ACCURACY_M} m — Wi-Fi / mobile-tower guesses, not GPS) and jumps out of line are left out of the route. Tap to show them in grey.`}
+                    >
+                      {showRough ? 'Hide' : 'Show'} {cleaned.rough.length - mockCount} rough
+                    </button>
+                  )}
+                  {mockCount > 0 && (
+                    <span className="px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold" title="The phone said these locations came from a mock-location (fake GPS) app.">
+                      {mockCount} fake GPS
+                    </span>
+                  )}
+                </>
               )}
             </span>
-          )}
-          <button
-            onClick={() => setShowReport(true)}
-            disabled={history.length === 0}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed ml-auto"
-          >
-            <FileText className="w-3.5 h-3.5" /> View Report
-          </button>
-          {canStayReport && (
-            <button
-              onClick={() => setShowStay(true)}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
-              title="How long at each place, day by day, inside the time range"
-            >
-              <Timer className="w-3.5 h-3.5" /> Stay Report
-            </button>
-          )}
+            <div className={`grid ${canStayReport ? 'grid-cols-2' : 'grid-cols-1'} gap-2 sm:flex sm:ml-auto`}>
+              <button
+                onClick={() => setShowReport(true)}
+                disabled={history.length === 0}
+                className="flex items-center justify-center gap-1.5 h-10 text-sm font-semibold px-3.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <FileText className="w-4 h-4" /> View Report
+              </button>
+              {canStayReport && (
+                <button
+                  onClick={() => setShowStay(true)}
+                  className="flex items-center justify-center gap-1.5 h-10 text-sm font-semibold px-3.5 rounded-xl bg-white border border-violet-300 text-violet-700 hover:bg-violet-50"
+                  title="How long at each place, day by day, inside the time range"
+                >
+                  <Timer className="w-4 h-4" /> Stay Report
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
       {showSchedule && canSchedule && <TrackingScheduleSheet token={token} onClose={() => setShowSchedule(false)} />}
@@ -965,6 +1038,20 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
               >
                 <CalendarClock className="w-3.5 h-3.5" />
                 Schedule
+              </button>
+            )}
+            {!selectedUser && sites && sites.projects.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowSites((v) => !v)}
+                aria-pressed={showSites}
+                className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-full border shadow-sm text-xs font-semibold ${
+                  showSites ? 'bg-orange-600 border-orange-600 text-white hover:bg-orange-700' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+                title="Show each project's site and radius on the map"
+              >
+                <Landmark className="w-3.5 h-3.5" />
+                Projects
               </button>
             )}
           </div>
@@ -1100,7 +1187,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
             <MiniCard
               title="Employees by place"
-              subtitle={`Right now · last ${STALE_AFTER_MIN} min · tap to see on the map`}
+              subtitle={`Right now · last ${STALE_AFTER_MIN} min · nearest project under each place`}
               icon={<MapPin className="w-4 h-4 text-emerald-600" />}
               collapsed={!!collapsed.places}
               onToggle={() => toggleCard('places')}
@@ -1112,6 +1199,10 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                   places.map(([k, list]) => {
                     const name = placeNames[k];
                     const label = name || (k in placeNames ? `${Number(list[0].lat).toFixed(4)}, ${Number(list[0].lng).toFixed(4)}` : 'Finding place…');
+                    // Nearest company project to this place, and how many here
+                    // are away from their own branch.
+                    const near = list.reduce<LocationPing | null>((b, p) => (p.nearest_project && (!b || p.nearest_project.distance_m < (b.nearest_project?.distance_m ?? Infinity)) ? p : b), null);
+                    const awayFromBranch = list.filter((p) => p.own_branch?.status === 'away').length;
                     return (
                       <BarRow
                         key={k}
@@ -1121,11 +1212,31 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                         color="#0891b2"
                         hint={list.map((p) => p.user_name || 'User').join(', ')}
                         onClick={() => flyToPings(list)}
+                        detail={
+                          near?.nearest_project ? (
+                            <>
+                              <span className="truncate max-w-[60%]">{near.nearest_project.name} · {metres(near.nearest_project.distance_m)}</span>
+                              <StateChip cls={PROJECT_CHIP[near.nearest_project.status]} label={PROJECT_LABEL[near.nearest_project.status]} />
+                              {awayFromBranch > 0 && <span className="w-full">{awayFromBranch} away from own branch</span>}
+                            </>
+                          ) : undefined
+                        }
                       />
                     );
                   })
                 )}
               </div>
+              {live.length > 0 && (
+                <div className="px-4 py-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setPlacesReportOpen(true)}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-full bg-orange-600 text-white text-xs font-semibold px-3 py-2 hover:bg-orange-700"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Open report
+                  </button>
+                </div>
+              )}
             </MiniCard>
 
             <MiniCard
@@ -1158,7 +1269,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
           <MiniCard
             title="Reporting now"
-            subtitle="Latest location of each employee · tap a name for their path"
+            subtitle="Latest location of each employee · nearest company project and distance from their own branch · tap a name for their path"
             icon={<Clock className="w-4 h-4 text-slate-500" />}
             collapsed={!!collapsed.people}
             onToggle={() => toggleCard('people')}
@@ -1202,6 +1313,37 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                           </span>
                         </span>
                       </button>
+                      {/* Nearest company project, and the distance from their own branch. */}
+                      {!stale && (p.nearest_project || p.own_branch) && (
+                        <span className="hidden md:grid grid-cols-2 gap-3 shrink-0 w-[46%] max-w-[420px] text-[11px]">
+                          <span className="min-w-0">
+                            <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Nearest project</span>
+                            {p.nearest_project ? (
+                              <>
+                                <span className="block truncate font-medium text-slate-700">{p.nearest_project.name}</span>
+                                <span className="flex items-center gap-1 text-slate-500 tabular-nums">
+                                  {metres(p.nearest_project.distance_m)} <StateChip cls={PROJECT_CHIP[p.nearest_project.status]} label={PROJECT_LABEL[p.nearest_project.status]} />
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block text-slate-400">No project location set</span>
+                            )}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Own branch</span>
+                            {p.own_branch ? (
+                              <>
+                                <span className="block truncate font-medium text-slate-700">{p.own_branch.name}</span>
+                                <span className="flex items-center gap-1 text-slate-500 tabular-nums">
+                                  {p.own_branch.distance_m != null && metres(p.own_branch.distance_m)} <StateChip cls={BRANCH_CHIP[p.own_branch.status]} label={BRANCH_LABEL[p.own_branch.status]} />
+                                </span>
+                              </>
+                            ) : (
+                              <span className="block text-slate-400">No branch on record</span>
+                            )}
+                          </span>
+                        </span>
+                      )}
                       <button onClick={() => flyToPings([p])} className="hidden sm:flex shrink-0 w-8 h-8 rounded-full items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-emerald-700" title={`Show ${name} on the map`} aria-label={`Show ${name} on the map`}>
                         <MapPin className="w-4 h-4" />
                       </button>
@@ -1227,6 +1369,18 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           {/* The who-list / Send Notice / Notice Report popups. */}
           <TrackingStatusCards token={token} variant="lists" external status={status} openRequest={listRequest} reportRequest={noticeReportRequest} onFullPath={(u) => setSelectedUser(u)} />
         </>
+      )}
+
+      {placesReportOpen && (
+        <TrackingPlacesReport
+          pings={live}
+          placeOf={(p) => {
+            const k = placeKey(p);
+            return placeNames[k] || `${Number(p.lat).toFixed(4)}, ${Number(p.lng).toFixed(4)}`;
+          }}
+          unlocatedProjects={sites?.unlocated_projects || []}
+          onClose={() => setPlacesReportOpen(false)}
+        />
       )}
 
       {following && canLive && (

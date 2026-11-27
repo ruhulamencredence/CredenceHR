@@ -43,6 +43,24 @@ erDiagram
     int group_id PK
     tinyint new_accounts_app
   }
+  data_cleanup_batches {
+    int id PK
+    int company_id
+    varchar kind
+    varchar mode
+    int count
+    text reason
+    text filters_json
+  }
+  data_cleanup_trash {
+    int id PK
+    int batch_id
+    varchar kind
+    varchar record_id
+    varchar label
+    longtext rows_json
+    tinyint restored
+  }
   employee_template_assignments {
     int id PK
     int employee_user_id FK
@@ -157,6 +175,15 @@ erDiagram
     varchar action
     text detail
   }
+  user_access_log {
+    int id PK
+    int user_id FK
+    int employee_id FK
+    int actor_id
+    varchar actor_name
+    varchar source
+    varchar action
+  }
   user_app_access {
     int user_id PK,FK
     varchar item_key PK
@@ -185,6 +212,15 @@ erDiagram
     varchar platform
     varchar status
     timestamp requested_at
+  }
+  user_merge_log {
+    int id PK
+    int from_user_id
+    varchar from_name
+    varchar from_login
+    int to_user_id
+    varchar to_name
+    varchar kept_access
   }
   user_profile_details {
     int user_id PK,FK
@@ -242,6 +278,9 @@ erDiagram
     datetime reset_at
     tinyint tutorials_enabled
   }
+  all_employees {
+    int id PK
+  }
   approval_templates {
     int id PK
   }
@@ -262,6 +301,8 @@ erDiagram
   users ||--o{ profile_photo_requests : "user_id"
   users ||..o{ sso_login_logs : "user_id"
   users ||..o{ sso_login_requests : "user_id"
+  users ||..o{ user_access_log : "user_id"
+  all_employees ||..o{ user_access_log : "employee_id"
   users ||..o{ user_app_access : "user_id"
   users ||--o{ user_company_access : "user_id"
   users ||..o{ user_device_requests : "user_id"

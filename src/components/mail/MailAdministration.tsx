@@ -22,6 +22,7 @@ import { apiUrl } from '../../lib/api';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { shortMailDate, fullMailDate } from '../../lib/mailApi';
 import { CentralGroupsAdmin } from './MailGroups';
+import { useElementHeight } from '../../lib/useElementHeight';
 
 const CredenceMail = lazy(() => import('./CredenceMail').then((m) => ({ default: m.CredenceMail })));
 
@@ -38,13 +39,30 @@ interface AdminMailbox {
   lastSyncAt: string | null;
   lastError: string | null;
   connectedAt: string | null;
+  // How many mailboxes this person has connected.
+  boxes: number;
   locked: boolean;
 }
 interface AdminList {
   canOpen: boolean;
   canPassword: boolean;
   serverReady: boolean;
+  // One page at a time (the server filters, sorts and counts).
+  total: number;
+  page: number;
+  perPage: number;
+  pages: number;
+  totalMailboxes: number;
+  people: number;
+  multiPeople: number;
   items: AdminMailbox[];
+}
+interface LogPage {
+  total: number;
+  page: number;
+  perPage: number;
+  pages: number;
+  items: LogRow[];
 }
 interface LogRow {
   id: number;
@@ -58,7 +76,12 @@ interface LogRow {
 interface SystemSettings {
   internalDelivery: boolean;
   domains: string[];
+  // A colleague not using Credence Mail: through the mail server, or held inside.
+  unconnected: 'server' | 'inside';
   canEdit: boolean;
+  // Signature links (Signature tab).
+  signatureLinks?: { website: string; facebook: string; linkedin: string };
+  canEditSignature?: boolean;
 }
 
 // Not mailFetch: these calls must never carry X-Mail-View-As.
@@ -150,7 +173,7 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
       })
       .catch((e) => setError(e.message));
   }, [token]);
-  const save = async (patch: Partial<Pick<SystemSettings, 'internalDelivery'>> & { domains?: string }) => {
+  const save = async (patch: Partial<Pick<SystemSettings, 'internalDelivery' | 'unconnected'>> & { domains?: string }) => {
     if (patch.internalDelivery === false && !(await confirmDialog('Turn internal delivery off? Mail between colleagues will go through the mail server (cPanel) again.', { confirmLabel: 'Turn off', tone: 'danger' }))) return;
     setBusy(true);
     setError('');
@@ -186,8 +209,8 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
           <div className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Building2 className="w-4 h-4 text-emerald-600" /> Internal delivery</div>
           <p className="text-xs text-slate-600 mt-1">
             Mail from one of our mailboxes to a colleague whose mailbox is connected in Credence Mail is delivered inside CredenceHR, at once — it never goes through the
-            mail server (cPanel). Only recipients outside (another domain, or a colleague not on Credence Mail) get it through the mail server. With a mix, each side
-            gets one copy, To / Cc stay as written and Bcc stays hidden.
+            mail server (cPanel). Recipients outside (another domain) get it through the mail server, and so does a colleague not on Credence Mail unless set
+            otherwise below. With a mix, each side gets one copy, To / Cc stay as written and Bcc stays hidden.
           </p>
         </div>
         <button
@@ -218,6 +241,37 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
           )}
         </div>
         <p className="text-[11px] text-slate-500 mt-1">Comma separated. Only mail sent from and to these domains can stay inside CredenceHR.</p>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-700">A colleague not using Credence Mail</div>
+        <p className="text-[11px] text-slate-500 mt-0.5">
+          Someone who hasn't connected their mailbox in Credence Mail (or has Mail turned off). Mail from someone who has only an inside-only mailbox always stays inside.
+        </p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="A colleague not using Credence Mail">
+          {([
+            ['server', 'Through the mail server', 'Goes to their real mailbox — seen in Outlook or the phone, and in Credence Mail once they connect.'],
+            ['inside', 'Keep it inside CredenceHR', 'Held in Credence Mail only; they see it when they open Credence Mail. For people with no real mailbox.']
+          ] as const).map(([k, title, desc]) => {
+            const on = (s.unconnected || 'server') === k;
+            return (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={!s.canEdit || busy}
+                onClick={() => !on && void save({ unconnected: k })}
+                className={`text-left rounded-xl border px-3 py-2.5 transition-colors disabled:cursor-not-allowed ${on ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white hover:bg-slate-50'} ${!s.canEdit ? 'opacity-70' : ''}`}
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                  <span className={`w-3.5 h-3.5 rounded-full border-2 ${on ? 'border-emerald-600 bg-emerald-600 shadow-[inset_0_0_0_2px_white]' : 'border-slate-300'}`} />
+                  {title}
+                </span>
+                <span className="block mt-1 text-[11px] text-slate-500 leading-snug">{desc}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
         Internal mail is only in Credence Mail: Outlook or a phone's mail app on the cPanel mailbox doesn't show it.
@@ -271,41 +325,192 @@ const CheckAddress: React.FC<{ token: string; domain: string }> = ({ token, doma
   );
 };
 
+// "1–50 of 1,540", first / previous / next / last, and how many to a page.
+const PageBar: React.FC<{ page: number; pages: number; total: number; perPage: number; onPage: (p: number) => void; onPerPage: (n: number) => void; busy?: boolean }> = ({ page, pages, total, perPage, onPage, onPerPage, busy }) => {
+  const from = total === 0 ? 0 : (page - 1) * perPage + 1;
+  const to = Math.min(total, page * perPage);
+  const btn = 'px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed';
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-white">
+      <div className="flex items-center gap-2 text-xs text-slate-600">
+        <span>{from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()}</span>
+        <select value={perPage} onChange={(e) => onPerPage(Number(e.target.value))} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs" aria-label="Rows per page">
+          {[25, 50, 100, 200].map((n) => (
+            <option key={n} value={n}>{n} / page</option>
+          ))}
+        </select>
+        {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button type="button" className={btn} disabled={page <= 1} onClick={() => onPage(1)}>« First</button>
+        <button type="button" className={btn} disabled={page <= 1} onClick={() => onPage(page - 1)}>‹ Prev</button>
+        <span className="px-2 text-xs text-slate-600">Page <b>{page}</b> of {pages}</span>
+        <button type="button" className={btn} disabled={page >= pages} onClick={() => onPage(page + 1)}>Next ›</button>
+        <button type="button" className={btn} disabled={page >= pages} onClick={() => onPage(pages)}>Last »</button>
+      </div>
+    </div>
+  );
+};
+
+// The Website / Facebook / LinkedIn links on every Credence design signature.
+// Empty = that link is not shown. Changing them needs the "Signature links" permission.
+const SignatureLinksSettings: React.FC<{ token: string }> = ({ token }) => {
+  const [s, setS] = useState<SystemSettings | null>(null);
+  const [form, setForm] = useState({ website: '', facebook: '', linkedin: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    adminFetch<SystemSettings>(token, '/settings')
+      .then((r) => {
+        setS(r);
+        setForm({ website: r.signatureLinks?.website || '', facebook: r.signatureLinks?.facebook || '', linkedin: r.signatureLinks?.linkedin || '' });
+      })
+      .catch((e) => setError(e.message));
+  }, [token]);
+  if (!s) {
+    return error ? (
+      <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>
+    ) : (
+      <div className="rounded-2xl bg-white border border-slate-200 p-5"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
+    );
+  }
+  const can = !!s.canEditSignature;
+  const cur = s.signatureLinks || { website: '', facebook: '', linkedin: '' };
+  const changed = form.website.trim() !== cur.website || form.facebook.trim() !== cur.facebook || form.linkedin.trim() !== cur.linkedin;
+  const save = async () => {
+    setBusy(true);
+    setError('');
+    setSaved(false);
+    try {
+      const r = await adminFetch<SystemSettings>(token, '/signature-links', 'PUT', { website: form.website.trim(), facebook: form.facebook.trim(), linkedin: form.linkedin.trim() });
+      setS(r);
+      setForm({ website: r.signatureLinks?.website || '', facebook: r.signatureLinks?.facebook || '', linkedin: r.signatureLinks?.linkedin || '' });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const field = (key: 'website' | 'facebook' | 'linkedin', label: string, ph: string) => (
+    <div>
+      <label className="text-xs font-semibold text-slate-700">{label}</label>
+      <input
+        value={form[key]}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+        disabled={!can || busy}
+        placeholder={ph}
+        inputMode="url"
+        className="mt-1 w-full text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:bg-slate-50"
+      />
+    </div>
+  );
+  const shownLinks = [['WEBSITE', form.website], ['FACEBOOK', form.facebook], ['LINKEDIN', form.linkedin]].filter(([, v]) => v.trim());
+  return (
+    <div className="rounded-2xl bg-white border border-slate-200 p-4 sm:p-5 space-y-4 max-w-2xl">
+      <div>
+        <div className="text-sm font-semibold text-slate-900">Signature links</div>
+        <p className="text-xs text-slate-600 mt-1">
+          The WEBSITE | FACEBOOK | LINKEDIN line at the bottom of every Credence design signature. Each one opens the address you set here. Leave one empty to hide it. A
+          change shows in everyone's signatures the next time they open Credence Mail.
+        </p>
+      </div>
+      <div className="grid gap-3">
+        {field('website', 'Website', 'https://www.credencehousingltd.com/')}
+        {field('facebook', 'Facebook', 'https://www.facebook.com/credencehousingltd/')}
+        {field('linkedin', 'LinkedIn', 'https://www.linkedin.com/company/credencehousinglimited/posts/')}
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-700 mb-1">Preview</div>
+        <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] font-bold tracking-wider text-orange-600">
+          {shownLinks.length ? shownLinks.map(([label], i) => (
+            <span key={label}>{i > 0 && <span className="text-slate-300 mx-1.5">|</span>}{label}</span>
+          )) : <span className="font-normal text-slate-400">No links on the signature.</span>}
+        </div>
+      </div>
+      {can && (
+        <div className="flex items-center gap-3">
+          <button type="button" disabled={!changed || busy} onClick={() => void save()} className="px-4 py-2 rounded-xl text-xs font-semibold bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-50">
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+          </button>
+          {saved && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Saved.</span>}
+        </div>
+      )}
+      {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+      {!can && <div className="text-[11px] text-slate-500 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Changing these needs the "Signature links" permission.</div>}
+    </div>
+  );
+};
+
 export const MailAdministration: React.FC<{ token: string; user: User }> = ({ token, user }) => {
-  const [tab, setTab] = useState<'boxes' | 'delivery' | 'groups' | 'log'>('boxes');
+  const [tab, setTab] = useState<'boxes' | 'delivery' | 'signature' | 'groups' | 'log'>('boxes');
+  // The sticky title / search bar's height, so the column titles stick under it.
+  const [barRef, barH] = useElementHeight(56);
+  const stickTop = 64 + barH;
   const [data, setData] = useState<AdminList | null>(null);
-  const [log, setLog] = useState<LogRow[] | null>(null);
+  const [log, setLog] = useState<LogPage | null>(null);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
+  const [qSent, setQSent] = useState('');
+  const [multiOnly, setMultiOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
+  const [logPage, setLogPage] = useState(1);
+  const [logPerPage, setLogPerPage] = useState(50);
+  const [loading, setLoading] = useState(false);
   const [opened, setOpened] = useState<AdminMailbox | null>(null);
+
+  // Typing in the search box asks the server after a short pause, from page 1.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQSent((cur) => (cur === q.trim() ? cur : q.trim()));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  useEffect(() => setPage(1), [qSent, multiOnly, perPage]);
+  useEffect(() => setLogPage(1), [logPerPage]);
 
   const load = useCallback(async () => {
     try {
       setError('');
-      setData(await adminFetch<AdminList>(token, '/accounts'));
+      setLoading(true);
+      const qs = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+      if (qSent) qs.set('q', qSent);
+      if (multiOnly) qs.set('multi', '1');
+      const r = await adminFetch<AdminList>(token, `/accounts?${qs.toString()}`);
+      setData(r);
+      if (r.page !== page) setPage(r.page);
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
-  }, [token]);
+  }, [token, page, perPage, qSent, multiOnly]);
   const loadLog = useCallback(async () => {
     try {
-      setLog(await adminFetch<LogRow[]>(token, '/log'));
+      setError('');
+      setLoading(true);
+      const r = await adminFetch<LogPage>(token, `/log?page=${logPage}&per_page=${logPerPage}`);
+      setLog(r);
+      if (r.page !== logPage) setLogPage(r.page);
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
-  }, [token]);
+  }, [token, logPage, logPerPage]);
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (tab === 'boxes') void load();
+  }, [tab, load]);
   useEffect(() => {
     if (tab === 'log') void loadLog();
   }, [tab, loadLog]);
 
-  const shown = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    return (data?.items || []).filter((b) => !t || `${b.userName} ${b.userLogin} ${b.emailAddress}`.toLowerCase().includes(t));
-  }, [data, q]);
-  const people = useMemo(() => new Set((data?.items || []).map((b) => b.userId)).size, [data]);
+  const shown = data?.items || [];
+  const multiPeople = data?.multiPeople || 0;
+  const people = data?.people || 0;
 
   if (opened) {
     return (
@@ -326,6 +531,9 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
 
   return (
     <div className="space-y-4">
+      {/* Desktop: the title, tabs and search stay under the header while the
+          list scrolls; the table's column titles stick right under them. */}
+      <div ref={barRef} className="md:sticky md:top-16 md:z-20 md:bg-white md:rounded-2xl md:border md:border-slate-200 md:px-3 md:py-2.5 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
           <Mail className="w-5 h-5 text-sky-600" /> Mail Administration
@@ -336,6 +544,7 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
               [
                 ['boxes', 'Mailboxes'],
                 ['delivery', 'Internal delivery'],
+                ['signature', 'Signature'],
                 ['groups', 'Groups'],
                 ['log', 'Log']
               ] as const
@@ -350,11 +559,27 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           </button>
         </div>
       </div>
+        {tab === 'boxes' && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[14rem] max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or mailbox" className="w-full text-sm pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-200" />
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                <input type="checkbox" checked={multiOnly} onChange={(e) => setMultiOnly(e.target.checked)} className="rounded" />
+                Only people with more than one mailbox{multiPeople ? ` (${multiPeople})` : ''}
+              </label>
+              {data && <span className="text-xs text-slate-500">{data.totalMailboxes.toLocaleString()} mailbox{data.totalMailboxes === 1 ? '' : 'es'} · {people.toLocaleString()} {people === 1 ? 'person' : 'people'}</span>}
+            </div>
+        )}
+      </div>
 
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
 
       {tab === 'delivery' ? (
         <InternalDelivery token={token} />
+      ) : tab === 'signature' ? (
+        <SignatureLinksSettings token={token} />
       ) : tab === 'groups' ? (
         <CentralGroupsAdmin token={token} />
       ) : tab === 'boxes' ? (
@@ -367,13 +592,6 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           {data && !data.serverReady && (
             <div className="text-xs px-3 py-2 rounded-xl bg-amber-50 text-amber-800">MAIL_ENCRYPTION_KEY isn't set on the server, so mailboxes can't be read or connected.</div>
           )}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-[14rem] max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or mailbox" className="w-full text-sm pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-200" />
-            </div>
-            {data && <span className="text-xs text-slate-500">{data.items.length} mailbox{data.items.length === 1 ? '' : 'es'} · {people} {people === 1 ? 'person' : 'people'}</span>}
-          </div>
 
           {!data && !error ? (
             <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100" style={{ animation: 'skeleton-in .2s ease both' }}>
@@ -389,10 +607,10 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
             <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{q ? 'No mailbox matches.' : 'Nobody has connected a mailbox yet.'}</div>
           ) : (
             data && (
-              <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
-                <div className="overflow-x-auto">
+              <div className="rounded-2xl bg-white border border-slate-200 overflow-clip">
+                <div className="overflow-x-auto xl:overflow-visible">
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                    <thead className="sticky z-10 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: stickTop }}>
                       <tr>
                         <th className="px-4 py-2.5 font-semibold">Employee</th>
                         <th className="px-4 py-2.5 font-semibold">Mailbox</th>
@@ -406,6 +624,9 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
                           <td className="px-4 py-3">
                             <div className="font-medium text-slate-900">{b.userName}</div>
                             {b.userLogin && <div className="text-[11px] text-slate-500">{b.userLogin}</div>}
+                            {b.boxes > 1 && (
+                              <span className="inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">{b.boxes} mailboxes</span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <div className="text-slate-800">{b.emailAddress}</div>
@@ -439,20 +660,21 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
                     </tbody>
                   </table>
                 </div>
+                <PageBar page={data.page} pages={data.pages} total={data.total} perPage={data.perPage} onPage={setPage} onPerPage={setPerPage} busy={loading} />
               </div>
             )
           )}
         </>
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-clip">
           {!log ? (
             <div className="py-12 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
-          ) : !log.length ? (
+          ) : !log.items.length ? (
             <div className="p-8 text-center text-sm text-slate-500 flex flex-col items-center gap-2"><History className="w-6 h-6 text-slate-300" /> No mailbox has been opened and no password shown yet.</div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto xl:overflow-visible">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                <thead className="sticky z-10 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: stickTop }}>
                   <tr>
                     <th className="px-4 py-2.5 font-semibold">When</th>
                     <th className="px-4 py-2.5 font-semibold">Who</th>
@@ -461,7 +683,7 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {log.map((r) => (
+                  {log.items.map((r) => (
                     <tr key={r.id}>
                       <td className="px-4 py-2.5 text-xs text-slate-600 whitespace-nowrap">{fullMailDate(r.at)}</td>
                       <td className="px-4 py-2.5 text-slate-800">{r.actor}</td>
@@ -481,6 +703,9 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
                 </tbody>
               </table>
             </div>
+          )}
+          {log && log.total > 0 && (
+            <PageBar page={log.page} pages={log.pages} total={log.total} perPage={log.perPage} onPage={setLogPage} onPerPage={setLogPerPage} busy={loading} />
           )}
         </div>
       )}

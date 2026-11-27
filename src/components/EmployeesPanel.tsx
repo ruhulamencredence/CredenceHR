@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useElementHeight } from '../lib/useElementHeight';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
@@ -7,6 +9,7 @@ import {
 import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { UserAvatar } from './UserAvatar';
 import { apiUrl } from '../lib/api';
+import { ConfirmationLeaveBalance, type ConfirmationPreview } from './ConfirmationLeaveBalance';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
 import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
@@ -16,7 +19,7 @@ import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 import { useMyCompanies } from '../lib/company';
 
 import { DateInput } from './DateInput';
-import { SearchSelect } from './Combobox';
+import { SearchSelect, Combobox } from './Combobox';
 import { UnlinkedLoginsPopup } from './UnlinkedLoginsPopup';
 import { EmployeeHeadcountSheet, employeeLayer, exportEmployees } from './EmployeeHeadcountSheet';
 import { EmployeeFilterBar } from './EmployeeFilterBar';
@@ -344,6 +347,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   if (returnView.current === undefined) returnView.current = takeReturnView();
   const rv = returnView.current;
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // The sticky filter bar's height (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(120);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState(rv?.search ?? '');
@@ -398,6 +403,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // (status, branch…) can never wipe it (Office Attendance would then ask to
   // link that PIN again).
   const [loadedPin, setLoadedPin] = useState('');
+  // Job Base when the form was opened: Probation -> something else offers HR the Leave balance (Leave Manage layer joiner_rules).
+  const [loadedJobBase, setLoadedJobBase] = useState('');
+  const [confirmationLeave, setConfirmationLeave] = useState<ConfirmationPreview | null>(null);
+  const canJoinerLeave = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('joiner_rules');
   const [form, setForm] = useState<EmployeeFormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -407,6 +416,19 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
   const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
   const nameSuggestions = useNameSuggestions(token);
+  // Designations (one list for all companies, DesignationRoutes.ts): type to find one; a new name is
+  // added to the list by itself when the employee is saved.
+  const [designationNames, setDesignationNames] = useState<string[]>([]);
+  useEffect(() => {
+    fetch(apiUrl('/api/designations/options'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: { name: string }[]) => setDesignationNames(Array.isArray(list) ? list.map((d) => d.name) : []))
+      .catch(() => undefined);
+  }, [token]);
+  const isNewDesignation = (v: string) => {
+    const k = v.toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+    return !!k && designationNames.length > 0 && !designationNames.some((n) => n.toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim() === k);
+  };
   // All companies mode (switcher): the list mixes companies, so each row
   // shows whose employee it is.
   const myCompanies = useMyCompanies(token);
@@ -632,6 +654,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   const openEditForm = (e: Employee) => {
     setEditingId(e.id);
     setLoadedPin(e.zk_device_pin || '');
+    setLoadedJobBase(e.job_base || '');
     setForm({
       employee_id: e.employee_id || '',
       name: e.name || '',
@@ -1014,8 +1037,20 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
         type: careerNote.includes('not saved') ? 'error' : 'success',
         text: (editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.') + careerNote
       });
+      // Probation -> confirmed: offer HR the Leave days to add (only to an account with the Joiner & Probation layer).
+      const wasProbation = !!editingId && loadedJobBase.trim().toLowerCase() === 'probation';
+      const nowProbation = String(form.job_base || '').trim().toLowerCase() === 'probation';
       closeForm();
       fetchAll();
+      if (wasProbation && !nowProbation && canJoinerLeave && editingId) {
+        try {
+          const pr = await fetch(apiUrl(`/api/leave-joiner/confirmation-preview?employee_id=${editingId}`), { headers: authHeaders });
+          const pj = await pr.json().catch(() => ({}));
+          if (pr.ok && pj.enabled) setConfirmationLeave(pj as ConfirmationPreview);
+        } catch {
+          // no popup; the Employee is saved either way
+        }
+      }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong' });
     } finally {
@@ -1376,6 +1411,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
       </div>
 
       {view === 'directory' && (
+        // Desktop: search & filters stay under the header while the list
+        // scrolls; the column titles stick right under them (barH).
+        <div ref={barRef} className="md:sticky md:top-16 md:z-20">
         <EmployeeFilterBar
           search={search}
           onSearch={setSearch}
@@ -1395,6 +1433,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
             setFilters({});
           }}
         />
+        </div>
       )}
 
       {unlinkedOpen && <UnlinkedLoginsPopup token={token} onClose={() => setUnlinkedOpen(false)} onLinked={() => void fetchEmployees()} />}
@@ -1411,19 +1450,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          {/* Wide screens: no side-scroll box, so the column titles stick to the
+              page right under the sticky filter bar. Phones show cards. */}
+          <div className="overflow-x-auto xl:overflow-x-visible">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                  <th className="px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
-                  <th className="sticky right-0 z-[1] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
+                <tr className="bg-slate-50">
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Employee</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Designation</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Department</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Duty Location<br />/ Branch</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Contact</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                  <th style={{ top: 64 + barH }} className="sticky z-[2] bg-slate-50 shadow-[inset_0_-1px_0_#e2e8f0] px-2.5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-500">Login</th>
+                  <th style={{ top: 64 + barH }} className="sticky right-0 z-[3] bg-slate-50 px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_#e2e8f0,-8px_0_12px_-10px_rgba(15,23,42,0.25)]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1474,7 +1515,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                               <span className="block">{label}</span>
                               {b && (
                                 <span className={`inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded ${b.branch_type === 'project_site' ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
-                                  {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                                  {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                                 </span>
                               )}
                             </span>
@@ -1689,13 +1730,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Designation</label>
-                  <input
-                    type="text"
+                  <Combobox
+                    free
+                    ariaLabel="Designation"
                     value={form.designation}
-                    onChange={(e) => setForm((f) => ({ ...f, designation: e.target.value }))}
-                    placeholder="e.g. Executive"
+                    onChange={(v) => setForm((f) => ({ ...f, designation: v }))}
+                    options={designationNames}
+                    placeholder="Type to find — e.g. Executive"
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                  {isNewDesignation(form.designation) && (
+                    <p className="mt-1 text-[11px] text-amber-700">New designation — it is added to Designations (with its own code) when you save.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Department</label>
@@ -1925,7 +1971,18 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Division, Department &amp; Branch</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <TextField label="Division" value={form.division} onChange={(v) => setForm((f) => ({ ...f, division: v }))} placeholder="e.g. Corporate Office" />
+                      {/* Division is the Branch's type, set by the system (BranchDivision.ts). */}
+                      {(() => {
+                        const picked = form.branch_id ? branches.find((b) => b.id === form.branch_id) : null;
+                        const shown = picked ? (picked.branch_type === 'project_site' ? 'Project Side' : 'Head Office') : form.division;
+                        return (
+                          <div>
+                            <label className={fieldLabelClass}>Division</label>
+                            <input type="text" value={shown} readOnly disabled placeholder="From the Branch" className={`${fieldInputClass} opacity-80 cursor-not-allowed`} />
+                            <p className="mt-1 text-[11px] text-slate-400">Set from the Branch: Head Office or Project Side.</p>
+                          </div>
+                        );
+                      })()}
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
                         <SearchSelect
@@ -1936,7 +1993,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                           <option value="">— None —</option>
                           {branches.map((b) => (
                             <option key={b.id} value={b.id}>
-                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project' : 'Head Office'})
+                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'})
                             </option>
                           ))}
                         </SearchSelect>
@@ -2449,12 +2506,19 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     ))}
                   </SearchSelect>
                 </div>
-                <TextField
-                  label="New Designation"
-                  value={transferForm.to_designation}
-                  onChange={(v) => setTransferForm((f) => ({ ...f, to_designation: v }))}
-                  placeholder={transferringFor.designation || 'e.g. Senior Engineer'}
-                />
+                <div>
+                  <label className={fieldLabelClass}>New Designation</label>
+                  <Combobox
+                    free
+                    ariaLabel="New Designation"
+                    value={transferForm.to_designation}
+                    onChange={(v) => setTransferForm((f) => ({ ...f, to_designation: v }))}
+                    options={designationNames}
+                    placeholder={transferringFor.designation || 'Type to find — e.g. Senior Engineer'}
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                  {isNewDesignation(transferForm.to_designation) && <p className="mt-1 text-[11px] text-amber-700">New designation — added to Designations when saved.</p>}
+                </div>
               </div>
 
               <div>
@@ -2748,6 +2812,17 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
           </div>
         </div>
       )}
+      {confirmationLeave && (
+        <ConfirmationLeaveBalance
+          token={token}
+          preview={confirmationLeave}
+          onClose={() => setConfirmationLeave(null)}
+          onDone={(text) => {
+            setConfirmationLeave(null);
+            setMessage({ type: 'success', text });
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -2804,12 +2879,36 @@ const EmployeeSearchSelect: React.FC<{
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The list is drawn on the page (fixed, via a portal) — not inside the popup —
+  // so a popup's own scroll/clip never cuts it off and rows never sit on top of
+  // the fields below. It opens upward when there is no room underneath.
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number; maxH: number } | null>(null);
+  const place = useCallback(() => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom - 12;
+    const above = r.top - 12;
+    const up = below < 260 && above > below;
+    const room = Math.max(160, up ? above : below);
+    setPos(up
+      ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 4, maxH: room }
+      : { left: r.left, width: r.width, top: r.bottom + 4, maxH: room });
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, place]);
 
   const selected = employees.find((emp) => String(emp.id) === value) || null;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+      const n = e.target as Node;
+      if (wrapRef.current && !wrapRef.current.contains(n) && !panelRef.current?.contains(n)) {
         setOpen(false);
         setQuery('');
       }
@@ -2834,8 +2933,12 @@ const EmployeeSearchSelect: React.FC<{
         </span>
         <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
       </div>
-      {open && (
-        <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+      {open && pos && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, zIndex: 100000 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden flex flex-col"
+        >
           <input
             autoFocus
             type="text"
@@ -2850,7 +2953,7 @@ const EmployeeSearchSelect: React.FC<{
             placeholder={placeholder}
             className="block w-full px-3 py-2 text-sm border-b border-slate-100 focus:outline-none"
           />
-          <div className="max-h-52 overflow-y-auto">
+          <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: Math.min(pos.maxH - 48, 340) }}>
             {value && (
               <button
                 type="button"
@@ -2868,19 +2971,23 @@ const EmployeeSearchSelect: React.FC<{
                   key={emp.id}
                   type="button"
                   onClick={() => { onChange(String(emp.id)); setQuery(''); setOpen(false); }}
-                  className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
-                    String(emp.id) === value ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-700'
+                  className={`block w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors border-b border-slate-50 last:border-0 ${
+                    String(emp.id) === value ? 'bg-blue-50' : ''
                   }`}
                 >
-                  {emp.name}
-                  {[emp.employee_id, (emp as any).designation, (emp as any).department].some(Boolean) ? (
-                    <span className="text-slate-400 font-normal"> · {[emp.employee_id, (emp as any).designation, (emp as any).department].filter(Boolean).join(' · ')}</span>
+                  <span className={`block text-sm leading-snug ${String(emp.id) === value ? 'font-semibold text-blue-700' : 'font-medium text-slate-800'}`}>
+                    {emp.name}
+                    {emp.employee_id ? <span className="text-slate-400 font-normal"> ({emp.employee_id})</span> : null}
+                  </span>
+                  {[(emp as any).designation, (emp as any).department].some(Boolean) ? (
+                    <span className="block text-[11px] leading-snug text-slate-500 truncate">{[(emp as any).designation, (emp as any).department].filter(Boolean).join(' · ')}</span>
                   ) : null}
                 </button>
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

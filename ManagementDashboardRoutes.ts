@@ -67,7 +67,10 @@ export const MD_SECTIONS = {
   md_approvals: "approvals",
   md_projects: "projects",
   md_recruitment: "recruitment",
-  md_fleet: "fleet"
+  md_fleet: "fleet",
+  // The same calendar as the User Dashboard (/api/calendar-attendance, which
+  // already limits whose days each person sees by their role).
+  md_calendar: "calendar"
 } as const;
 type MdSection = (typeof MD_SECTIONS)[keyof typeof MD_SECTIONS];
 // "Needs attention" items, by the part their link opens.

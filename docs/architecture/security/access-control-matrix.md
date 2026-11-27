@@ -6,44 +6,45 @@
 | মডিউল (Admin Panel) | কী | layer / অনুমতির ধাপ (🔒 = ডিফল্টে বন্ধ, Superadmin টিক দিলে তবেই) |
 |---|---|---|
 | Admin Dashboard | `admin_dashboard` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Reports | `reports` | `read` Read Only<br>`edit_add` Edit<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`submission_status` Budget Submission Status<br>🔒`dispatch_material` Dispatch Material (own)<br>🔒`dispatch_all` Dispatch Material: see all<br>🔒`po_import` P.O Import |
-| Projects | `projects` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
+| Reports | `reports` | `read` Read Only<br>`edit_add` Edit<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`submission_status` Budget Submission Status<br>🔒`dispatch_material` Dispatch Material (own)<br>🔒`dispatch_all` Dispatch Material: see all<br>🔒`po_import` P.O Import<br>🔒`close_short` Undelivered MPR & Close short |
+| Projects | `projects` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`merge_projects` Merge projects |
 | Branches | `branches` | শুধু মডিউলের অনুমতি (layer নেই) |
 | MPR Numbers | `mprs` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Data Import | `imports` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Users | `users` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`block_account` Block Account<br>🔒`password_requests` Password requests (Forgot password) |
+| Users | `users` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete<br>🔒`block_account` Block Account<br>🔒`password_requests` Password requests (Forgot password)<br>🔒`merge_accounts` Merge accounts |
 | Employees | `employees` | `read` Employees (view, add, edit)<br>🔒`employee_delete` Delete employee records<br>`emp_headcount` Office / Project & Branch headcount<br>🔒`emp_export` Export employees (Excel) |
 | Departments | `departments` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
+| Designations | `designations` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Remote Attendance | `attendance` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Monthly Attendance Report | `attendance_reports` | `read` Attendance Reports<br>🔒`late_list` Late list (who came late)<br>`dept_summary` Department Summary (present / absent / leave / delay by department)<br>`custom_report` Custom Report (Attendance Report Builder)<br>🔒`attendance_edit` Edit attendance (give In / Out, with remarks) |
 | Monthly Leave Application | `leave_applications` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Office Attendance | `office_attendance` | `read` Office Attendance<br>🔒`link_pins` Link Device PINs<br>🔒`punch_rules` Double punch rule |
 | Employee Tracking | `tracking` | `read` Live Map & History<br>`stay_report` Stay Report<br>🔒`live` Live Follow<br>🔒`tracking_schedule` Tracking Schedule |
 | Check In/Out | `claims` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf |
+| Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf<br>`rules_readers` Who has read the rules |
 | Bill Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Notices | `notices` | `read` Write & publish notices<br>🔒`notice_read_report` Who has read it (report & send again)<br>🔒`notice_email` Send notices by email<br>🔒`notice_animations` Animation library (add / remove) |
 | Holidays (Global Calendar) | `holidays` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Payroll | `payroll` | `read` Payroll<br>`payroll_view` View only (Audit / Accounts)<br>🔒`salary_amounts` See salary amounts<br>🔒`ot_rules` OT Rules (overtime pay)<br>`approval_sheet` Approval — Salary sheet (view)<br>`month_compare` Approval — Month comparison (view)<br>`top_sheet` Approval — Top Sheet (view)<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`hrd_review` HR Director review<br>🔒`audit_approve` Audit (after payment)<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
 | Asset Management | `asset_management` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Vehicle Management | `vehicle_management` | `read` Vehicle Management<br>🔒`manage_drivers` Manage drivers<br>🔒`manage_vehicles` Edit / delete vehicles |
+| Vehicle Management | `vehicle_management` | `read` Vehicle Management<br>🔒`manage_drivers` Manage drivers<br>🔒`manage_vehicles` Edit / delete vehicles<br>🔒`pickups` Pick-ups (drop & pick up rides)<br>🔒`trip_report` Drop & pick up report |
 | Vehicle Maintainer (Ride Bypass) | `vehicle_maintainer` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Job Recycle | `recycle` | শুধু মডিউলের অনুমতি (layer নেই) |
-| MPR Edit Log | `editlog` | শুধু মডিউলের অনুমতি (layer নেই) |
+| MPR Edit Log | `editlog` | `read` Edit history & Job Edit approvals<br>🔒`mpr_followup` Needs update & People |
 | Exit / Offboarding | `exit_offboarding` | `read` Exit / Offboarding<br>🔒`exit_dues` Exit — Dues from other modules<br>🔒`exit_pdf` Exit — Clearance & Settlement PDF<br>🔒`exit_clearance_setup` Exit — Clearance Departments setup |
 | Performance Management | `performance_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Recruitment (ATS) | `recruitment` | `read` Recruitment (postings, candidates, interviews)<br>🔒`email_candidates` Email candidates<br>🔒`edit_candidates` Edit candidate details |
 | Grievance & Disciplinary | `grievance_disciplinary` | শুধু মডিউলের অনুমতি (layer নেই) |
 | HR Analytics | `hr_analytics` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Management Dashboard | `management_dashboard` | `md_people` People (headcount, joined / left, workforce)<br>`md_attendance` Attendance & on leave today<br>🔒`md_money` Money (salary cost, money out)<br>`md_approvals` Approvals<br>`md_projects` Projects (PEPM) & Targets<br>`md_recruitment` Recruitment pipeline<br>`md_fleet` Fleet & assets |
+| Management Dashboard | `management_dashboard` | `md_people` People (headcount, joined / left, workforce)<br>`md_attendance` Attendance & on leave today<br>🔒`md_money` Money (salary cost, money out)<br>`md_approvals` Approvals<br>`md_projects` Projects (PEPM) & Targets<br>`md_recruitment` Recruitment pipeline<br>`md_fleet` Fleet & assets<br>`md_calendar` Calendar (holidays + attendance, by the person's own role) |
 | HR Data Import | `data_import` | 🔒`import_employees` Import Employee Details<br>🔒`import_leave` Import Leave<br>🔒`import_movement_claims` Import Check In/Out<br>🔒`import_bill_claims` Import Bill Claims<br>🔒`import_attendance` Import Remote Attendance<br>🔒`import_office_attendance` Import Office Attendance |
 | Document Vault | `document_vault` | `read` Documents (upload, view, own signature)<br>🔒`sign_request` Request signatures from others<br>🔒`esign_settings` E-Signature settings (OTP, read to the end) |
-| HR Operations | `hr_operations` | `read` HR Operations<br>🔒`onboarding_create` Onboarding — Create login<br>🔒`onboarding_review` Onboarding — Review / Reject<br>🔒`onboarding_approve` Onboarding — Approve<br>🔒`reminders_receive` Reminders — receive & view<br>🔒`requisitions` SIM & ID card requisitions — issue / reject<br>`quick_reports` Quick reports (probation, joiners, transfers, resignations, attendance, leave, headcount…)<br>`quick_ot` Quick report: Overtime (OT) — who, how many hours, which days<br>`hr_headcount` Office / Project & Branch headcount<br>🔒`hr_emp_export` Export employees (Excel) |
+| HR Operations | `hr_operations` | `read` HR Operations<br>🔒`onboarding_create` Onboarding — Create login<br>🔒`onboarding_review` Onboarding — Review / Reject<br>🔒`onboarding_approve` Onboarding — Approve<br>🔒`reminders_receive` Reminders — receive & view<br>🔒`requisitions` SIM & ID card requisitions — issue / reject<br>`quick_reports` Quick reports (probation, joiners, transfers, resignations, attendance, leave, headcount…)<br>`quick_ot` Quick report: Overtime (OT) — who, how many hours, which days<br>`hr_headcount` Office / Project & Branch headcount<br>🔒`hr_emp_export` Export employees (Excel)<br>🔒`p360_access` Service Book — Login & Access log |
 | Task Management | `task_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | SIM & Mobile Bill | `mobile_bill` | `read` SIM & Mobile Bill<br>`limit_history` Limit Change History<br>`sim_inventory` SIM Inventory (history) |
 | Target Reports | `target_reports` | `read` Target Reports<br>🔒`target_export` Targets — Excel / PDF<br>🔒`target_cancel` Targets — Cancel / Close |
-| Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups |
+| Mail Administration | `mail_admin` | `read` Mailbox list<br>🔒`mail_open` Open mailboxes (read only)<br>🔒`mail_password` See mailbox passwords<br>🔒`mail_settings` Internal delivery settings<br>🔒`mail_groups` Set up mail groups<br>🔒`mail_signature` Signature links (Website / Facebook / LinkedIn) |
 | Duty Roster | `duty_roster` | `read` See shifts and roster<br>🔒`roster_manage` Set shifts and roster<br>🔒`ot_approve` OT Approval<br>🔒`guard_posts` Guard posts & relief |
 | Break Time | `break_time` | `read` See break report<br>🔒`break_manage` Break rules, end forgotten breaks |
 | User Feedback | `user_feedback` | `read` See feedback<br>🔒`feedback_resolve` Mark feedback Done / Pending |

@@ -34,7 +34,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
   Bell, Users, ListChecks, Gift, Fingerprint,
-  ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X, AlertTriangle, ArrowRight, Loader2, CheckCircle2,
+  ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X, AlertTriangle, ArrowRight, Loader2, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { confirmDialog } from '../lib/confirmDialog';
 import { User, EXPLICIT_ONLY_LAYERS } from '../types';
@@ -259,6 +259,14 @@ function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
+// A notice's content as one line of plain text for the card.
+const noticeText = (html?: string) => {
+  if (!html) return '';
+  // DOMParser doesn't load the pictures in it.
+  const doc = new DOMParser().parseFromString(html.replace(/<(br|\/p|\/div|\/li)[^>]*>/gi, ' $&'), 'text/html');
+  return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onNavigate }) => {
   // "Coming up — next 60 days" is up (HR Operations reminders layer): it
   // covers everything the shorter HR Alerts box would list.
@@ -322,9 +330,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // "Reject selected": the reason the employees see (required).
+  const [rejectReason, setRejectReason] = useState('');
   useEffect(() => {
     setPicked(new Set());
     setBulkMsg(null);
+    setRejectReason('');
   }, [openList?.key, openList?.title]);
 
   useEffect(() => {
@@ -353,7 +364,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         when(has('asset_management'), () => safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders)),
         when(has('bill_claim'), () => safeGet<any[]>(`/api/bill-claims?since=${claimsSince}&slim=1`, authHeaders)),
         when(has('bill_claim', 'disbursement'), () => safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders)),
-        safeGet<any[]>('/api/notices/active', authHeaders),
+        // The board (every notice live for this account), not /active — that is
+        // the login popup's queue, which drops normal-priority notices, ones
+        // already closed, and ones this account posted itself.
+        safeGet<any[]>('/api/notices/board', authHeaders),
         when(showAttendanceReport, () => safeGet<any[]>('/api/employee-directory', groupHeaders)),
         when(showAttendanceReport, () =>
           safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
@@ -689,9 +703,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     };
   }
 
-  // Approve every ticked row, one by one, through the same endpoints as a
-  // single approve (each checks this account may); then reload the lists.
-  const approveSelected = async () => {
+  // Approve (or reject, with the reason) every ticked row, one by one,
+  // through the same endpoints as a single decision (each checks this
+  // account may); then reload the lists.
+  const decideSelected = async (decision: 'approve' | 'reject') => {
+    const reason = rejectReason.trim();
     if (!openList) return;
     const rows = openList.rows.filter((r) => r.approve && picked.has(r.key));
     if (rows.length === 0) return;
@@ -703,12 +719,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     for (const r of rows) {
       const a = r.approve!;
       const url = a.via === 'chain' ? `/api/my-approvals/${a.request_id}/act` : `/api/attendance/corrections/${a.id}/decision`;
-      const body = a.via === 'chain' ? { action: 'approved' } : { action: 'approve' };
+      const body =
+        decision === 'reject'
+          ? a.via === 'chain'
+            ? { action: 'rejected', remarks: reason }
+            : { action: 'reject', remarks: reason }
+          : a.via === 'chain'
+            ? { action: 'approved' }
+            : { action: 'approve' };
       try {
         const res = await fetch(apiUrl(url), { method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (res.ok) {
           const out = await res.json().catch(() => ({}));
-          if (out?.status === 'pending') passedOn++;
+          if (decision === 'approve' && out?.status === 'pending') passedOn++;
           else ok++;
         } else failed.push(`${r.name}: ${(await res.json().catch(() => ({})))?.error || res.status}`);
       } catch (e: any) {
@@ -723,7 +746,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     }
     setPicked(new Set());
     setBulkBusy(false);
-    const done = [ok ? `${ok} approved` : '', passedOn ? `${passedOn} passed to the next approver` : ''].filter(Boolean).join(', ') || 'None approved';
+    if (decision === 'reject' && ok) setRejectReason('');
+    const verb = decision === 'reject' ? 'rejected' : 'approved';
+    const done = [ok ? `${ok} ${verb}` : '', passedOn ? `${passedOn} passed to the next approver` : ''].filter(Boolean).join(', ') || `None ${verb}`;
     setBulkMsg(
       failed.length === 0
         ? { ok: true, text: `${done}.` }
@@ -1231,7 +1256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   {notices.slice(0, 5).map((n) => (
                     <div key={n.id} className="border-b border-slate-50 last:border-0 pb-3 last:pb-0">
                       <p className="text-xs font-semibold text-slate-900">{n.title}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.message || n.body}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{noticeText(n.content_html)}</p>
                     </div>
                   ))}
                 </div>
@@ -1585,18 +1610,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               showFooter ? (
                 <>
                   {approvable.length > 0 ? (
-                    <button
-                      type="button"
-                      disabled={nPicked === 0 || bulkBusy}
-                      onClick={async () => {
-                        if (!(await confirmDialog(`Approve ${nPicked} selected request${nPicked === 1 ? '' : 's'}?`, { confirmLabel: 'Approve', tone: 'default' }))) return;
-                        void approveSelected();
-                      }}
-                      className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                      Approve selected{nPicked > 0 ? ` (${nPicked})` : ''}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <button
+                        type="button"
+                        disabled={nPicked === 0 || bulkBusy}
+                        onClick={async () => {
+                          if (!(await confirmDialog(`Approve ${nPicked} selected request${nPicked === 1 ? '' : 's'}?`, { confirmLabel: 'Approve', tone: 'default' }))) return;
+                          void decideSelected('approve');
+                        }}
+                        className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {bulkBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                        Approve selected{nPicked > 0 ? ` (${nPicked})` : ''}
+                      </button>
+                      {/* Reject the ticked ones — same rights as Approve; the
+                          reason goes to each employee. */}
+                      <input
+                        type="text"
+                        aria-label="Reason for rejecting"
+                        placeholder="Reason to reject — the employee sees it"
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        className="liquid-glass-inset rounded-full px-3.5 py-2 text-xs w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-rose-300"
+                      />
+                      <button
+                        type="button"
+                        disabled={nPicked === 0 || bulkBusy}
+                        onClick={async () => {
+                          if (!rejectReason.trim()) {
+                            setBulkMsg({ ok: false, text: 'Write the reason to reject — the employee sees it.' });
+                            return;
+                          }
+                          if (!(await confirmDialog(`Reject ${nPicked} selected request${nPicked === 1 ? '' : 's'}? Each employee is told: "${rejectReason.trim()}"`, { confirmLabel: 'Reject', tone: 'danger' }))) return;
+                          void decideSelected('reject');
+                        }}
+                        className="rounded-full px-4 py-2 text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        Reject selected{nPicked > 0 ? ` (${nPicked})` : ''}
+                      </button>
+                    </div>
                   ) : <span />}
                   {openList.tab && onNavigate && (
                     <button

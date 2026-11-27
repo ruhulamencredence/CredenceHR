@@ -985,9 +985,17 @@ export function registerReportsInsightsRoutes(app: Express, deps: ReportsInsight
       const list = await allowedReports(req.user);
       // Departments the caller may pick (the Department filter's dropdown).
       const emps: any[] = await queryDB("SELECT DISTINCT department FROM all_employees WHERE department IS NOT NULL AND department <> ''").catch(() => []);
+      // A report whose data is Department-scoped (Attendance, Leave, Bill Claim)
+      // offers the caller only the Departments they were given there (an HOD:
+      // just their own); null = every Department. Same scope /run enforces.
+      const scopeOf = new Map<string, string[] | null>();
+      for (const r of list) {
+        scopeOf.set(r.key, r.deptScope && req.user.role !== "superadmin" ? await getDeptScope(r.deptScope, req.user.id) : null);
+      }
       res.json({
         categories: CATEGORY_ORDER.filter((c) => list.some((r) => r.category === c)),
         reports: list.map((r) => ({
+          departments: scopeOf.get(r.key) ? [...(scopeOf.get(r.key) as string[])].sort((a, b) => a.localeCompare(b)) : null,
           key: r.key,
           category: r.category,
           title: r.title,

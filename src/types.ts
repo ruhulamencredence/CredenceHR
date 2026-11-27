@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'data_import' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'disbursement' | 'employees' | 'departments' | 'designations' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'data_import' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
@@ -32,6 +32,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'users', label: 'Users' },
   { key: 'employees', label: 'Employees' },
   { key: 'departments', label: 'Departments' },
+  { key: 'designations', label: 'Designations' },
   { key: 'attendance', label: 'Remote Attendance' },
   { key: 'attendance_reports', label: 'Monthly Attendance Report' },
   // Read-only "who applied for Leave" report — separate from the
@@ -97,7 +98,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'merge_accounts' | 'merge_projects' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'rules_readers' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'mail_signature' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'md_calendar' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit' | 'close_short' | 'mpr_followup' | 'pickups' | 'trip_report' | 'p360_access';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -111,7 +112,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['notices', 'departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'bill_claim', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'document_vault', 'employees', 'recruitment', 'data_import', 'vehicle_management', 'management_dashboard'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['editlog', 'notices', 'departments', 'designations', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'bill_claim', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'document_vault', 'employees', 'recruitment', 'data_import', 'vehicle_management', 'management_dashboard'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -126,7 +127,17 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'submission_status', label: 'Budget Submission Status' },
     { key: 'dispatch_material', label: 'Dispatch Material (own)' },
     { key: 'dispatch_all', label: 'Dispatch Material: see all' },
-    { key: 'po_import', label: 'P.O Import' }
+    { key: 'po_import', label: 'P.O Import' },
+    // Undelivered MPR: rows whose material won't (all) arrive inside the
+    // Budget — set the rest aside (Close short). Explicit-only.
+    { key: 'close_short', label: 'Undelivered MPR & Close short' }
+  ],
+  // MPR Edit Log: the edit history and Job Edit approvals (read, as before),
+  // and the follow-up views — Needs update (due date passed, material not
+  // in) and People (per person) — only for accounts it is ticked for.
+  editlog: [
+    { key: 'read', label: 'Edit history & Job Edit approvals' },
+    { key: 'mpr_followup', label: 'Needs update & People' }
   ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
@@ -193,7 +204,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // through that employee's approval chain). Explicit only.
   bill_claim: [
     { key: 'read', label: 'Bill Claim' },
-    { key: 'on_behalf', label: 'Claim on Behalf' }
+    { key: 'on_behalf', label: 'Claim on Behalf' },
+    // Bill Claim Policy -> Who has read the rules (its own page). Reading — on by default.
+    { key: 'rules_readers', label: 'Who has read the rules' }
   ],
   // HR Operations -> Onboarding -> New Joiners (self-service onboarding).
   // All three are explicit only: opening an application creates a login,
@@ -215,7 +228,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     // once (startup marker hr_quick_ot_grant).
     { key: 'quick_ot', label: 'Quick report: Overtime (OT) — who, how many hours, which days' },
     { key: 'hr_headcount', label: 'Office / Project & Branch headcount' },
-    { key: 'hr_emp_export', label: 'Export employees (Excel)' }
+    { key: 'hr_emp_export', label: 'Export employees (Excel)' },
+    // Service Book -> Login & Access: who changed what on the login, and when. Explicit only.
+    { key: 'p360_access', label: 'Service Book — Login & Access log' }
   ],
   // Exit / Offboarding -> the exiting Employee's dues from other modules
   // (assets, SIM, loans / advances, claims) and adding them to the
@@ -250,7 +265,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'mail_open', label: 'Open mailboxes (read only)' },
     { key: 'mail_password', label: 'See mailbox passwords' },
     { key: 'mail_settings', label: 'Internal delivery settings' },
-    { key: 'mail_groups', label: 'Set up mail groups' }
+    { key: 'mail_groups', label: 'Set up mail groups' },
+    { key: 'mail_signature', label: 'Signature links (Website / Facebook / LinkedIn)' }
   ],
   // Duty Roster -> see shifts and the roster; add / edit shifts and set the
   // roster (explicit only).
@@ -283,7 +299,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'md_approvals', label: 'Approvals' },
     { key: 'md_projects', label: 'Projects (PEPM) & Targets' },
     { key: 'md_recruitment', label: 'Recruitment pipeline' },
-    { key: 'md_fleet', label: 'Fleet & assets' }
+    { key: 'md_fleet', label: 'Fleet & assets' },
+    { key: 'md_calendar', label: 'Calendar (holidays + attendance, by the person\'s own role)' }
   ],
   // Employees: deleting an Employee record (only one with no pay or service
   // records — EmployeeRecordsGuard.ts) is its own explicit tick.
@@ -314,7 +331,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   vehicle_management: [
     { key: 'read', label: 'Vehicle Management' },
     { key: 'manage_drivers', label: 'Manage drivers' },
-    { key: 'manage_vehicles', label: 'Edit / delete vehicles' }
+    { key: 'manage_vehicles', label: 'Edit / delete vehicles' },
+    { key: 'pickups', label: 'Pick-ups (drop & pick up rides)' },
+    { key: 'trip_report', label: 'Drop & pick up report' }
   ],
   // HR Data Import: one tick per kind of data. Having Employees / Leave /
   // Attendance… does not let anyone import into it — only these ticks do.
@@ -327,12 +346,15 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'import_attendance', label: 'Import Remote Attendance' },
     { key: 'import_office_attendance', label: 'Import Office Attendance' }
   ],
+  // Projects -> Merge projects: move a duplicate Project's attendance, check-in
+  // lists, access and budgets onto the real one (only for accounts it is ticked for).
+  projects: [...PERMISSION_LAYERS, { key: 'merge_projects', label: 'Merge projects' }],
   // Users -> Block / Unblock a login (only for accounts it is ticked for).
-  users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }, { key: 'password_requests', label: 'Password requests (Forgot password)' }]
+  users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }, { key: 'password_requests', label: 'Password requests (Forgot password)' }, { key: 'merge_accounts', label: 'Merge accounts' }]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'merge_accounts', 'merge_projects', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'mail_signature', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit', 'close_short', 'mpr_followup', 'pickups', 'trip_report', 'p360_access'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -346,7 +368,7 @@ export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[mod
 // allow editing Leave balances" toggle), which these layers narrow further,
 // same "no saved rows -> full access" default as everywhere else on this
 // system (see requireLeaveManagerLayer() in server.ts).
-export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules';
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules' | 'joiner_rules';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
   { key: 'edit_balance', label: 'Edit Balance' },
@@ -356,9 +378,10 @@ export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] 
   { key: 'year_settings', label: 'Year Settings' },
   { key: 'workflow_manage', label: 'Balance Workflows' },
   { key: 'leave_rules', label: 'Leave Rules (accrual, carry-forward, eligibility)' },
+  { key: 'joiner_rules', label: 'Joiner & Probation Rules (new joiner, Probation, Confirmation balance)' },
 ];
 // Not part of the no-saved-layers default: it changes balances by itself, so it is ticked on purpose.
-export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules'];
+export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules', 'joiner_rules'];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
@@ -400,6 +423,13 @@ export interface LocationPing {
   created_at?: string;
   // 1 = the phone said it came from a mock-location ("fake GPS") app.
   is_mock?: number | boolean | null;
+  // GET /api/tracking/live: who they are on the Employee record, the
+  // nearest company project to this location, and their own branch.
+  employee_code?: string | null;
+  designation?: string | null;
+  department?: string | null;
+  nearest_project?: { id: number; name: string; distance_m: number; radius_m: number; status: 'at_site' | 'near' | 'away' } | null;
+  own_branch?: { id: number | null; name: string; distance_m: number | null; radius_m: number | null; status: 'at_branch' | 'away' | 'no_location' } | null;
 }
 
 // One row of the company-wide Employee Directory (Admin Panel -> Employees, an
@@ -490,6 +520,8 @@ export interface EmployeeDirectoryEntry {
   employee_id: string | null;
   name: string;
   designation: string | null;
+  // Designations -> level (1 = most senior); null when the designation has none.
+  designation_level?: number | null;
   department: string | null;
   department_id: number | null;
   email: string | null;
@@ -659,6 +691,11 @@ export interface ApprovalTemplate {
   step_count?: number;
   skip_auto_supervisor?: boolean | number;
   steps?: ApprovalTemplateStep[];
+  // GET /api/approval-templates?with=chain (the Templates list).
+  uses_supervisor?: boolean;
+  chain?: { step_order: number; label: string | null; approver_type: string; approvers: string[] }[];
+  employee_count?: number;
+  updated_at?: string;
 }
 
 export interface ApprovalRequest {
@@ -668,6 +705,10 @@ export interface ApprovalRequest {
   awaiting_approver?: number | null;
   source_type: 'attendance' | 'claim' | 'bill_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
   event_type: 'check_in' | 'check_out' | 'submit';
+  // GET /api/approvals: who asked, on the Employee record.
+  requested_by_code?: string | null;
+  requested_by_designation?: string | null;
+  requested_by_department?: string | null;
   source_id: number;
   requested_by: number;
   requested_by_name?: string | null;
@@ -827,6 +868,9 @@ export interface User {
   // 'admin' it's OFF by default and must be explicitly switched on by the
   // Superadmin (PUT /api/users/:id/login-location-access). Irrelevant for 'user'.
   can_view_login_location?: boolean;
+  // Departments this account heads / supervises a team in (Users list filters; only sent to an account that may read Departments).
+  dept_head_of?: string[];
+  dept_supervisor_of?: string[];
   // Superadmin-only grant: can this Admin ALSO set OTHER accounts' Module Access
   // (the module_permissions grant above) themselves, via PUT
   // /api/users/:id/module-permissions? Always false for role !== 'admin'. OFF by
@@ -990,6 +1034,9 @@ export interface LeaveCategoryPolicy {
   // true = weekends and holidays inside a leave come off the balance too
   // (every calendar day); false = only the applicant's working days do.
   count_off_days?: boolean;
+  // Joiner & Probation rules (Leave Manage layer "joiner_rules"); off by default.
+  probation_mode?: 'full' | 'prorata' | 'none';
+  joiner_prorata?: boolean;
   // Leave Rules (Leave Manage layer "leave_rules"); all off by default.
   // Who may apply: 'any' | 'female' | 'male', and months of service needed.
   gender?: 'any' | 'female' | 'male';
@@ -1175,11 +1222,16 @@ export interface Project {
   location_lng?: number | null;
   location_label?: string | null;
   location_radius?: number | null; // meters — optional site-radius circle around the pin
+  // PEPM Entry sharing (PepmTeam.ts): who sees this Project's entries —
+  // the whole team, each person their own, or by home project.
+  entry_scope?: 'team' | 'own' | 'home';
   // The Branch this Project is kept in step with (branches.project_id) and
   // its type — null when no Branch is linked.
   linked_branch_id?: number | null;
   linked_branch_name?: string | null;
   linked_branch_type?: 'head_office' | 'project_site' | null;
+  // Retired: hidden from lists and pickers, nothing deleted (BranchTools.ts).
+  is_archived?: number | boolean;
 }
 
 // A company Branch (Admin Panel -> Branches, a separate AdminModuleKey from
@@ -1197,6 +1249,7 @@ export interface Branch {
   // Employee assigned to this Branch — see all_employees.branch_id /
   // getEmployeeBranchTypeMap in holidayRoutes.ts.
   branch_type: 'head_office' | 'project_site';
+  is_archived?: number | boolean;
   created_by?: number;
   created_at?: string;
   // Site location pin set from Admin Panel -> Branches -> "Set Location on Map"
@@ -1266,6 +1319,9 @@ export interface Entry {
   user_name?: string;
   // Who entered the row — a Project team has several members (PepmTeam.ts).
   entered_by_name?: string | null;
+  // "By home project" Projects (PepmTeam.ts): the project the entry is For.
+  for_project_id?: number | null;
+  for_project_name?: string | null;
   budget_name?: string | null;
   created_at?: string;
   // Pulled from the matching imported Budget Excel row (budget_id + MRF No + Description)
@@ -1392,6 +1448,8 @@ export interface PendingJobEdit {
   job_id: number | null;
   job_no?: string | null;
   job_name?: string | null;
+  // The Job's Project (GET /api/job-edits); a New Job has it in payload.project_name.
+  project_name?: string | null;
   // Which existing MPR row this request is against — set for 'delete_entry', null
   // for a still-pending 'add_item'/'add_job' (there's no real entries row yet).
   entry_id: number | null;
@@ -1770,8 +1828,20 @@ export interface BillClaimCategory {
   is_active: boolean;
   sort_order: number;
   max_per_bill: number | null;
+  daily_limit?: number | null;
   monthly_limit: number | null;
   receipt_required: boolean;
+  // Limits by designation (a blank field there uses the category's own).
+  designation_limits?: BillClaimDesignationLimit[];
+  // GET /api/bill-claim-policy/mine: whose designation's limits apply here.
+  limits_for?: string | null;
+}
+export interface BillClaimDesignationLimit {
+  designation_id: number | null;
+  designation: string;
+  max_per_bill: number | null;
+  daily_limit: number | null;
+  monthly_limit: number | null;
 }
 export interface BillClaimPolicyDef {
   key: string;
@@ -1930,6 +2000,8 @@ export type NoticePriority = 'normal' | 'important' | 'urgent';
 export interface NoticeAudience {
   departments: number[];
   branches: number[];
+  // Every Head Office / every Project at once (by each person's Branch type).
+  places?: ('head_office' | 'project')[];
   include: number[];
   exclude: number[];
 }
@@ -1951,6 +2023,7 @@ export interface NoticeAudiencePerson {
   department: string | null;
   department_id: number | null;
   branch_id: number | null;
+  place?: 'head_office' | 'project' | null;
 }
 
 // Personal Alerts (bell icon, web + mobile) — a small per-account inbox.
@@ -2159,6 +2232,9 @@ export interface ConveyanceBill {
   // voucher_no. See POST /api/conveyance-bills/:id/disburse and .../undisburse.
   is_disbursed?: boolean;
   voucher_no?: string | null;
+  // When it came to Disbursement (its Bill Claim's last approval, else when
+  // the Bill was made) — Admin list only.
+  approved_at?: string | null;
   disbursed_at?: string | null;
   disbursed_by?: number | null;
   disbursed_by_name?: string | null;
@@ -2277,6 +2353,13 @@ export interface ChatRoom {
   muted_until?: string | null;
   // Disappearing messages for new messages (seconds; 0 = off).
   disappear_seconds?: number;
+  // This account's own chat list (chat/ChatListActions.tsx): archived,
+  // pinned on top, marked as unread, in Favorites, in its own lists.
+  archived?: boolean;
+  pinned?: boolean;
+  marked_unread?: boolean;
+  favorite?: boolean;
+  list_ids?: number[];
 }
 
 export interface ChatRoomMember {

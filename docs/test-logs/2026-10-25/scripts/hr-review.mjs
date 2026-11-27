@@ -25,7 +25,7 @@ const mkEmp = async (name, email, extra = {}) => { const r = await api(SA, 'POST
 const eA = await mkEmp('Alice Review', 'alice.rv@credence.test'); const eB = await mkEmp('Bob Review', 'bob.rv@credence.test');
 const A = (await login('alice.rv@credence.test', 'Pass12345')).body; const B = (await login('bob.rv@credence.test', 'Pass12345')).body;
 console.log('fixtures', eA.status, eB.status, !!A.token, !!B.token);
-const hrU = (await api(SA, 'POST', '/api/users', { name: 'HR Limited', email: 'hr.lim@credence.test', password: 'Pass12345', role: 'admin' })).body.id;
+const hrU = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'HR Limited', email: 'hr.lim@credence.test', password: 'Pass12345', role: 'admin' })).body.id;
 await api(SA, 'PUT', `/api/users/${hrU}/module-permissions`, { modules: ['employees'] });
 const HR = (await login('hr.lim@credence.test', 'Pass12345')).body;
 
@@ -35,7 +35,7 @@ area = 'Security — accounts & sessions';
   const w = await login('alice.rv@credence.test', 'wrong'); const u = await login('nobody@credence.test', 'wrong');
   T('SEC-01', [400,401].includes(w.status) && [400,401].includes(u.status), 'Wrong password and unknown user both refused', `${w.status}/${u.status}`);
   T('SEC-02', JSON.stringify(w.body.error) === JSON.stringify(u.body.error), 'Same message for wrong password and unknown user (no account enumeration)', `${JSON.stringify(w.body)} vs ${JSON.stringify(u.body)}`);
-  await api(SA, 'POST', '/api/users', { name: 'Throttle Victim', email: 'thr.rv@credence.test', password: 'Pass12345', role: 'user' });
+  await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Throttle Victim', email: 'thr.rv@credence.test', password: 'Pass12345', role: 'user' });
   let codes = []; for (let i = 0; i < 25; i++) codes.push((await login('thr.rv@credence.test', 'bad' + i)).status);
   const throttled = codes.some((c) => c === 429 || c === 423);
   const still = (await login('thr.rv@credence.test', 'Pass12345')).status;
@@ -45,7 +45,7 @@ area = 'Security — accounts & sessions';
   T('SEC-05', denied(await api(tam, 'GET', '/api/users')), 'Tampered token refused');
   const none = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url') + '.' + Buffer.from(JSON.stringify({ id: 1, role: 'superadmin' })).toString('base64url') + '.';
   T('SEC-06', denied(await api(none, 'GET', '/api/users')), 'Unsigned (alg=none) token refused');
-  const weak = await api(SA, 'POST', '/api/users', { name: 'Weak Pw', email: 'weak.pw@credence.test', password: '111111', role: 'user' });
+  const weak = await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Weak Pw', email: 'weak.pw@credence.test', password: '111111', role: 'user' });
   INFO('SEC-07', 'Simple passwords such as "111111" are allowed (company policy: any password; sign-in lockout still applies)', `create with "111111": ${weak.status}`);
   const lst = await api(SA, 'GET', '/api/users'); T('SEC-08', !/password_hash|\$2[aby]\$/.test(JSON.stringify(lst.body)), 'User list does not return password hashes');
   const hashRow = sql("SELECT password_hash FROM users WHERE email='alice.rv@credence.test'"); T('SEC-09', /^\$2[aby]\$/.test(hashRow), 'Passwords stored as bcrypt hashes');
@@ -81,7 +81,7 @@ area = 'Authorization & privacy';
 {
   const adm = ['/api/users', '/api/employees', '/api/payroll?month_year=2026-10', '/api/hr-analytics/summary', '/api/approval-templates', '/api/companies', '/api/departments/manage', '/api/exit-requests/pending'];
   for (const p of adm) { const r = await api(B.token, 'GET', p); if (isHtml(r) || r.status === 404) { INFO('AUTHZ-01', `${p} is not an API route here (HTML page returned)`, ''); continue; } T('AUTHZ-01', denied(r), `Employee cannot open ${p}`, J(r)); }
-  const ew = [['POST', '/api/notices', { title: 'a', content_html: 'b', target_type: 'all' }], ['PUT', '/api/leave-balances/bulk', {}], ['POST', '/api/holidays', { entry_date: day(3), day_type: 'holiday', title: 'x' }], ['POST', '/api/payroll/generate', {}], ['POST', '/api/employees', { name: 'Evil' }], ['PUT', `/api/users/${hrU}/module-permissions`, { modules: ['payroll'] }], ['POST', '/api/users', { name: 'Evil', email: 'evil@x.test', password: 'Pass12345', role: 'admin' }]];
+  const ew = [['POST', '/api/notices', { title: 'a', content_html: 'b', target_type: 'all' }], ['PUT', '/api/leave-balances/bulk', {}], ['POST', '/api/holidays', { entry_date: day(3), day_type: 'holiday', title: 'x' }], ['POST', '/api/payroll/generate', {}], ['POST', '/api/employees', { name: 'Evil' }], ['PUT', `/api/users/${hrU}/module-permissions`, { modules: ['payroll'] }], ['POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Evil', email: 'evil@x.test', password: 'Pass12345', role: 'admin' }]];
   for (const [m, p, b] of ew) { const r = await api(B.token, m, p, b); T('AUTHZ-02', denied(r), `Employee cannot ${m} ${p}`, J(r)); }
   const meU = await api(B.token, 'GET', '/api/auth/me'); const bid = meU.body.id || meU.body.user?.id;
   const esc = await api(B.token, 'PUT', '/api/profile', { role: 'superadmin', name: 'Bob' }); const roleNow = sql(`SELECT role FROM users WHERE id=${bid}`);

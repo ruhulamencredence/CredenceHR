@@ -66,7 +66,7 @@ for (const [d, t] of [['2022-05-03', 'Eid-ul-Fitr'], ['2023-04-22', 'Eid-ul-Fitr
   await step(`Holiday ${t} ${d}`, api(SA, 'POST', '/api/holidays', { entry_date: d, day_type: 'holiday', title: t, applies_to: 'head_office' }));
 
 // People around Ruhul: an HR officer, his line manager, the IT and Finance clearance people.
-const hrU = await step('HR officer account (Nasrin)', api(SA, 'POST', '/api/users', { name: 'Nasrin Sultana', email: 'nasrin.hr@credence.test', password: 'Pass12345', role: 'admin' }));
+const hrU = await step('HR officer account (Nasrin)', api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Nasrin Sultana', email: 'nasrin.hr@credence.test', password: 'Pass12345', role: 'admin' }));
 const hrId = hrU.body.id;
 await step('Nasrin gets Recruitment, HR Operations, Employees, Exit, Assets', api(SA, 'PUT', `/api/users/${hrId}/module-permissions`, { modules: ['recruitment', 'hr_operations', 'employees', 'exit_offboarding', 'asset_management'] }));
 await step('Nasrin can open onboarding (not approve)', api(SA, 'PUT', `/api/users/${hrId}/module-permission-layers`, { module: 'hr_operations', layers: ['read', 'onboarding_create', 'onboarding_review'] }));

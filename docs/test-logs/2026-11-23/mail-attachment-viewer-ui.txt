@@ -1,0 +1,24 @@
+PASS computer: four attachments
+PASS computer: tap green.png → opens in the app
+PASS computer: "2 / 3" (two images + the PDF)
+PASS computer: the picture is shown
+PASS computer: › → letter.pdf, 3 / 3
+PASS computer: PDF pages drawn in the app
+PASS computer: no next after the last
+PASS computer: ← key back to 2 / 3
+PASS computer: back to a file seen before — shown at once (kept, not fetched again)
+PASS computer: ✕ closes
+PASS computer: ⬇ next to red.png downloads it
+PASS computer: notes.txt (not viewable) downloads on tap, no viewer
+PASS computer: no new tab, no page errors []
+PASS phone: four attachments
+PASS phone: tap green.png → opens in the app
+PASS phone: "2 / 3" (two images + the PDF)
+PASS phone: the picture is shown
+PASS phone: › → letter.pdf, 3 / 3
+PASS phone: PDF pages drawn in the app
+PASS phone: no next after the last
+PASS phone: ‹ back to 2 / 3
+PASS phone: ✕ closes
+PASS phone: no new tab, no page errors []
+ALL PASS

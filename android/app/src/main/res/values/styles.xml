@@ -33,11 +33,16 @@
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
-        <!-- Android 12+ draws its own splash (the launcher icon on this
-             colour) instead of @drawable/splash. Same orange as the splash
-             and the in-app open animation (BootIntroAnimation.tsx), so the
-             hand-off never flashes white. -->
+        <!-- The opening screen: orange with the app's own logo, at once (the
+             logo drawable is the same tile, size and place as the web page's
+             first frame, so logo -> page -> open animation is one picture and
+             nothing white shows in between). MainActivity keeps this up until
+             the page has drawn its first frame. -->
         <item name="windowSplashScreenBackground">#F47920</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F47920</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
     </style>
 </resources>

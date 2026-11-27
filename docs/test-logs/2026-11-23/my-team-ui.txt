@@ -1,0 +1,20 @@
+PASS phone: My Team card on the Dashboard
+PASS card: 4 people
+PASS card: 1 Present · 1 Late · 1 On leave · 1 Not in yet
+PASS card: who is late
+PASS See all: the My Team page opens
+PASS page: grouped as "Head of <Department>"
+PASS page: Sadia shows Casual Leave
+PASS page: Karim shows In 11:40 and the Project
+PASS filter Late: only Karim
+PASS search "nusr": only Nusrat
+PASS tap Karim: his card opens
+PASS person: this month so far
+PASS person: Call button dials his number
+PASS person: "Under you as Head of …"
+PASS closing the person keeps the list open
+PASS phone: no page errors []
+PASS computer: My Team card on the Dashboard
+PASS computer: no page errors []
+PASS nobody under them: no My Team card
+ALL PASS

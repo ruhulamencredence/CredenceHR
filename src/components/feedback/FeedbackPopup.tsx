@@ -241,9 +241,21 @@ export const FeedbackPopup: React.FC<{ token: string; onClose: () => void }> = (
               </button>
             </div>
           ) : (
-            <button type="button" onClick={() => fileRef.current?.click()} className={`w-full flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border border-dashed text-sm text-slate-600 hover:bg-white/60 ${dragging ? 'border-violet-500 bg-violet-50/60' : 'border-slate-300'}`}>
-              <span className="flex items-center gap-2"><ImagePlus className="w-4 h-4" /> Add a screenshot (optional)</span>
-              <span className="text-[11px] text-slate-500 hidden sm:block">Choose a file, drop one here, or press Ctrl+V to paste a copied image</span>
+            // A solid tile with a clear dashed edge — a faint dashed line alone
+            // disappeared into the glass card.
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-[20px] border-2 border-dashed text-left transition-colors ${dragging ? 'border-[color:var(--g-accent,#7F00FF)] bg-white' : 'border-slate-400/70 bg-white/80 hover:bg-white'}`}
+            >
+              <span className="w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center text-white" style={{ background: 'var(--g-accent, #7F00FF)' }}>
+                <ImagePlus className="w-5 h-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-slate-800">Add a screenshot <span className="font-normal text-slate-500">(optional)</span></span>
+                <span className="block text-[11.5px] text-slate-500 sm:hidden">Tap to pick a photo</span>
+                <span className="hidden sm:block text-[11.5px] text-slate-500">Choose a file, drop one here, or press Ctrl+V to paste a copied image</span>
+              </span>
             </button>
           )}
         </div>

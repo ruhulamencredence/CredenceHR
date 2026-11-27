@@ -98,6 +98,13 @@ export function usePullToRefresh(threshold = 80) {
         // reads as an intentional "loading now" hand-off rather than an
         // abrupt cut. 380ms matches the fade timing below.
         setTriggering(true);
+        // index.html reads this on the next start and shows the same veil +
+        // Infinity loader instead of the orange logo splash while the app loads.
+        try {
+          sessionStorage.setItem('mpr_pull_reload', '1');
+        } catch {
+          // storage unavailable — the normal start screen shows
+        }
         window.setTimeout(() => window.location.reload(), 380);
         return;
       }

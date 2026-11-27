@@ -18,6 +18,7 @@
 // styling, Spinner, money()) so it drops in as a full-screen modal over
 // PayrollModule.tsx.
 
+import { lateDeductions, latesCombined } from '../lib/lateDeduction';
 import { maskMoney } from '../lib/payrollAmounts';
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2, Search, Paperclip } from 'lucide-react';
@@ -501,8 +502,14 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       Delay: shift starts {latePolicy.shift_start_time?.slice(0, 5)}, grace {latePolicy.grace_minutes} min (late past{' '}
                       {addMinutesToTime(latePolicy.shift_start_time, latePolicy.grace_minutes)}), {latePolicy.lates_per_deduction_day} lates ={' '}
                       1 day's pay deducted. Extreme Delay: past{' '}
-                      {addMinutesToTime(latePolicy.shift_start_time, latePolicy.extreme_grace_minutes)}, {latePolicy.extreme_lates_per_deduction_day}{' '}
-                      late{latePolicy.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
+                      {addMinutesToTime(latePolicy.shift_start_time, latePolicy.extreme_grace_minutes)},{' '}
+                      {latesCombined(latePolicy) ? (
+                        <>no separate deduction — counted with the lates ({latePolicy.lates_per_deduction_day} lates of either kind = 1 day).</>
+                      ) : (
+                        <>
+                          {latePolicy.extreme_lates_per_deduction_day} late{latePolicy.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
@@ -625,6 +632,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                               >
                                 <Clock className="w-3 h-3" /> {r.extreme_late_count}
                               </button>
+                            )}
+                            {latesCombined(latePolicy) && r.extreme_late_count > 0 && (
+                              <p className="text-[9px] text-slate-500 mt-0.5">{r.late_count + r.extreme_late_count} lates together</p>
                             )}
                             {(r.late_deduction_days > 0 || r.extreme_late_deduction_days > 0) && (
                               <p className="text-[9px] text-rose-500 mt-0.5">
@@ -1110,9 +1120,10 @@ const LateDaysModal: React.FC<{
   };
 
   const countedLate = days.filter((d) => !d.waived && !d.extreme).length;
-  const deductionDays = policy ? Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1)) : 0;
   const countedExtremeLate = days.filter((d) => !d.waived && d.extreme).length;
-  const extremeDeductionDays = policy ? Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1)) : 0;
+  // Extreme = 0: both kinds counted together (lib/lateDeduction.ts).
+  const combined = latesCombined(policy);
+  const { late: deductionDays, extreme: extremeDeductionDays } = lateDeductions(countedLate, countedExtremeLate, policy);
 
   return (
     <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
@@ -1138,6 +1149,15 @@ const LateDaysModal: React.FC<{
           ) : (
             <>
               <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-600 space-y-1">
+                {combined ? (
+                  <p data-testid="late-days-combined">
+                    {countedLate} Delay + {countedExtremeLate} Extreme Delay = {countedLate + countedExtremeLate} counted late day
+                    {countedLate + countedExtremeLate === 1 ? '' : 's'}
+                    {policy ? ` — every ${policy.lates_per_deduction_day} lates of either kind deducts 1 day's pay` : ''} →{' '}
+                    <span className="font-semibold text-rose-600">{deductionDays} day{deductionDays === 1 ? '' : 's'}</span> deducted.
+                  </p>
+                ) : (
+                <>
                 <p>
                   {countedLate} counted Delay day{countedLate === 1 ? '' : 's'}
                   {policy ? ` — every ${policy.lates_per_deduction_day} lates deducts 1 day's pay` : ''} →{' '}
@@ -1148,6 +1168,8 @@ const LateDaysModal: React.FC<{
                   {policy ? ` — every ${policy.extreme_lates_per_deduction_day} deducts 1 day's pay` : ''} →{' '}
                   <span className="font-semibold text-rose-600">{extremeDeductionDays} day{extremeDeductionDays === 1 ? '' : 's'}</span> deducted.
                 </p>
+                </>
+                )}
               </div>
               <div className="space-y-2">
                 {days.map((d) => (

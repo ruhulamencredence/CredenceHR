@@ -32,7 +32,7 @@ const eBid = eB.body.id;
 // Mother-company HR, given the sister company too (Admin Panel -> Users ->
 // Company access, and Module Access in each company).
 const MODS = ['employees', 'payroll', 'approvals', 'leave_applications', 'reports'];
-const hid = (await api(SA, 'POST', '/api/users', { name: 'Group HR', email: 'group.hr@credence.test', password: 'easy', role: 'admin' })).body.id;
+const hid = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Group HR', email: 'group.hr@credence.test', password: 'easy', role: 'admin' })).body.id;
 const acc = await api(SA, 'PUT', `/api/system/company-access/${hid}`, { company_ids: [1, B], default_company_id: 1 });
 await api(SA, 'PUT', `/api/users/${hid}/module-permissions`, { modules: MODS }, 1);
 const modB = await api(SA, 'PUT', `/api/users/${hid}/module-permissions`, { modules: MODS }, B);
@@ -98,7 +98,7 @@ T('GH-18', !ok(genAll), 'All companies: payroll is still run per company (CBL\'s
 const one = await api(HR, 'GET', '/api/employees', undefined, B);
 T('GH-19', ok(one) && has(one.body, 'Bina Builders') && !has(one.body, 'Arif Mother'), 'Picking one company still shows just that company', J(one));
 // An account allowed only company 1 gets nothing more from the mode.
-const oid = (await api(SA, 'POST', '/api/users', { name: 'One Co HR', email: 'oneco.hr@credence.test', password: 'easy', role: 'admin' })).body.id;
+const oid = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'One Co HR', email: 'oneco.hr@credence.test', password: 'easy', role: 'admin' })).body.id;
 await api(SA, 'PUT', `/api/users/${oid}/module-permissions`, { modules: MODS }, 1);
 sql(`UPDATE users SET can_work_all_companies = 1 WHERE id = ${oid}`);
 const O = await login('oneco.hr@credence.test', 'easy');

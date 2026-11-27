@@ -51,7 +51,7 @@ const st2 = await call(rumana, 'PUT', '/api/app-access/settings', { new_accounts
 ok('…and cannot change the new-account setting', st2.s === 403);
 
 console.log('— new accounts');
-const made = (await call(sa, 'POST', '/api/users', { name: 'New Joiner', email: 'new.joiner@credence.test', password: 'Joiner#2026pass', role: 'user' })).j;
+const made = (await call(sa, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'New Joiner', email: 'new.joiner@credence.test', password: 'Joiner#2026pass', role: 'user' })).j;
 ok('a new account is made', !!made && !made.error, JSON.stringify(made));
 ok('it has nothing set for itself (follows the setting)', sql("SELECT IFNULL(can_use_app, 'null') FROM users WHERE email = 'new.joiner@credence.test'") === 'null');
 const nj = async () => (await call(null, 'POST', '/api/auth/login', { email: 'new.joiner@credence.test', password: 'Joiner#2026pass', workspace: 'credence', platform: 'app', latitude: 23.78, longitude: 90.41, device_id: 'qa-new-joiner', device_name: 'QA phone', device_platform: 'android' })).j;

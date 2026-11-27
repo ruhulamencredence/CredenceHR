@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { latesCombined } from '../lib/lateDeduction';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
-import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, Smartphone } from 'lucide-react';
+import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, ShieldCheck, Smartphone } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { retryImport } from '../lib/chunkReload';
@@ -94,13 +95,28 @@ async function getCurrentCoords(): Promise<AttendanceFix> {
         first = second;
       }
     }
+    // The way to fix it depends on the device: an iPhone (Safari / Home
+    // Screen app) has no lock icon, its switch is in the iPhone Settings.
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && (navigator as any).maxTouchPoints > 1);
+    const android = /Android/i.test(ua);
     if (first?.code === 1) {
       throw new Error(
-        "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
+        ios
+          ? 'Location is blocked for this site on your iPhone. Open iPhone Settings → Privacy → Location Services: turn Location Services on, then open Safari Websites and choose "While Using the App" (and turn on Precise Location). Come back, reload the page and try again.'
+          : android
+            ? 'Location is blocked for this site. Tap the icon to the left of the web address → Permissions → Location → Allow, make sure the phone\'s Location is on, then reload and try again.'
+            : "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
       );
     }
     if (first?.code === 2) {
-      throw new Error("Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again.");
+      throw new Error(
+        ios
+          ? "Your iPhone couldn't find your position. Turn on Settings → Privacy → Location Services, go outside or near a window, then try again."
+          : android
+            ? "Your phone couldn't find your position. Turn on Location in the quick settings, then try again."
+            : "Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again."
+      );
     }
     throw new Error('Getting your location took too long. Please try again.');
   }
@@ -176,11 +192,14 @@ const AttendanceClockBg: React.FC = () => {
   );
 };
 
+// Where the punch came from (office device, project, off-site) — on the
+// computer only. On the phone the In / Out tiles show just the time: the
+// employee knows where they punched, and the reports keep the place.
 const placeLine = (source: string | null | undefined, place: string | null | undefined) => {
   const text =
     source === 'office' ? `Office device${place ? ` · ${place}` : ''}` : source === 'offsite' ? `Off-site · ${place || 'outside the project area'}` : place ? `at ${place}` : '';
   return text ? (
-    <div className="mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
+    <div className="hidden md:block mt-0.5 text-[10.5px] leading-tight text-slate-500 truncate" title={text}>
       {text}
     </div>
   ) : null;
@@ -191,7 +210,74 @@ const placeLine = (source: string | null | undefined, place: string | null | und
 // location_radius circle. Shown near the top of the User Panel, always
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
-export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
+// A relief guard duty (Duty Roster -> Guard Posts, GET /api/guard/my-relief).
+interface ReliefDuty {
+  id: number;
+  date: string;
+  post_name: string;
+  site: string | null;
+  project_id: number | null;
+  shift_name: string;
+  start_time: string;
+  end_time: string;
+  start: string;
+  end: string;
+  check_in_from: string;
+  check_in_until: string;
+  active: boolean;
+  checked_in: boolean;
+}
+// The shift's own times (Bangladesh time, as set on the roster) — not the phone's clock zone.
+const hm12 = (hm: string, addMin = 0) => {
+  const [h, m] = hm.split(':').map(Number);
+  const t = (((h * 60 + m + addMin) % 1440) + 1440) % 1440;
+  const H = Math.floor(t / 60);
+  return `${H % 12 || 12}:${String(t % 60).padStart(2, '0')} ${H < 12 ? 'AM' : 'PM'}`;
+};
+const bdToday = () => new Date(Date.now() + 6 * 3600e3).toISOString().slice(0, 10);
+const dayWord = (date: string, start: string) => {
+  const today = bdToday();
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  if (date === today) return Number(start.slice(0, 2)) >= 17 ? 'Tonight' : 'Today';
+  if (date === tomorrow) return 'Tomorrow';
+  return new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects: ownProjects, loading }) => {
+  // Relief guard duties: shown on the card; while one runs, its site is one
+  // of the places to check in at (the server opens it for that duty only).
+  const [relief, setRelief] = useState<ReliefDuty[]>([]);
+  const [reliefProjects, setReliefProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch(apiUrl('/api/guard/my-relief'), { headers: { Authorization: `Bearer ${token}` } });
+        const j = r.ok ? await r.json() : { duties: [] };
+        if (!alive) return;
+        const duties: ReliefDuty[] = Array.isArray(j?.duties) ? j.duties : [];
+        setRelief(duties);
+        const want = new Set(duties.filter((d) => d.active && d.project_id).map((d) => Number(d.project_id)));
+        if (want.size) {
+          const pr = await fetch(apiUrl('/api/attendance/my-projects'), { headers: { Authorization: `Bearer ${token}` } });
+          const list: Project[] = pr.ok ? await pr.json() : [];
+          if (alive) setReliefProjects(list.filter((x) => want.has(Number(x.id))));
+        } else setReliefProjects([]);
+      } catch {
+        // offline — the card works as before
+      }
+    };
+    void load();
+    const t = window.setInterval(() => void load(), 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [token]);
+  const projects = useMemo(() => {
+    const seen = new Set(ownProjects.map((x) => Number(x.id)));
+    return [...ownProjects, ...reliefProjects.filter((x) => !seen.has(Number(x.id)))];
+  }, [ownProjects, reliefProjects]);
   // Blur is on in the Android/iPhone app too (it used to be left out there
   // because some Android WebViews dropped it on reload); glass-mask-fix +
   // translateZ(0) on the shell keep the card itself from disappearing. The
@@ -284,6 +370,25 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
   // the server yet.
+  // Take back the off-site In / Out that still waits for approval, so an In given inside
+  // the project area counts instead (POST /api/attendance/offsite/withdraw).
+  const withdrawOffsite = async () => {
+    if (!(await confirmDialog('Withdraw your off-site request for today? It will not go for approval, and you can check in inside the project area.', { title: 'Withdraw', confirmLabel: 'Withdraw' }))) return;
+    setWorking('in');
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl('/api/attendance/offsite/withdraw'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not withdraw the request.');
+      setMessage({ type: 'success', text: 'Your off-site request was withdrawn.' });
+      await loadDay();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Could not withdraw the request.' });
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const handleMark = async (kind: 'in' | 'out') => {
     // A device that can't give attendance (Android browser / computer): say why, send nothing.
     if (block) {
@@ -408,16 +513,34 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const inParts = status?.check_in_at ? formatTimeParts(status.check_in_at as string) : null;
   const outParts = status?.check_out_at ? formatTimeParts(status.check_out_at as string) : null;
   const busy = working !== null || !!pending || loadingStatus;
+  // The Out Time box itself gives the Out again (no "Set again" text).
+  const canSetOutAgain = hasCheckedOut && !!outParts && !!status?.can_update_check_out && !busy;
+  const setOutAgain = async () => {
+    if (!canSetOutAgain || !outParts) return;
+    // A device that can't give attendance: say why first, before asking.
+    if (block) return setShowBlock(true);
+    const msg =
+      status?.check_out_source === 'office'
+        ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
+        : `Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`;
+    if (!(await confirmDialog(msg))) return;
+    void handleMark('out');
+  };
 
   const lateWarnings: { badge: string; text: string }[] = [];
   if (lateSummary?.policy) {
     const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
     const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
     const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
-    if (oneShort(Number(lateSummary.late_count) || 0, per)) {
+    // Extreme = 0 in the Late Policy: Extreme Delay counts with the lates (lib/lateDeduction.ts).
+    const combined = latesCombined(lateSummary.policy);
+    const lates = (Number(lateSummary.late_count) || 0) + (combined ? Number(lateSummary.extreme_late_count) || 0 : 0);
+    if (oneShort(lates, per)) {
       lateWarnings.push({
-        badge: `${lateSummary.late_count}/${per} late`,
-        text: `${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
+        badge: `${lates}/${per} late`,
+        text: combined
+          ? `${lates} lates this month (Delay and Extreme Delay together) — 1 more and a day's salary will be deducted (${per} lates = 1 day).`
+          : `${lates} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
       });
     }
     if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {
@@ -492,6 +615,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 <span className="text-[11px] align-middle">{formatTimeParts(waiting.in_at).meridiem}</span>
               </div>
               <div className="mt-0.5 text-[10.5px] leading-tight text-amber-700 font-semibold">Waiting for approval</div>
+              <button
+                type="button"
+                onClick={() => handleMark('in')}
+                disabled={busy}
+                className="mt-1 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 transition-colors"
+              >
+                {working === 'in' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
+                Check in here
+              </button>
             </>
           ) : (
             <button
@@ -508,7 +640,29 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        {/* Gave it too early, or the office machine took a stray punch as
+            the Out? The same day it can be given again
+            (users.can_update_check_out — off unless ticked) by tapping this
+            box; no "Set again" text, it asks first (confirmDialog). */}
+        <div
+          className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'} ${
+            canSetOutAgain ? 'cursor-pointer active:scale-[0.98] transition-transform' : ''
+          }`}
+          {...(canSetOutAgain
+            ? {
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': 'Out Time — tap to give it again',
+                onClick: setOutAgain,
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOutAgain();
+                  }
+                }
+              }
+            : {})}
+        >
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {!hasCheckedOut && waiting?.out_at ? (
             <>
@@ -525,27 +679,10 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
                 <span className="text-[11px] align-middle">{outParts.meridiem}</span>
               </div>
               {placeLine(status?.check_out_source, status?.check_out_place)}
-              {/* Gave it too early, or the office machine took a stray punch as
-                  the Out? The same day it can be given again
-                  (users.can_update_check_out — off unless ticked). */}
-              {status?.can_update_check_out && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (block) return setShowBlock(true);
-                    const msg =
-                      status?.check_out_source === 'office'
-                        ? `Give your Out Time now? The office machine took ${outParts.time} ${outParts.meridiem} as your Out. That punch stays on record; the time you set now becomes your Out Time and goes for approval.`
-                        : `Give your Out Time again? ${outParts.time} ${outParts.meridiem} is replaced by the time you set now, and it goes for approval again.`;
-                    if (!(await confirmDialog(msg))) return;
-                    void handleMark('out');
-                  }}
-                  disabled={busy}
-                  className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {working === 'out' ? <Spinner size={12} /> : <Play className="w-3 h-3 fill-current" />}
-                  Set again
-                </button>
+              {working === 'out' && (
+                <div className="mt-0.5">
+                  <Spinner size={12} />
+                </div>
               )}
             </>
           ) : (
@@ -613,14 +750,56 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             ) : waiting ? null : (
               <span>Not checked in today yet.</span>
             )}
+
             {waiting && (
               <span className="text-amber-700">
-                Off-site · {waiting.in_place || waiting.out_place} — counts once approved
+                Off-site · {waiting.in_place || waiting.out_place} —{' '}
+                {status?.check_in_at && waiting.in_at ? 'waiting; if it is earlier than your In, the approver decides' : 'counts once approved'}
               </span>
+            )}
+            {waiting && (
+              <button type="button" onClick={withdrawOffsite} disabled={busy} className="font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40">
+                Withdraw
+              </button>
             )}
             {!!status?.check_in_at && <ApprovalBadge approval={status?.check_in_approval} />}
             {hasCheckedOut && <ApprovalBadge approval={status?.check_out_approval} />}
           </div>
+          {relief.map((d) => (
+            <div key={d.id} className="mt-2 rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white px-3.5 py-2.5 text-[13px] text-slate-700">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 text-white px-2 py-0.5 text-[10px] font-bold">
+                  <ShieldCheck className="w-3 h-3" /> RELIEF DUTY
+                </span>
+                <b className="text-slate-900">
+                  {dayWord(d.date, d.start_time)} {hm12(d.start_time)} – {hm12(d.end_time)}
+                </b>
+              </div>
+              <div className="mt-1">
+                <b>{[d.site, d.post_name].filter(Boolean).join(' · ')}</b> · {d.shift_name}
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {d.project_id
+                  ? d.active
+                    ? d.checked_in
+                      ? `Checked in. Check Out here until ${hm12(d.end_time, 30)}.`
+                      : `You can check in there now (until ${hm12(d.end_time, 30)}).`
+                    : `You can check in there from ${hm12(d.start_time, -30)}.`
+                  : 'Your site supervisor marks your attendance there.'}
+              </div>
+              {d.active && d.project_id && (
+                <button
+                  type="button"
+                  onClick={() => void handleMark(d.checked_in ? 'out' : 'in')}
+                  disabled={!!working}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white px-3.5 py-1.5 text-xs font-bold disabled:opacity-50"
+                >
+                  {working ? <Spinner size={12} /> : <Play className="w-3 h-3" />} {d.checked_in ? 'Check Out' : 'Check In'} here
+                </button>
+              )}
+            </div>
+          ))}
+
           {status?.check_in_remarks && (
             <div className="pl-5 text-slate-500">
               <span className="font-medium text-slate-600">In remarks:</span> {status.check_in_remarks}

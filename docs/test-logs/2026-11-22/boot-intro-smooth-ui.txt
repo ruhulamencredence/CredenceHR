@@ -1,0 +1,13 @@
+PASS sign-in: intro playing, <html data-boot-intro> set
+PASS sign-in: the app under the intro is hidden while it plays
+PASS sign-in: the picture animation has not started under the intro
+PASS sign-in: intro gone, attribute removed
+PASS sign-in: app visible again
+PASS sign-in: picture animation started after the intro
+PASS sign-in: the card is on screen
+PASS sign-in: no page errors []
+PASS signed in: app hidden under the intro
+PASS signed in: app visible after the intro
+PASS signed in: no page errors []
+PASS tap: intro skipped, app shown at once
+ALL PASS

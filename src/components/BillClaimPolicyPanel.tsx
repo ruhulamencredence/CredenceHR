@@ -4,9 +4,12 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert, RotateCcw } from 'lucide-react';
+import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert, RotateCcw, BookOpen, ChevronRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues } from '../types';
+import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues, BillClaimDesignationLimit } from '../types';
+import { SearchSelect } from './Combobox';
+import { BillClaimRulesReaders } from './BillClaimRulesReaders';
+import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
@@ -23,21 +26,43 @@ const GROUPS: { key: BillClaimPolicyDef['group']; title: string; icon: React.Ele
   { key: 'review', title: 'Editing & review', icon: RotateCcw }
 ];
 
+// One designation's limits while editing (blank = the category's own).
+interface DesignationDraft {
+  key: string;
+  designation_id: string;
+  designation: string;
+  max_per_bill: string;
+  daily_limit: string;
+  monthly_limit: string;
+}
 interface CategoryDraft {
   name: string;
   description: string;
   max_per_bill: string;
+  daily_limit: string;
   monthly_limit: string;
+  designations: DesignationDraft[];
   receipt_required: boolean;
   is_active: boolean;
   sort_order: string;
 }
-const emptyDraft: CategoryDraft = { name: '', description: '', max_per_bill: '', monthly_limit: '', receipt_required: false, is_active: true, sort_order: '' };
+const emptyDraft: CategoryDraft = { name: '', description: '', max_per_bill: '', daily_limit: '', monthly_limit: '', designations: [], receipt_required: false, is_active: true, sort_order: '' };
+const numStr = (n: number | null | undefined) => (n != null ? String(n) : '');
+let designationKey = 0;
 const toDraft = (c: BillClaimCategory): CategoryDraft => ({
   name: c.name,
   description: c.description || '',
   max_per_bill: c.max_per_bill != null ? String(c.max_per_bill) : '',
+  daily_limit: numStr(c.daily_limit),
   monthly_limit: c.monthly_limit != null ? String(c.monthly_limit) : '',
+  designations: (c.designation_limits || []).map((d) => ({
+    key: `d${++designationKey}`,
+    designation_id: d.designation_id != null ? String(d.designation_id) : '',
+    designation: d.designation,
+    max_per_bill: numStr(d.max_per_bill),
+    daily_limit: numStr(d.daily_limit),
+    monthly_limit: numStr(d.monthly_limit)
+  })),
   receipt_required: c.receipt_required,
   is_active: c.is_active,
   sort_order: String(c.sort_order)
@@ -75,12 +100,30 @@ const CATEGORY_FIELDS: [string, string][] = [
   ['name', 'Name'],
   ['description', 'Description'],
   ['max_per_bill', 'Max per bill'],
+  ['daily_limit', 'Daily limit'],
   ['monthly_limit', 'Monthly limit'],
+  ['designation_limits', 'By designation'],
   ['receipt_required', 'Receipt'],
   ['is_active', 'Active'],
   ['sort_order', 'Order']
 ];
-const show = (v: any) => (v === true ? 'On' : v === false ? 'Off' : v == null || v === '' ? '—' : String(v));
+// "Executive: ৳300 a bill, ৳200 a day; Manager: ৳500 a month"
+const designationText = (list: BillClaimDesignationLimit[]) =>
+  list.length
+    ? list
+        .map((d) =>
+          `${d.designation}: ${[
+            d.max_per_bill != null ? `৳${d.max_per_bill} a bill` : '',
+            d.daily_limit != null ? `৳${d.daily_limit} a day` : '',
+            d.monthly_limit != null ? `৳${d.monthly_limit} a month` : ''
+          ]
+            .filter(Boolean)
+            .join(', ')}`
+        )
+        .join('; ')
+    : '—';
+const show = (v: any) =>
+  Array.isArray(v) ? designationText(v) : v === true ? 'On' : v === false ? 'Off' : v == null || v === '' ? '—' : String(v);
 
 // "field: old → new" lines for one history row.
 function historyChanges(r: HistoryRow, defs: BillClaimPolicyDef[]): string[] {
@@ -256,11 +299,26 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
   const [values, setValues] = useState<BillClaimPolicyValues>({});
   const [categories, setCategories] = useState<BillClaimCategory[]>([]);
   const [canEdit, setCanEdit] = useState(false);
+  // Who has read the rules — a page of its own (BillClaimRulesReaders.tsx),
+  // opened by its button here; only with the Bill Claim layer "rules_readers".
+  const [canSeeReaders, setCanSeeReaders] = useState(false);
+  const [readersOpen, setReadersOpen] = useState(false);
+  useBackButtonClose(readersOpen, () => setReadersOpen(false));
   const [savingRules, setSavingRules] = useState(false);
   // Category being edited: an id, 'new', or null.
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [draft, setDraft] = useState<CategoryDraft>(emptyDraft);
   const [savingCategory, setSavingCategory] = useState(false);
+  // Designations for the "Limits by designation" picker (loaded when editing).
+  const [designationOptions, setDesignationOptions] = useState<{ id: number; name: string; employees: number }[] | null>(null);
+  useEffect(() => {
+    if (editing === null || designationOptions) return;
+    fetch(apiUrl('/api/designations/options'), { headers })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => setDesignationOptions(Array.isArray(rows) ? rows : []))
+      .catch(() => setDesignationOptions([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
 
   const load = async () => {
     try {
@@ -272,6 +330,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
       setValues(data.values);
       setCategories(data.categories);
       setCanEdit(!!data.can_edit);
+      setCanSeeReaders(!!data.can_see_readers);
       setError('');
     } catch (err: any) {
       setError(err.message);
@@ -328,7 +387,17 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
         name: draft.name.trim(),
         description: draft.description.trim() || null,
         max_per_bill: draft.max_per_bill === '' ? null : Number(draft.max_per_bill),
+        daily_limit: draft.daily_limit === '' ? null : Number(draft.daily_limit),
         monthly_limit: draft.monthly_limit === '' ? null : Number(draft.monthly_limit),
+        designation_limits: draft.designations
+          .filter((d) => d.designation)
+          .map((d) => ({
+            designation_id: d.designation_id ? Number(d.designation_id) : null,
+            designation: d.designation,
+            max_per_bill: d.max_per_bill === '' ? null : Number(d.max_per_bill),
+            daily_limit: d.daily_limit === '' ? null : Number(d.daily_limit),
+            monthly_limit: d.monthly_limit === '' ? null : Number(d.monthly_limit)
+          })),
         receipt_required: draft.receipt_required,
         is_active: draft.is_active,
         ...(draft.sort_order !== '' ? { sort_order: Number(draft.sort_order) } : {})
@@ -371,6 +440,96 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
     );
   }
 
+  if (readersOpen && canSeeReaders) {
+    return (
+      <BillClaimRulesReaders
+        token={token}
+        onBack={() => {
+          setReadersOpen(false);
+          window.scrollTo({ top: 0 });
+        }}
+      />
+    );
+  }
+
+  const setDesignation = (key: string, patch: Partial<DesignationDraft>) =>
+    setDraft((d) => ({ ...d, designations: d.designations.map((x) => (x.key === key ? { ...x, ...patch } : x)) }));
+  const pickedIds = new Set(draft.designations.map((d) => d.designation_id).filter(Boolean));
+  // Limits by designation: a row per designation; a blank box uses the
+  // category's own limit (shown as its placeholder).
+  const designationRow = (
+    <tr className="bg-blue-50/40">
+      <td colSpan={8} className="px-3 py-2.5 border border-slate-200">
+        <div className="text-[11px] font-semibold text-slate-700">Limits by designation</div>
+        <p className="text-[10px] text-slate-500 mb-2">
+          Someone with one of these designations gets these limits instead of the ones above. A box left blank uses the category&apos;s own limit.
+        </p>
+        {draft.designations.length > 0 && (
+          <div className="space-y-1.5 mb-2">
+            {draft.designations.map((d) => (
+              <div key={d.key} className="grid grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto] gap-1.5 items-center">
+                <SearchSelect
+                  value={d.designation_id}
+                  onChange={(e) => {
+                    const o = (designationOptions || []).find((x) => String(x.id) === e.target.value);
+                    setDesignation(d.key, { designation_id: e.target.value, designation: o?.name || '' });
+                  }}
+                  aria-label="Designation"
+                  className={inputCls}
+                >
+                  <option value="">— Select designation —</option>
+                  {d.designation_id && !(designationOptions || []).some((o) => String(o.id) === d.designation_id) && (
+                    <option value={d.designation_id}>{d.designation}</option>
+                  )}
+                  {(designationOptions || [])
+                    .filter((o) => String(o.id) === d.designation_id || !pickedIds.has(String(o.id)))
+                    .map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} · {o.employees} employee{o.employees === 1 ? '' : 's'}
+                      </option>
+                    ))}
+                </SearchSelect>
+                {(['max_per_bill', 'daily_limit', 'monthly_limit'] as const).map((f) => (
+                  <input
+                    key={f}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={d[f]}
+                    onChange={(e) => setDesignation(d.key, { [f]: e.target.value })}
+                    placeholder={`${f === 'max_per_bill' ? 'Per bill' : f === 'daily_limit' ? 'Per day' : 'Per month'}${draft[f] ? ` (${draft[f]})` : ''}`}
+                    aria-label={`${d.designation || 'Designation'} ${f === 'max_per_bill' ? 'per bill' : f === 'daily_limit' ? 'per day' : 'per month'}`}
+                    className={inputCls}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setDraft((x) => ({ ...x, designations: x.designations.filter((y) => y.key !== d.key) }))}
+                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg"
+                  aria-label={`Remove ${d.designation || 'designation'}`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            setDraft((x) => ({
+              ...x,
+              designations: [...x.designations, { key: `d${++designationKey}`, designation_id: '', designation: '', max_per_bill: '', daily_limit: '', monthly_limit: '' }]
+            }))
+          }
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add a designation
+        </button>
+      </td>
+    </tr>
+  );
+
   const categoryRow = (
     <tr className="bg-blue-50/40">
       <td className="px-2 py-1.5 border border-slate-200">
@@ -385,6 +544,9 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
       </td>
       <td className="px-2 py-1.5 border border-slate-200">
         <input type="number" min="0" step="0.01" value={draft.max_per_bill} onChange={(e) => setDraft({ ...draft, max_per_bill: e.target.value })} placeholder="No limit" aria-label="Max per bill" className={inputCls} />
+      </td>
+      <td className="px-2 py-1.5 border border-slate-200">
+        <input type="number" min="0" step="0.01" value={draft.daily_limit} onChange={(e) => setDraft({ ...draft, daily_limit: e.target.value })} placeholder="No limit" aria-label="Daily limit" className={inputCls} />
       </td>
       <td className="px-2 py-1.5 border border-slate-200">
         <input type="number" min="0" step="0.01" value={draft.monthly_limit} onChange={(e) => setDraft({ ...draft, monthly_limit: e.target.value })} placeholder="No limit" aria-label="Monthly limit" className={inputCls} />
@@ -413,7 +575,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
 
   return (
     <div className="space-y-6">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-start gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-wrap items-start gap-3">
         <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
           <ShieldCheck className="w-5 h-5" />
         </span>
@@ -424,6 +586,18 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
             {!canEdit && ' Only the Superadmin can change them.'}
           </p>
         </div>
+        {canSeeReaders && (
+          <button
+            type="button"
+            onClick={() => {
+              setReadersOpen(true);
+              window.scrollTo({ top: 0 });
+            }}
+            className="ml-auto shrink-0 self-center inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100"
+          >
+            <BookOpen className="w-3.5 h-3.5" /> Who has read the rules <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {error && (
@@ -524,6 +698,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
               <tr>
                 <th className="px-2 py-2 border border-slate-200 text-left font-semibold">Category</th>
                 <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-28">Max per bill</th>
+                <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-28">Daily limit</th>
                 <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-28">Monthly limit</th>
                 <th className="px-2 py-2 border border-slate-200 text-center font-semibold w-20">Receipt</th>
                 <th className="px-2 py-2 border border-slate-200 text-center font-semibold w-16">Active</th>
@@ -534,14 +709,21 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
             <tbody>
               {categories.map((c) =>
                 editing === c.id ? (
-                  <React.Fragment key={c.id}>{categoryRow}</React.Fragment>
+                  <React.Fragment key={c.id}>
+                    {categoryRow}
+                    {designationRow}
+                  </React.Fragment>
                 ) : (
                   <tr key={c.id} className={`odd:bg-white even:bg-slate-50/70 ${c.is_active ? '' : 'text-slate-400'}`}>
                     <td className="px-2 py-1.5 border border-slate-200">
                       <div className={`font-medium ${c.is_active ? 'text-slate-900' : ''}`}>{c.name}</div>
                       {c.description && <div className="text-[11px] text-slate-500">{c.description}</div>}
+                      {!!c.designation_limits?.length && (
+                        <div className="text-[10px] text-sky-700 mt-0.5">By designation — {designationText(c.designation_limits)}</div>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{money(c.max_per_bill)}</td>
+                    <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{money(c.daily_limit ?? null)}</td>
                     <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{money(c.monthly_limit)}</td>
                     <td className="px-2 py-1.5 border border-slate-200 text-center">{c.receipt_required ? 'Needed' : '—'}</td>
                     <td className="px-2 py-1.5 border border-slate-200 text-center">{c.is_active ? 'Yes' : 'No'}</td>
@@ -561,7 +743,12 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
                   </tr>
                 )
               )}
-              {editing === 'new' && categoryRow}
+              {editing === 'new' && (
+                <>
+                  {categoryRow}
+                  {designationRow}
+                </>
+              )}
             </tbody>
           </table>
         </div>

@@ -34,6 +34,7 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
 import { activeCompanyId } from "./companyContext";
+import { loadBranchIndex, placeOf } from "./EmployeeFilters";
 
 interface ApprovalRouteDeps {
   authenticateToken: any;
@@ -478,7 +479,26 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           return true;
         });
 
-      res.json(await attachClaimReview(enriched.slice(0, 1000)));
+      // Who asked, on the Employee record — for the Queue's search and its
+      // Group by Department (ApprovalManager.tsx).
+      const shown = enriched.slice(0, 1000);
+      const askers = [...new Set<number>(shown.map((r: any) => Number(r.requested_by)).filter((n: number) => n > 0))];
+      const empOf = new Map<number, any>();
+      if (askers.length) {
+        const emps: any[] =
+          (await queryDB(
+            `SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${askers.map(() => "?").join(",")}) ORDER BY is_active ASC`,
+            askers
+          ).catch(() => [])) || [];
+        for (const e of emps) empOf.set(Number(e.user_id), e);
+      }
+      for (const r of shown) {
+        const e = empOf.get(Number(r.requested_by));
+        r.requested_by_code = e?.employee_id || null;
+        r.requested_by_designation = e?.designation || null;
+        r.requested_by_department = e?.department || null;
+      }
+      res.json(await attachClaimReview(shown));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -665,6 +685,119 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Approve Application: for each request, what happened BEFORE it reached
+  // this account (the card's "Before it reached you" box) — every earlier
+  // Layer's approver (name, designation / department), what they did, when,
+  // their remarks, and what they changed (a bill claim's Approved Amount,
+  // an asset requisition's items). All from the request's own record
+  // (approval_requests.actions_json, asset_requisition_events), so it shows
+  // only what this approver may already see on the card. Also the
+  // requester's Employee ID / Designation / Department, for the page's search.
+  async function attachTrailAndRequester(combined: any[], mine: any[]) {
+    try {
+      const uids = new Set<number>();
+      for (const c of combined) if (c?.requested_by) uids.add(Number(c.requested_by));
+      const actsById = new Map<number, any[]>();
+      for (const r of mine) {
+        let a: any[] = [];
+        try {
+          a = JSON.parse(r.actions_json || "[]");
+        } catch {
+          a = [];
+        }
+        a = Array.isArray(a) ? a : [];
+        actsById.set(Number(r.id), a);
+        for (const x of a) if (x?.approver_id) uids.add(Number(x.approver_id));
+      }
+      const empOf = new Map<number, any>();
+      const ids = Array.from(uids).filter((n) => Number.isFinite(n) && n > 0);
+      for (let i = 0; i < ids.length; i += 500) {
+        const part = ids.slice(i, i + 500);
+        const rows: any[] =
+          (await queryDB(`SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${part.map(() => "?").join(",")})`, part).catch(() => [])) || [];
+        for (const e of rows) if (!empOf.has(Number(e.user_id))) empOf.set(Number(e.user_id), e);
+      }
+      // Asset requisitions: item edits, by who and when.
+      const assetIds = mine.filter((r: any) => r.source_type === "asset_requisition").map((r: any) => Number(r.source_id));
+      const editsByReq = new Map<number, any[]>();
+      if (assetIds.length) {
+        const rows: any[] =
+          (await queryDB(
+            `SELECT requisition_id, actor_user_id, details_json, created_at FROM asset_requisition_events WHERE action = 'items_edited' AND requisition_id IN (${assetIds.map(() => "?").join(",")}) ORDER BY created_at ASC, id ASC`,
+            assetIds
+          ).catch(() => [])) || [];
+        for (const e of rows) {
+          const k = Number(e.requisition_id);
+          if (!editsByReq.has(k)) editsByReq.set(k, []);
+          editsByReq.get(k)!.push(e);
+        }
+      }
+      const ms = (v: any) => {
+        const t = new Date(String(v || "").replace(" ", "T")).getTime();
+        return Number.isFinite(t) ? t : 0;
+      };
+      const tk = (n: number) => `৳${Number(n).toLocaleString("en-BD", { maximumFractionDigits: 2 })}`;
+      const describeEdit = (c: any) =>
+        c?.action === "added"
+          ? `Added ${c.item_name} × ${c.to?.quantity} ${c.to?.unit || ""}`.trim()
+          : c?.action === "removed"
+            ? `Removed ${c.item_name}`
+            : c?.from && c?.to && Number(c.from.quantity) !== Number(c.to.quantity)
+              ? `${c.item_name}: Qty ${c.from.quantity} → ${c.to.quantity}`
+              : c?.from && c?.to && c.from.item_name !== c.to.item_name
+                ? `Item ${c.from.item_name} → ${c.to.item_name}`
+                : `Edited ${c?.item_name || "an item"}`;
+      const mineIds = new Set<number>(mine.map((r: any) => Number(r.id)));
+      const ownRoutes = new Set(["leave_reliever", "leave_direct", "exit_clearance", "hr_action"]);
+      for (const c of combined) {
+        const req = c?.requested_by ? empOf.get(Number(c.requested_by)) : null;
+        c.requested_by_code = req?.employee_id || null;
+        c.requested_by_designation = req?.designation || null;
+        c.requested_by_department = req?.department || null;
+        if (ownRoutes.has(c?.source_type) || !mineIds.has(Number(c?.id))) continue;
+        const acts = (actsById.get(Number(c.id)) || []).filter((a: any) => a && ["approved", "rejected", "returned"].includes(a.action));
+        const edits = editsByReq.get(Number(c.source_id)) || [];
+        let prevAmount = c.source_type === "bill_claim" && c.source_amount != null ? Number(c.source_amount) : null;
+        let prevAt = 0;
+        c.trail = acts.map((a: any) => {
+          const who = a.approver_id ? empOf.get(Number(a.approver_id)) : null;
+          const changes: string[] = [];
+          if (c.source_type === "bill_claim" && a.approved_amount != null) {
+            if (a.amount_edited && prevAmount != null) changes.push(`Approved amount ${tk(prevAmount)} → ${tk(Number(a.approved_amount))}`);
+            prevAmount = Number(a.approved_amount);
+          }
+          const at = ms(a.acted_at);
+          if (c.source_type === "asset_requisition") {
+            for (const e of edits) {
+              const et = ms(e.created_at);
+              if (Number(e.actor_user_id) !== Number(a.approver_id) || et < prevAt || (at && et > at)) continue;
+              let d: any = null;
+              try {
+                d = JSON.parse(e.details_json || "null");
+              } catch {
+                d = null;
+              }
+              for (const ch of d?.changes || []) changes.push(describeEdit(ch));
+            }
+          }
+          prevAt = at || prevAt;
+          return {
+            step: Number(a.step_order) || null,
+            who: a.approver_name || null,
+            role: who?.designation || who?.department || null,
+            action: a.action,
+            remarks: a.remarks || null,
+            at: a.acted_at || null,
+            changes
+          };
+        });
+      }
+    } catch (err: any) {
+      // The page works without it — the box just doesn't show.
+      console.warn("my-approvals trail:", err?.message || err);
+    }
+  }
 
   app.get("/api/my-approvals", authenticateToken, async (req: any, res) => {
     try {
@@ -1001,7 +1134,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
                     destination: vr.destination,
                     ride_date: toDateOnlyString(vr.ride_date),
                     start_time: String(vr.start_time || "").slice(0, 5),
-                    estimated_duration_hours: Number(vr.estimated_duration_hours)
+                    estimated_duration_hours: Number(vr.estimated_duration_hours),
+                    // Drop & pick up: the approver sees (and can change) the trip.
+                    trip_type: vr.trip_type || "round",
+                    pickup_mode: vr.pickup_mode || null,
+                    pickup_at: vr.pickup_at || null
                   }
                 : null;
             })()
@@ -1066,6 +1203,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         return Number.isFinite(v) ? v : 0;
       };
       combined.sort((a: any, b: any) => t(b) - t(a) || Number(b.id) - Number(a.id));
+      await attachTrailAndRequester(combined, mine);
       res.json(await attachClaimReview(await attachClaimRefsToMyApprovals(combined)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1089,16 +1227,26 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         const d = v instanceof Date ? v : new Date(v);
         return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
       };
+      // SQL lower bound for "decided on or after `from`": a day early, so a
+      // decision near midnight (Dhaka vs the server clock) is never missed;
+      // inRange() below is the exact check.
+      const since = from ? new Date(Date.parse(`${from}T00:00:00Z`) - 2 * 864e5).toISOString().slice(0, 10) : null;
       const inRange = (at: any) => {
         const d = day(at);
         return (!from || d >= from) && (!to || d <= to);
       };
-      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
+      type Row = { key: string; type: string; title: string; source_type?: string; source_id?: number; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null; amount?: number | null };
       const rows: Row[] = [];
 
       // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
       const reqRows: any[] =
-        (await queryDB("SELECT * FROM approval_requests WHERE actions_json LIKE ?", [`%"approver_id":${myId}%`]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, source_type, source_id, requested_by, actions_json FROM approval_requests
+            WHERE (actions_json LIKE ? OR actions_json LIKE ?)${since ? " AND updated_at >= ?" : ""}`,
+          // Every action writes the row, so updated_at is never older than
+          // the decision in it.
+          [`%"approver_id":${myId},%`, `%"approver_id":${myId}}%`, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       const TYPE_TITLE: Record<string, string> = {
         attendance: "Remote Attendance",
         claim: "Check In/Out",
@@ -1111,14 +1259,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         advance_request: "Loan / Advance Request"
       };
       const idsOf = (t: string) => reqRows.filter((r) => r.source_type === t).map((r) => Number(r.source_id));
-      const fetchByIds = (table: string, ids: number[]) =>
-        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT * FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
+      // Only the columns the list shows — SELECT * also pulled every Bill
+      // Claim's / Asset Requisition's attached file, which made this slow.
+      const fetchByIds = (table: string, ids: number[], cols = "*") =>
+        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${cols} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
       const [ucs, cls, las, ars, vrs, mls, ads] = await Promise.all([
-        fetchByIds("bill_claims", idsOf("bill_claim")),
-        fetchByIds("claims", idsOf("claim")),
-        fetchByIds("leave_applications", idsOf("leave_application")),
-        fetchByIds("asset_requisitions", idsOf("asset_requisition")),
-        fetchByIds("vehicle_requisitions", idsOf("vehicle_requisition")),
+        fetchByIds("bill_claims", idsOf("bill_claim"), "id, description, category, amount, approved_amount"),
+        fetchByIds("claims", idsOf("claim"), "id, purpose"),
+        fetchByIds("leave_applications", idsOf("leave_application"), "id, leave_type, start_date, end_date, day_count"),
+        fetchByIds("asset_requisitions", idsOf("asset_requisition"), "id, asset_category"),
+        fetchByIds("vehicle_requisitions", idsOf("vehicle_requisition"), "id, pickup_location, destination"),
         fetchByIds("mobile_limit_requests", idsOf("mobile_limit_request")),
         fetchByIds("advance_requests", idsOf("advance_request"))
       ]);
@@ -1160,12 +1310,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         actions.forEach((a: any, n: number) => {
           if (Number(a.approver_id) !== myId || (a.action !== "approved" && a.action !== "rejected") || !inRange(a.acted_at)) return;
           const detail = detailOf(r);
+          // A Bill Claim's amount, for the "Bill Claims approved ৳…" total.
+          const bc = r.source_type === "bill_claim" ? ucMap.get(Number(r.source_id)) : null;
           rows.push({
             key: `ar-${r.id}-${n}`,
             source_type: r.source_type,
             source_id: Number(r.source_id),
             type: TYPE_TITLE[r.source_type] || r.source_type,
             title: detail,
+            amount: bc ? Number(bc.approved_amount ?? bc.amount) || 0 : null,
             requester_id: Number(r.requested_by) || null,
             action: a.action,
             remarks: a.remarks || null,
@@ -1176,10 +1329,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       // 2. HR personnel actions — history_json carries {action, by, at, step}.
-      const hrRows: any[] = (await queryDB("SELECT * FROM hr_actions WHERE history_json LIKE ?", [`%"by":${myId}%`]).catch(() => [])) || [];
+      const hrRows: any[] =
+        (await queryDB(
+          `SELECT id, employee_id, action_type, effective_date, history_json FROM hr_actions
+            WHERE (history_json LIKE ? OR history_json LIKE ?)${since ? " AND updated_at >= ?" : ""}`,
+          [`%"by":${myId},%`, `%"by":${myId}}%`, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       if (hrRows.length) {
         const empIds = Array.from(new Set(hrRows.map((a) => Number(a.employee_id))));
-        const emps = byId(await fetchByIds("all_employees", empIds));
+        const emps = byId(await fetchByIds("all_employees", empIds, "id, name, user_id"));
         for (const a of hrRows) {
           let hist: any[] = [];
           try {
@@ -1209,7 +1367,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // 3. Leave Applications decided directly (no Approval Workflow) or as Reliever.
       const viaWorkflow = new Set(reqRows.filter((r) => r.source_type === "leave_application").map((r) => Number(r.source_id)));
       const direct: any[] =
-        (await queryDB("SELECT * FROM leave_applications WHERE decided_by = ? AND status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, user_id, leave_type, start_date, end_date, day_count, status, remarks, decided_by, decided_at FROM leave_applications
+            WHERE decided_by = ? AND status IN ('approved', 'rejected')${since ? " AND decided_at >= ?" : ""}`,
+          [myId, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       for (const la of direct) {
         if (viaWorkflow.has(Number(la.id)) || Number(la.decided_by) !== myId || !inRange(la.decided_at)) continue;
         rows.push({
@@ -1226,10 +1388,14 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         });
       }
       const relieved: any[] =
-        (await queryDB("SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+        (await queryDB(
+          `SELECT id, user_id, leave_type, start_date, end_date, reliever_id, reliever_status, reliever_remarks, reliever_decided_at, created_at FROM leave_applications
+            WHERE reliever_id = ? AND reliever_status IN ('approved', 'rejected')${since ? " AND COALESCE(reliever_decided_at, created_at) >= ?" : ""}`,
+          [myId, ...(since ? [since] : [])]
+        ).catch(() => [])) || [];
       for (const la of relieved) {
         if (Number(la.reliever_id) !== myId) continue;
-        const at = la.reliever_decided_at || la.updated_at || la.created_at;
+        const at = la.reliever_decided_at || la.created_at;
         if (!inRange(at)) continue;
         rows.push({
           key: `lr-${la.id}`,
@@ -1246,9 +1412,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       // 4. Exit clearance items this account cleared.
-      const cleared: any[] = (await queryDB("SELECT * FROM exit_clearance_items WHERE cleared_by = ?", [myId]).catch(() => [])) || [];
+      const cleared: any[] =
+        (await queryDB(`SELECT * FROM exit_clearance_items WHERE cleared_by = ?${since ? " AND cleared_at >= ?" : ""}`, [myId, ...(since ? [since] : [])]).catch(() => [])) || [];
       if (cleared.length) {
-        const exits = byId(await fetchByIds("exit_requests", Array.from(new Set(cleared.map((c) => Number(c.exit_id))))));
+        const exits = byId(await fetchByIds("exit_requests", Array.from(new Set(cleared.map((c) => Number(c.exit_id)))), "id, exit_type, user_id"));
         for (const c of cleared) {
           if (Number(c.cleared_by) !== myId || !Number(c.is_cleared) || !inRange(c.cleared_at)) continue;
           const ex = exits.get(Number(c.exit_id));
@@ -1268,9 +1435,30 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       const requesterIds = Array.from(new Set(rows.map((r) => r.requester_id).filter((x): x is number => !!x)));
-      const names = byId(await fetchByIds("users", requesterIds));
+      const names = byId(await fetchByIds("users", requesterIds, "id, name"));
+      // Who asked, the way people know them: Employee ID, designation and
+      // Department from their Employee record (the History's Employee /
+      // Department filters and columns).
+      const empOf = new Map<number, any>();
+      if (requesterIds.length) {
+        const emps: any[] =
+          (await queryDB(
+            `SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IN (${requesterIds.map(() => "?").join(",")}) ORDER BY is_active ASC`,
+            requesterIds
+          ).catch(() => [])) || [];
+        for (const e of emps) empOf.set(Number(e.user_id), e); // the active record wins (last)
+      }
       const items = rows
-        .map((r) => ({ ...r, requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null }))
+        .map((r) => {
+          const e = r.requester_id ? empOf.get(r.requester_id) : null;
+          return {
+            ...r,
+            requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null,
+            requested_by_code: e?.employee_id || null,
+            requested_by_designation: e?.designation || null,
+            requested_by_department: e?.department || null
+          };
+        })
         .sort((a, b) => new Date(b.acted_at).getTime() - new Date(a.acted_at).getTime());
       const byType: Record<string, { approved: number; rejected: number }> = {};
       for (const r of items) {
@@ -1307,12 +1495,24 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     try {
       const requests: any[] = (await queryDB("SELECT * FROM approval_requests WHERE source_type = 'bill_claim' AND status = 'pending'")) || [];
       const out: any[] = [];
+      const branchIdx = await loadBranchIndex(queryDB);
       for (const r of requests) {
         if (!(await isConveyanceDisburserStep(r).catch(() => false))) continue;
         const uc: any = ((await queryDB("SELECT * FROM bill_claims WHERE id = ?", [Number(r.source_id)])) || [])[0];
         if (!uc || uc.status !== "pending") continue;
         const people = await getCurrentStepApprovers(r).catch(() => [] as { user_id: number; user_name: string | null }[]);
-        const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        const owner: any = ((await queryDB("SELECT u.name, e.employee_id AS employee_code, e.designation, e.department, e.branch, e.branch_id, e.division FROM users u LEFT JOIN all_employees e ON e.user_id = u.id WHERE u.id = ? LIMIT 1", [Number(uc.user_id)])) || [])[0] || {};
+        // Head Office / Project of the claimant (Branch type), for the filter.
+        const where = placeOf(owner, branchIdx);
+        // When it came to the payer: the Layer before approved it (its last
+        // Approve in the request's trail), and who that was.
+        let lastApprove: any = null;
+        try {
+          const trail = JSON.parse(r.actions_json || "[]");
+          if (Array.isArray(trail)) for (const a of trail) if (a?.action === "approved") lastApprove = a;
+        } catch {
+          lastApprove = null;
+        }
         out.push({
           approval_id: Number(r.id),
           bill_claim_id: Number(uc.id),
@@ -1328,7 +1528,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           approved_amount: uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount),
           waiting_on: people.map((p) => p.user_name).filter(Boolean),
           can_disburse: req.user.role === "superadmin" || people.some((p) => Number(p.user_id) === Number(req.user.id)),
-          since: r.updated_at || r.created_at || null
+          since: r.updated_at || r.created_at || null,
+          arrived_at: lastApprove?.acted_at || r.updated_at || r.created_at || null,
+          arrived_from: lastApprove?.approver_name || null,
+          branch: where.branch || "",
+          place: where.kind === "Project" ? "project" : where.kind === "Head Office" ? "head_office" : "none"
         });
       }
       out.sort((a, b) => a.approval_id - b.approval_id);
@@ -1517,6 +1721,43 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       );
       const stepCounts = await queryDB("SELECT template_id, COUNT(*) AS cnt FROM approval_template_steps GROUP BY template_id");
       const countByTemplate = new Map<number, number>(stepCounts.map((r: any) => [Number(r.template_id), Number(r.cnt)]));
+      // ?with=chain (the Templates list): each template's Layers with who
+      // approves, and how many accounts it covers — its own assignments, plus
+      // everyone with no pick for that type when it is the default.
+      if (req.query?.with === "chain") {
+        const ids = templates.map((t: any) => Number(t.id));
+        const steps: any[] = ids.length
+          ? (await queryDB(`SELECT * FROM approval_template_steps WHERE template_id IN (${ids.map(() => "?").join(",")}) ORDER BY step_order ASC`, ids)) || []
+          : [];
+        const approvers: any[] = steps.length
+          ? (await queryDB(
+              `SELECT sa.step_id, u.name AS user_name FROM approval_template_step_approvers sa LEFT JOIN users u ON u.id = sa.user_id WHERE sa.step_id IN (${steps.map(() => "?").join(",")}) ORDER BY sa.id ASC`,
+              steps.map((x) => x.id)
+            )) || []
+          : [];
+        const namesByStep = new Map<number, string[]>();
+        for (const a of approvers) namesByStep.set(Number(a.step_id), [...(namesByStep.get(Number(a.step_id)) || []), a.user_name || "Unknown"]);
+        const assigned: any[] = (await queryDB("SELECT request_type, template_id, COUNT(*) AS cnt FROM employee_template_assignments GROUP BY request_type, template_id")) || [];
+        const accounts = Number(((await queryDB("SELECT COUNT(*) AS n FROM users")) || [])[0]?.n || 0);
+        const assignedOf = (id: number) => Number(assigned.find((r) => Number(r.template_id) === id)?.cnt || 0);
+        const pickedFor = (type: string) => assigned.filter((r) => r.request_type === type).reduce((n, r) => n + Number(r.cnt), 0);
+        return res.json(
+          templates.map((t: any) => {
+            const own = steps.filter((x) => Number(x.template_id) === Number(t.id));
+            const isDefault = !!Number(t.is_default);
+            return {
+              ...t,
+              is_default: isDefault,
+              is_active: !!Number(t.is_active),
+              step_count: own.length,
+              // Layer 1 is the employee's own Supervisor unless the template says otherwise.
+              uses_supervisor: !Number(t.skip_auto_supervisor),
+              chain: own.map((x) => ({ step_order: Number(x.step_order), label: x.label || null, approver_type: x.approver_type, approvers: namesByStep.get(Number(x.id)) || [] })),
+              employee_count: assignedOf(Number(t.id)) + (isDefault && Number(t.is_active) ? Math.max(0, accounts - pickedFor(t.request_type)) : 0)
+            };
+          })
+        );
+      }
       res.json(
         templates.map((t: any) => ({
           ...t,

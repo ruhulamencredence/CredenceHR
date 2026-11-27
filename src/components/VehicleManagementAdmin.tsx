@@ -33,12 +33,16 @@ import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 
 import { SearchSelect } from './Combobox';
-import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { rideTimeOf, vehicleChoices, type SlotVehicle } from '../lib/vehicleSlots';
+import { VehicleDayBoard } from './VehicleDayBoard';
 import { VehicleDriversPanel } from './VehicleDriversPanel';
-import { confirmDialog } from '../lib/confirmDialog';
+import { confirmDialog, promptDialog } from '../lib/confirmDialog';
 import { DurationPicker } from './DurationPicker';
 import { formatDuration } from '../lib/rideDuration';
 import { personLabel } from '../lib/personLabel';
+import { TripRide, TripBadge, TripLegs, ChangeTripPopup } from './RideTrip';
+import { VehiclePickups, VehicleTripReport } from './VehiclePickups';
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
   // (GET /api/users, gated behind the 'users' module) — reused here purely
@@ -57,7 +61,7 @@ interface Vehicle {
   status: 'available' | 'on_ride' | 'maintenance' | 'retired';
 }
 
-interface Requisition {
+interface Requisition extends TripRide {
   id: number;
   employee_name: string;
   purpose: string;
@@ -67,7 +71,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired' | 'dropped';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending', or for a
   // legacy requisition with no approval_requests row at all.
@@ -135,7 +139,9 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
     void loadDriverOptions();
   }, []);
 
-  const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
+  const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory' | 'pickups' | 'trip_report'>('requests');
+  // Change a ride's trip (Round trip / Drop & pick up / One way) — RideTrip.tsx.
+  const [tripFor, setTripFor] = useState<Requisition | null>(null);
   // Inventory: Vehicles | Drivers (VehicleDriversPanel.tsx).
   const [inventoryView, setInventoryView] = useState<'vehicles' | 'drivers'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -157,8 +163,8 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // Ride deadline rules (vehicle_ride_settings): a waiting request expires
   // grace_minutes after its start time; approvers are reminded
   // reminder_minutes before it. Only a Superadmin edits them.
-  const [rideRules, setRideRules] = useState<{ grace_minutes: number; reminder_minutes: number; can_change: boolean } | null>(null);
-  const [rideRulesDraft, setRideRulesDraft] = useState({ grace_minutes: '30', reminder_minutes: '60' });
+  const [rideRules, setRideRules] = useState<{ grace_minutes: number; reminder_minutes: number; start_early_minutes?: number; ride_gap_minutes?: number; can_change: boolean } | null>(null);
+  const [rideRulesDraft, setRideRulesDraft] = useState({ grace_minutes: '30', reminder_minutes: '60', start_early_minutes: '30', ride_gap_minutes: '30' });
   const [rideRulesMsg, setRideRulesMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -167,7 +173,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       .then((d) => {
         if (!d) return;
         setRideRules(d);
-        setRideRulesDraft({ grace_minutes: String(d.grace_minutes), reminder_minutes: String(d.reminder_minutes) });
+        setRideRulesDraft({ grace_minutes: String(d.grace_minutes), reminder_minutes: String(d.reminder_minutes), start_early_minutes: String(d.start_early_minutes ?? 30), ride_gap_minutes: String(d.ride_gap_minutes ?? 30) });
       })
       .catch(() => {});
   }, []);
@@ -178,11 +184,11 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       const res = await fetch(apiUrl('/api/vehicles/ride-settings'), {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ grace_minutes: Number(rideRulesDraft.grace_minutes), reminder_minutes: Number(rideRulesDraft.reminder_minutes) })
+        body: JSON.stringify({ grace_minutes: Number(rideRulesDraft.grace_minutes), reminder_minutes: Number(rideRulesDraft.reminder_minutes), start_early_minutes: Number(rideRulesDraft.start_early_minutes), ride_gap_minutes: Number(rideRulesDraft.ride_gap_minutes) })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not save.');
-      setRideRules((prev) => (prev ? { ...prev, grace_minutes: data.grace_minutes, reminder_minutes: data.reminder_minutes } : prev));
+      setRideRules((prev) => (prev ? { ...prev, grace_minutes: data.grace_minutes, reminder_minutes: data.reminder_minutes, start_early_minutes: data.start_early_minutes, ride_gap_minutes: data.ride_gap_minutes } : prev));
       setRideRulesMsg('Saved.');
     } catch (err: any) {
       setRideRulesMsg(err.message);
@@ -192,12 +198,17 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // Edit / delete a vehicle: only with the "Edit / delete vehicles" layer
   // (the server checks it too — GET /api/vehicles/my-access).
   const [canManageVehicles, setCanManageVehicles] = useState(false);
+  // Pick-ups / Drop & pick up report: their own explicit ticks (layers "pickups", "trip_report").
+  const [layerAccess, setLayerAccess] = useState({ pickups: false, trip_report: false });
   const [editVehicle, setEditVehicle] = useState<{ id: number; vehicle_no: string; model: string; vehicle_type: string; status: Vehicle['status'] } | null>(null);
   const [savingVehicle, setSavingVehicle] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/my-access'), { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setCanManageVehicles(!!d?.manage_vehicles))
+      .then((d) => {
+        setCanManageVehicles(!!d?.manage_vehicles);
+        setLayerAccess({ pickups: !!d?.pickups, trip_report: !!d?.trip_report });
+      })
       .catch(() => undefined);
   }, []);
   async function saveVehicle() {
@@ -236,6 +247,9 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load vehicles.');
       setVehicles(data);
+      // The pickers' list: every car that can take rides, with its booked rides.
+      const av = await fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders() }).then((r) => (r.ok ? r.json() : []));
+      setSlotVehicles(Array.isArray(av) ? av : []);
     } catch (err: any) {
       setError(err.message);
     }
@@ -404,10 +418,16 @@ useLiveRefresh(() => loadRequisitions());
   }
 
   // Start Ride: an assigned ride becomes ongoing (live map + tracking on).
-  async function startRide(id: number) {
+  async function startRide(id: number, earlyReason?: string) {
     try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders(), body: JSON.stringify(earlyReason ? { early_reason: earlyReason } : {}) });
       const data = await res.json();
+      // Before its Start Ride window: Vehicle Management / a Maintainer may start it with a reason.
+      if (!res.ok && data.code === 'too_early' && data.can_override && !earlyReason) {
+        const why = await promptDialog(data.error, { title: 'Start this ride early?', placeholder: 'Why it starts early (kept with the ride)', confirmLabel: 'Start now', minLength: 3 });
+        if (why) return startRide(id, why);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
       loadRequisitions();
     } catch (err: any) {
@@ -470,14 +490,15 @@ useLiveRefresh(() => loadRequisitions());
     }
   }
 
-  const availableVehicles = vehicles.filter((v) => v.status === 'available');
+  // Booked by time: a car with a ride later can still be given now (vehicleSlots.ts).
+  const [slotVehicles, setSlotVehicles] = useState<SlotVehicle[]>([]);
   const pendingCount = requisitions.filter((r) => r.status === 'pending').length;
   const awaitingAssignCount = requisitions.filter((r) => r.status === 'approved').length;
   const noticeCount = requisitions.filter((r) => r.hr_notice_flag).length;
 
   return (
     <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
+      <div className="flex gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
         {([
           [
             'requests',
@@ -486,7 +507,9 @@ useLiveRefresh(() => loadRequisitions());
             }${noticeCount > 0 ? ` • ${noticeCount} flagged` : ''}`
           ],
           ['emergency', 'Emergency Requisition'],
-          ['inventory', 'Vehicle Inventory']
+          ['inventory', 'Vehicle Inventory'],
+          ...(layerAccess.pickups ? ([['pickups', `Pick-ups${requisitions.filter((r) => r.status === 'dropped').length ? ` (${requisitions.filter((r) => r.status === 'dropped').length})` : ''}`]] as const) : []),
+          ...(layerAccess.trip_report ? ([['trip_report', 'Drop & pick up report']] as const) : [])
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -515,7 +538,10 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="font-semibold text-gray-800 text-sm">Ride deadline</div>
                 A request still waiting on approval or a vehicle expires {rideRules.grace_minutes} min after its start time; approvers and
                 Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it. A ride given a vehicle but never started is
-                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed.
+                closed {rideRules.grace_minutes} min after its planned end, and the vehicle is freed. Start Ride works from{' '}
+                {rideRules.start_early_minutes ?? 30} min before the start time; earlier only by Vehicle Management or a Vehicle Maintainer,
+                with a reason. A car (and its driver) is booked only for each ride's time plus a {rideRules.ride_gap_minutes ?? 30} min gap
+                before and after — the rest of the day it can take other rides.
               </div>
               {rideRules.can_change && (
                 <>
@@ -541,6 +567,28 @@ useLiveRefresh(() => loadRequisitions());
                       className="w-24 border rounded px-2 py-1.5 text-sm"
                     />
                   </label>
+                  <label>
+                    <span className="block mb-0.5">Start Ride from (min before)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={rideRulesDraft.start_early_minutes}
+                      onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, start_early_minutes: e.target.value })}
+                      className="w-24 border rounded px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label>
+                    <span className="block mb-0.5">Gap between rides (min)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={600}
+                      value={rideRulesDraft.ride_gap_minutes}
+                      onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, ride_gap_minutes: e.target.value })}
+                      className="w-24 border rounded px-2 py-1.5 text-sm"
+                    />
+                  </label>
                   <button type="button" onClick={saveRideRules} className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
                     Save
                   </button>
@@ -549,6 +597,7 @@ useLiveRefresh(() => loadRequisitions());
               )}
             </div>
           )}
+          <VehicleDayBoard authHeaders={authHeaders} reloadKey={requisitions} />
           {requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (
             <div key={r.id} className="border rounded-lg p-4">
@@ -556,12 +605,23 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="font-semibold text-gray-800">
                   {r.employee_name} — {r.pickup_location} → {r.destination}
                 </div>
-                <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status === 'assigned' ? 'assigned — not started' : r.status}</span>
+                <span className="flex items-center gap-1.5">
+                  <TripBadge r={r} />
+                  <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">
+                    {r.status === 'assigned' ? (r.leg === 'pickup' ? 'pick-up car given — not set off' : 'assigned — not started') : r.status === 'dropped' ? 'dropped — pick-up later' : r.status}
+                  </span>
+                </span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {r.ride_date} at {r.start_time} • Est. {formatDuration(r.estimated_duration_hours)}
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
+              <TripLegs r={r} />
+              {(r.status === 'pending' || r.status === 'approved' || (r.status === 'assigned' && r.leg !== 'pickup')) && (
+                <button type="button" onClick={() => setTripFor(r)} className="mt-2 text-xs font-medium px-2.5 py-1 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50">
+                  Trip: {r.trip_type === 'drop_pickup' ? 'Drop & pick up' : r.trip_type === 'one_way' ? 'One way' : 'Round trip'} — change
+                </button>
+              )}
 
               {r.status === 'pending' && (
                 <div className="text-xs text-amber-700 mt-1">
@@ -591,9 +651,9 @@ useLiveRefresh(() => loadRequisitions());
                           className="border rounded px-2 py-1 text-xs"
                         >
                           <option value="">Pick a vehicle…</option>
-                          {availableVehicles.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.model} ({v.vehicle_no})
+                          {vehicleChoices(slotVehicles, rideTimeOf(r)).map(({ v, label, busy }) => (
+                            <option key={v.id} value={v.id} disabled={busy}>
+                              {label}
                             </option>
                           ))}
                         </SearchSelect>
@@ -603,9 +663,9 @@ useLiveRefresh(() => loadRequisitions());
                           className="border rounded px-2 py-1 text-xs"
                         >
                           <option value="">Pick a driver…</option>
-                          {sortDrivers(driverOptions, decideForm.vehicle_id).map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {driverOptionLabel(d, decideForm.vehicle_id)}
+                          {sortDrivers(driverOptions, decideForm.vehicle_id, rideTimeOf(r)).map((d) => (
+                            <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf(r))}>
+                              {driverOptionLabel(d, decideForm.vehicle_id, rideTimeOf(r))}
                             </option>
                           ))}
                         </SearchSelect>
@@ -783,9 +843,9 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a vehicle…</option>
-                        {availableVehicles.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.model} ({v.vehicle_no})
+                        {vehicleChoices(slotVehicles, rideTimeOf(r)).map(({ v, label, busy }) => (
+                          <option key={v.id} value={v.id} disabled={busy}>
+                            {label}
                           </option>
                         ))}
                       </SearchSelect>
@@ -795,9 +855,9 @@ useLiveRefresh(() => loadRequisitions());
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {sortDrivers(driverOptions, assignForm.vehicle_id).map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {driverOptionLabel(d, assignForm.vehicle_id)}
+                        {sortDrivers(driverOptions, assignForm.vehicle_id, rideTimeOf(r)).map((d) => (
+                          <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf(r))}>
+                            {driverOptionLabel(d, assignForm.vehicle_id, rideTimeOf(r))}
                           </option>
                         ))}
                       </SearchSelect>
@@ -965,6 +1025,9 @@ useLiveRefresh(() => loadRequisitions());
           ))}
         </div>
       )}
+      {tab === 'pickups' && layerAccess.pickups && <VehiclePickups />}
+      {tab === 'trip_report' && layerAccess.trip_report && <VehicleTripReport />}
+      {tripFor && <ChangeTripPopup r={tripFor} onClose={() => setTripFor(null)} onDone={() => { setTripFor(null); void loadRequisitions(); }} />}
       {tab === 'inventory' && inventoryView === 'drivers' && <VehicleDriversPanel vehicles={vehicles} onChanged={() => void loadDriverOptions()} />}
       {tab === 'inventory' && inventoryView === 'vehicles' && (
         <div className="space-y-6">

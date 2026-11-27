@@ -29,7 +29,7 @@
 import { requestApprovalReconcile } from "./approvalReconcile";
 import type { Express } from "express";
 import { isAppSession } from "./SessionSecurity";
-import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
+import { checkClaimBills, loadCategories, categoriesFor, hasReadCurrentRules, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./BillClaimHistory";
 
 interface BillClaimRouteDeps {
@@ -242,6 +242,24 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
         const TOTAL = "(SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id)";
         const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+        // The Branch by name — from Branches when only its id was saved.
+        const BRANCH = `(SELECT COALESCE(NULLIF(TRIM(e.branch), ''), (SELECT bb.branch_name FROM branches bb WHERE bb.id = e.branch_id)) FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+        // Head Office / Project: the type of the employee's Branch (Admin Panel
+        // -> Branches; by id, else by name), else their Division text — the
+        // same reading as Employees -> Office / Project (EmployeeFilters.ts).
+        const PLACE = `(SELECT CASE
+            WHEN br.branch_type = 'project_site' THEN 'project'
+            WHEN br.id IS NOT NULL THEN 'head_office'
+            WHEN LOWER(COALESCE(pe.division, '')) REGEXP 'project|site' THEN 'project'
+            WHEN LOWER(COALESCE(pe.division, '')) REGEXP 'head|corporate|office' THEN 'head_office'
+            ELSE 'none' END
+          FROM all_employees pe
+          LEFT JOIN branches br ON br.id = pe.branch_id OR (pe.branch_id IS NULL AND LOWER(TRIM(br.branch_name)) = LOWER(TRIM(pe.branch)))
+          WHERE pe.user_id = b.user_id ORDER BY pe.id, (br.id = pe.branch_id) DESC LIMIT 1)`;
+        // When the Bill came to Disbursement: the last approval of its Bill
+        // Claim(s) (the Layer before the one who pays it), else when the Bill
+        // was made (Check In/Out and typed-in Bills). afrom/ato filter on it.
+        const APPROVED = `COALESCE((SELECT MAX(ar.updated_at) FROM conveyance_bill_items ai JOIN approval_requests ar ON ar.source_type = 'bill_claim' AND ar.source_id = ai.bill_claim_id AND ar.status = 'approved' WHERE ai.bill_id = b.id), b.created_at)`;
         if (req.query.user_id) {
           where.push("b.user_id = ?");
           params.push(Number(req.query.user_id));
@@ -256,6 +274,14 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           where.push("b.bill_date <= ?");
           params.push(qs("to"));
         }
+        if (isDate(qs("afrom"))) {
+          where.push(`DATE(${APPROVED}) >= ?`);
+          params.push(qs("afrom"));
+        }
+        if (isDate(qs("ato"))) {
+          where.push(`DATE(${APPROVED}) <= ?`);
+          params.push(qs("ato"));
+        }
         if (isDate(qs("dfrom"))) {
           where.push("b.is_disbursed = 1 AND DATE(b.disbursed_at) >= ?");
           params.push(qs("dfrom"));
@@ -268,9 +294,13 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           where.push("b.disbursed_by = ?");
           params.push(Number(req.query.disbursed_by));
         }
+        if (qs("place") === "head_office" || qs("place") === "project") {
+          where.push(`${PLACE} = ?`);
+          params.push(qs("place"));
+        }
         for (const col of ["department", "designation", "branch"]) {
           if (qs(col)) {
-            where.push(`${EMP(col)} = ?`);
+            where.push(`${col === "branch" ? BRANCH : EMP(col)} = ?`);
             params.push(qs(col));
           }
         }
@@ -317,9 +347,9 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           queryDB(
             `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
                 ${EMP("employee_id")} AS employee_code, ${EMP("designation")} AS designation,
-                ${EMP("department")} AS department, ${EMP("branch")} AS branch,
+                ${EMP("department")} AS department, ${BRANCH} AS branch,
                 (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
-                ${TOTAL} AS total_amount
+                ${TOTAL} AS total_amount, ${APPROVED} AS approved_at
              ${FROM}
              LEFT JOIN users du ON du.id = b.disbursed_by
              ${w}
@@ -388,8 +418,9 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
   app.get("/api/conveyance-bills/filter-options", authenticateToken, requireAdmin, requireAnyModule(["bill_claim", "disbursement"]), async (_req: any, res) => {
     try {
       const EMP = (col: string) => `(SELECT e.${col} FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
+      const BRANCH = `(SELECT COALESCE(NULLIF(TRIM(e.branch), ''), (SELECT bb.branch_name FROM branches bb WHERE bb.id = e.branch_id)) FROM all_employees e WHERE e.user_id = b.user_id ORDER BY e.id LIMIT 1)`;
       const [emp, disb, cats, plain]: any[] = await Promise.all([
-        queryDB(`SELECT DISTINCT ${EMP("department")} AS department, ${EMP("designation")} AS designation, ${EMP("branch")} AS branch FROM conveyance_bills b`),
+        queryDB(`SELECT DISTINCT ${EMP("department")} AS department, ${EMP("designation")} AS designation, ${BRANCH} AS branch FROM conveyance_bills b`),
         queryDB("SELECT DISTINCT u.id, u.name FROM conveyance_bills b JOIN users u ON u.id = b.disbursed_by ORDER BY u.name"),
         queryDB(
           `SELECT DISTINCT COALESCE(ci.category_name, bc.category) AS category
@@ -400,11 +431,16 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         ),
         queryDB("SELECT COUNT(*) AS n FROM conveyance_bill_items WHERE source <> 'bill_claim'")
       ]);
+      // Each Branch's type, so the Branch list can follow Head Office / Project.
+      const brs: any[] = (await queryDB("SELECT branch_name, branch_type FROM branches").catch(() => [])) || [];
+      const branchPlace: Record<string, string> = {};
+      for (const b of brs) if (b.branch_name) branchPlace[String(b.branch_name).trim()] = b.branch_type === "project_site" ? "project" : "head_office";
       const uniq = (xs: any[]) => [...new Set(xs.map((x) => (x == null ? "" : String(x).trim())).filter(Boolean))].sort((a, b) => a.localeCompare(b));
       res.json({
         departments: uniq(emp.map((r: any) => r.department)),
         designations: uniq(emp.map((r: any) => r.designation)),
         branches: uniq(emp.map((r: any) => r.branch)),
+        branch_place: branchPlace,
         disbursers: disb.map((r: any) => ({ id: Number(r.id), name: r.name })),
         categories: uniq([...(Number(plain[0]?.n) > 0 ? ["Conveyance"] : []), ...cats.map((r: any) => r.category)])
       });
@@ -1062,6 +1098,13 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       // items — that becomes a single bill dated From Date.
       const today = todayInDhaka();
       const policyNow = await loadPolicy(queryDB);
+      // Their own claim: the current Bill Claim rules must have been read and
+      // confirmed first (Bill Claim → (i) Rules). Filing for someone else
+      // doesn't confirm for them, and doesn't need it.
+      const filer = actor || filedBy || claimant;
+      if (Number(filer.id) === Number(claimant.id) && !(await hasReadCurrentRules(queryDB, Number(claimant.id)))) {
+        return res.status(403).json({ error: "Read the Bill Claim rules and confirm them first — tap (i) Rules on Bill Claim.", code: "rules_unread" });
+      }
       let editMode: ClaimEditMode | null = null;
       let editRequest: any = null;
       if (editing) {
@@ -1162,12 +1205,23 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       // With bills, check-in/out references belong to a Transport bill and
       // ARE its amount — the claim total counts them once, not on top of it.
       let extraTotal = refsTotal;
+      const cats = await loadCategories(queryDB);
+      const isTransport = (l: any) => {
+        const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
+        return !!c && /transport/i.test(c.name);
+      };
+      // Bill Claim Policy "Transport bills come only from Check In/Out": the
+      // Transport amount is never typed in — it is its ticked check-in/outs.
+      if ((await loadPolicy(queryDB)).transport_from_check_in_out) {
+        const transportLines = lines.filter(isTransport).length;
+        if (transportLines > 1) {
+          return res.status(400).json({ error: "Only one Transport bill per claim — tick all your check-in/outs on it." });
+        }
+        if (transportLines === 1 && refs.length === 0) {
+          return res.status(400).json({ error: "A Transport bill needs its Check In/Out — tick the check-in/out(s) this travel was for. Its amount can't be typed in." });
+        }
+      }
       if (usesItems && refs.length > 0) {
-        const cats = await loadCategories(queryDB);
-        const isTransport = (l: any) => {
-          const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
-          return !!c && /transport/i.test(c.name);
-        };
         const at = lines.findIndex(isTransport);
         if (at < 0) {
           return res.status(400).json({ error: "Check-in/out references go with a Transport bill — choose Transport as a bill's category." });
@@ -1453,7 +1507,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
           min_date: win.min,
           max_date: win.max,
           values: policy,
-          categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
+          categories: (await categoriesFor(queryDB, claimant.id)).filter((c) => c.is_active),
           locked_dates: await lockedDates(queryDB, claimant.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
           today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, claimant.id, today) : null
         });

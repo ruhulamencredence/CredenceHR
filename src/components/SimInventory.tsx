@@ -10,6 +10,7 @@
 // who held it that month), as one Excel too.
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, History, Loader2, Search, X } from 'lucide-react';
 import { mbApi, monthLabel, fmtDate, OperatorBadge, tk } from './MobileBillParts';
@@ -62,6 +63,9 @@ const KIND: Record<string, string> = { added: 'First limit', manual: 'Changed by
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date());
 
 export const SimInventoryTab: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky filter bar's height, so the column titles stick
+  // right under it (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(110);
   const [sims, setSims] = useState<InvSim[] | null>(null);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
@@ -139,7 +143,8 @@ export const SimInventoryTab: React.FC<{ token: string }> = ({ token }) => {
           </div>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Desktop: search and filters stay under the header while the list scrolls. */}
+      <div ref={barRef} className="flex flex-wrap items-center gap-2 md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
         <label className="flex items-center gap-2 bg-white border border-slate-200 rounded-full px-3 py-1.5 flex-1 min-w-[200px] max-w-sm">
           <Search className="w-3.5 h-3.5 text-slate-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Number, name, ID, department, location…" className="bg-transparent text-xs outline-none flex-1 min-w-0" />
@@ -165,9 +170,9 @@ export const SimInventoryTab: React.FC<{ token: string }> = ({ token }) => {
         </button>
       </div>
       {error && <p className="text-xs text-rose-600">{error}</p>}
-      <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto">
+      <div className="rounded-2xl border border-slate-200 bg-white overflow-x-auto xl:overflow-clip">
         <table className="w-full text-xs" data-phone-card>
-          <thead className="bg-slate-50 text-slate-500">
+          <thead className="bg-slate-50 text-slate-500 sticky z-10 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
             <tr className="text-left">
               <th className="px-3 py-2.5 font-semibold">SIM</th>
               <th className="px-3 py-2.5 font-semibold">Now with</th>

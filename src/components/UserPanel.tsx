@@ -38,6 +38,7 @@ import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { TOUR_SECTION_EVENT, openTutorials, takeTourSection, useTutorialsState } from '../lib/tutorials';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
+import { MyTeamCard } from './MyTeam';
 const LeaveReviewPage = React.lazy(() => import('./LeaveReviewPage').then((m) => ({ default: m.LeaveReviewPage })));
 const EmployeeDirectory = React.lazy(() => import('./EmployeeDirectory').then((m) => ({ default: m.EmployeeDirectory })));
 const NoticeBoard = React.lazy(() => import('./NoticeBoard').then((m) => ({ default: m.NoticeBoard })));
@@ -67,6 +68,7 @@ import { Spinner } from './Spinner';
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { useCachedState } from '../lib/screenCache';
+import { EntryForField } from './EntryForField';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -342,6 +344,7 @@ const EntryRow = React.memo(function EntryRow({
         {it.job_no}
         {/* A Project team has several members (PepmTeam.ts): who entered this row. */}
         {it.entered_by_name && <div className="text-[10px] font-normal text-slate-400 truncate" title={`Entered by ${it.entered_by_name}`}>by {it.entered_by_name}</div>}
+        {it.for_project_name && <div className="text-[10px] font-semibold text-violet-600 truncate" title="Shared with this project's team">For {it.for_project_name}</div>}
       </td>
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
@@ -645,6 +648,7 @@ const EntryCard = React.memo(function EntryCard({
             {split && <SplitBadge split={split} />}
           </div>
           {it.entered_by_name && <div className="text-[10px] text-slate-400 truncate">by {it.entered_by_name}</div>}
+          {it.for_project_name && <div className="text-[10px] font-semibold text-violet-600 truncate">For {it.for_project_name}</div>}
         </div>
         {isEditing ? (
           <div className="flex items-center gap-1 flex-shrink-0">
@@ -1533,6 +1537,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Form state
   const [entryDate, setEntryDate] = useState<string>(todayDateOnlyString());
   const [projectId, setProjectId] = useState<string>('');
+  // "For" on a By-home-project Project (EntryForField.tsx).
+  const [forProjectId, setForProjectId] = useState<string>('');
   // Admin-set Delivery Date "minimum lead time" for the New Job Entry form's
   // own rows below (Condition Set's "entry" type — see
   // deliveryDateConditions.ts). Re-resolves whenever the Project/Budget
@@ -2710,6 +2716,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             body: JSON.stringify({
               budget_id: selectedBudget.id,
               project_id: Number(projectId),
+              ...(forProjectId ? { for_project_id: Number(forProjectId) } : {}),
               job_name: jobName.trim(),
               job_duration: jobDuration.trim(),
               items: itemsPayload
@@ -3331,6 +3338,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
 
+        {/* My Team (MyTeam.tsx) — only for an account with people under it. */}
+        <MyTeamCard token={token} className="flex flex-col [&>*]:flex-1" />
+
         {/* Book a Ride + My Asset quick access — web only; the app's own
             Dashboard has the mobile tiles above. */}
         {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
@@ -3612,6 +3622,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
 
+      {/* My Team — a Head / Supervisor's own people today (MyTeam.tsx);
+          renders nothing for an account with nobody under it. */}
+      {mobileActiveSection === null && !isDesktop && <MyTeamCard token={token} className="md:hidden" />}
+
       {/* Global Calendar (Admin Panel -> Holidays) — read-only "pocket
           calendar" of every set Weekend/Holiday date, same widget every role
           sees. Sits right under the Bill Claim/Job Entry/Job Edit
@@ -3854,6 +3868,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </p>
                 )}
               </div>
+
+              {/* For (a "By home project" Project, e.g. Central Inventory). */}
+              {!editingJob && <EntryForField token={token} projectId={projectId} value={forProjectId} onChange={setForProjectId} />}
 
               {/* Job Name (Manually entered by the user) */}
               <div>
@@ -4598,14 +4615,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         {/* Entries Table / List — grouped by Job, one line per Job (not per MPR) */}
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
-            <div className="hidden md:block">
+            <div className="hidden md:block !mb-0">
               <ModulePath path={['Self Service', 'PEPM Operation', 'Jobs']} />
             </div>
           )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
-            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -4738,7 +4755,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           </div>
 
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
-            <div className="hidden md:block">
+            <div className="hidden md:block !mb-0">
               <ModulePath path={['Self Service', 'PEPM Operation', 'Entry Details']} />
             </div>
           )}
@@ -5328,31 +5345,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           grid above (it operates on already Final-Submitted Jobs, which that grid's
           "Job Entry Details" list intentionally locks down). Hides on desktop while a
           Claims page is the active section, same as the grid.
-          On desktop, once it's the active section it's the ONLY thing showing in this
-          column (every other section above is `md:hidden`), so instead of sitting as
-          just another card inside this container's padding (px-2 sm:px-6 lg:px-8) and
-          top/bottom spacing (pt-8/md:pb-8, plus the space-y-8 gap from the section
-          before it), it breaks out of all of that with matching negative margins —
-          !mt-0 cancels the space-y-8 gap, md:-mt-8/md:-mb-8 cancel this container's own
-          top/bottom padding, and -mx-2 sm:-mx-6 lg:-mx-8 cancel its side padding — so
-          JobEditPanel (which fills md:h-[calc(100vh-4rem)] itself) actually reaches
-          every edge: flush under the header, full width, all the way to the bottom.
-          Mobile is untouched (max-md:!mt-0 only ever canceled the mobile gap; the
-          extra rules above only take effect at md+). */}
+          On desktop it sits like the other PEPM pages: the breadcrumb, then the panel
+          as a card right under it (!mt-0 cancels the space-y-8 gap from the hidden
+          section before it). */}
       {user.can_job_edit && !isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobEdit' && (
-        // !mt-0 cancels the space-y-8 gap this still picks up from the (hidden)
-        // section before it — same reasoning as JobEditPanel's own negative
-        // margins below, just for the smaller top-only gap: without it this sat
-        // under both that mt-8 AND the container's own pt-8, a ~4rem gap above
-        // just a breadcrumb before an otherwise near-empty page.
-        <div className="hidden md:block !mt-0">
+        // space-y-8 puts its gap UNDER the (empty) grid before this, so -mt-8
+        // takes it back; !mb-0 drops the gap under the breadcrumb itself.
+        <div className="hidden md:block -mt-8 !mb-0">
           <ModulePath path={['Self Service', 'PEPM Operation', 'Job Edits']} />
         </div>
       )}
       {user.can_job_edit && (
         <div className={`${mobileActiveSection === 'jobEdit' ? 'block mobile-page-in' : 'hidden'} ${
           !showingClaimsPage && desktopActiveSection === 'jobEdit' ? 'md:block' : 'md:hidden'
-        } !mt-0 -mx-2 sm:-mx-6 lg:-mx-8 md:-mt-8 md:-mb-8`}>
+        } !mt-0`}>
           <JobEditPanel token={token} />
         </div>
       )}

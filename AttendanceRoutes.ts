@@ -31,10 +31,15 @@ import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes
 import { loadRoster } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { restrictedAttendanceProjects } from "./AttendanceProjects";
+import { activeReliefDuties } from "./GuardRoutes";
 import { closedPayMonthFor, closedPayMonthMessage } from "./PayrollRoutes";
 import { loadPunchGap, farEnoughFromIn } from "./zkPunchRule";
 // Attendance from a browser only on an iPhone / iPad; Android needs the app, a computer can't (clientDevice.ts).
 import { requireAttendanceDevice } from "./clientDevice";
+import { closeOffsiteRequest, reconcileOffsiteIn } from "./OffsiteReconcile";
+import { companyStore, DEFAULT_COMPANY_ID } from "./companyContext";
+import { runsBackgroundJobs } from "./jobRunner";
+import { createAlert } from "./Alerts";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -89,16 +94,22 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // Which project IDs the calling user may act on for Remote Attendance on
   // `ymd` (today unless given): the account's own check-in list when an Admin
   // set one (Module Access -> Remote Attendance, user_attendance_projects —
-  // only the Projects whose From/To dates cover the day; see
-  // AttendanceProjects.ts), otherwise every project for an Admin/Superadmin
-  // and only the ones explicitly granted for a plain User (mirrors GET
-  // /api/projects's own visibility rule). A Superadmin is never limited.
+  // only the Projects whose From/To dates cover the day, or Their Branch's
+  // Project; see AttendanceProjects.ts), otherwise ("Any project") every
+  // project of the company. A Superadmin is never limited.
   async function getAllowedProjectIds(userId: number, role: string, ymd: string = todayInDhaka()): Promise<Set<number> | null> {
+    // A relief guard duty (Duty Roster -> Guard Posts) running now opens its
+    // post's Project for check-in / out — from 30 min before the shift to 30
+    // min after it, and only then (GuardRoutes.ts activeReliefDuties).
+    const relief = ((await activeReliefDuties(queryDB, userId).catch(() => [])) as any[]).map((d) => Number(d.project_id));
     const listed = await restrictedAttendanceProjects(queryDB, userId, role, ymd);
-    if (listed) return listed;
-    if (role === "admin" || role === "superadmin") return null; // null = no restriction
-    const perms = await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [userId]);
-    return new Set(perms.map((p: any) => Number(p.project_id)));
+    if (listed) {
+      for (const id of relief) listed.add(id);
+      return listed;
+    }
+    // "Any project" (no list, not by Branch): any of the company's projects,
+    // for a User too — not just the ones they have Budget / MPR access to.
+    return null; // null = no restriction
   }
 
   // Loads the Project and validates it has a location + radius set, returning a
@@ -194,13 +205,14 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
   // The Projects this account may check in at — the Dashboard's Remote
   // Attendance card. Same rule check-in itself enforces (getAllowedProjectIds):
-  // the "Allowed project for check-in" an Admin pinned, else the account's
-  // Project access. Separate from GET /api/projects (Budget / Jobs / MPR), so
-  // a pinned check-in Project shows even with no Project access at all.
+  // the "Allowed project for check-in" an Admin pinned (or Their Branch's),
+  // else every project ("Any project"). Separate from GET /api/projects
+  // (Budget / Jobs / MPR), so it needs no Project access at all.
   app.get("/api/attendance/my-projects", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
-      const rows: any[] = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      // A retired (archived) Project is not offered for check-in.
+      const rows: any[] = (await queryDB("SELECT * FROM projects ORDER BY project_name ASC")).filter((p: any) => !Number(p.is_archived));
       res.json(allowed ? rows.filter((p: any) => allowed.has(Number(p.id))) : rows);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -496,11 +508,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       if (otherIn.length) {
         return res.status(400).json({ error: `You've already checked in today${otherIn[0].project_name ? ` at ${otherIn[0].project_name}` : ""}.` });
       }
-      const waitingIn: any[] = await queryDB(
-        "SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND offsite_in = 1 LIMIT 1",
-        [req.user.id, today]
-      );
-      if (waitingIn.length) return res.status(400).json({ error: "Your off-site In for today is already waiting for approval." });
+      // A waiting off-site In does not block an In given inside the circle: this In counts
+      // at once, and the waiting request stays only if it is EARLIER (the approver decides;
+      // approving never moves the day's In later — OffsiteReconcile.ts).
 
       // Office Attendance (ZKTeco) gate — if the linked Employee already has an
       // In Time today from the office biometric device, that's already this
@@ -587,6 +597,23 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         if (inRow.length) {
           existing = inRow;
           outElsewhere = Number(inRow[0].project_id) !== project_id;
+        }
+      }
+      // A night relief duty: its morning Out goes on the In of the duty's own
+      // day (the In was given before midnight at this Project).
+      if (!(existing.length > 0 && existing[0].check_in_at)) {
+        const duty = ((await activeReliefDuties(queryDB, Number(req.user.id)).catch(() => [])) as any[]).find(
+          (d) => Number(d.project_id) === project_id && d.date !== today
+        );
+        if (duty) {
+          const open: any[] = await queryDB(
+            "SELECT * FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL AND check_out_at IS NULL",
+            [req.user.id, project_id, duty.date]
+          );
+          if (open.length) {
+            existing = open;
+            outElsewhere = false;
+          }
         }
       }
       const outProject = outElsewhere ? project_id : null;
@@ -698,6 +725,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   app.get("/api/attendance/day-status", authenticateToken, async (req: any, res) => {
     try {
       const today = todayInDhaka();
+      // A waiting off-site In that an earlier valid In (e.g. the office machine) made pointless closes itself.
+      await reconcileOffsiteIn(queryDB, createAlert, { userId: Number(req.user.id), sinceDays: 1 }).catch(() => 0);
       const { inS, outS } = await dayPicture(req.user, today);
       // Off-site In / Out given today and still waiting for approval.
       const pend: any[] =
@@ -819,10 +848,16 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // The calling user's own attendance history (most recent first).
   app.get("/api/attendance/mine", authenticateToken, requireTimesheetAccess, async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM attendance WHERE user_id = ? ORDER BY attendance_date DESC, id DESC", [req.user.id]);
+      // Timesheet shows the last three years (Month Wise can go back that far):
+      // every day in that window, not just the newest 200 rows — a Head Office
+      // person with a punch every working day had every month older than
+      // about nine months show as Absent. ?from=YYYY-MM-DD goes further back.
+      const asked = String(req.query.from || "");
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : `${Number(todayInDhaka().slice(0, 4)) - 3}-01-01`;
+      const rows = await queryDB("SELECT * FROM attendance WHERE user_id = ? AND attendance_date >= ? ORDER BY attendance_date DESC, id DESC", [req.user.id, since]);
       const projects = await queryDB("SELECT * FROM projects");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
-      const withApprovals = await attachApprovalStatuses("attendance", rows.slice(0, 200));
+      const withApprovals = await attachApprovalStatuses("attendance", rows);
       const mapped = withApprovals.map((r: any) => ({
         ...r,
         project_name: projectMap.get(r.project_id)?.project_name || null,
@@ -850,11 +885,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
                   CASE WHEN COUNT(*) > 1 THEN MAX(punch_time) ELSE NULL END AS check_out_at,
                   MAX(punch_time) AS last_punch
            FROM zk_attendance_logs
-           WHERE device_user_pin = ?
+           WHERE device_user_pin = ? AND punch_time >= ?
            GROUP BY DATE(punch_time)
-           ORDER BY attendance_date DESC
-           LIMIT 200`,
-          [emp[0].zk_device_pin]
+           ORDER BY attendance_date DESC`,
+          [emp[0].zk_device_pin, `${since} 00:00:00`]
         );
         const t = (v: any) => (v ? new Date(v).getTime() : NaN);
         // Office machine double punch: a punch within N minutes of the In isn't the Out.
@@ -994,7 +1028,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           return res.status(403).json({ error: listed.size ? "You can only correct attendance at your own check-in projects for that day." : "You had no check-in project on that day." });
         }
       }
-      if (!projectId) return res.status(400).json({ error: "Project is required." });
+      if (!projectId) return res.status(400).json({ error: "Pick the Project for this day." });
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       // A day whose salary month is already processed / paid stays as it is.
@@ -1353,16 +1387,30 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
     const departmentByUserId = new Map<number, string>();
     const inactiveUserIds = new Set<number>();
+    // Logins that are a real employee (an Employee record is linked) — a
+    // Superadmin who is one is in the report like everyone else; a
+    // Superadmin login with no Employee record (a system account) isn't.
+    const employeeUserIds = new Set<number>();
+    // A login linked to more than one Employee record (an old copy left
+    // inactive, e.g. after a merge) is active if any of them is — it used to
+    // count as inactive and drop out, though Timesheet and leave showed it.
+    // Its department is the active record's.
+    const activeUserIds = new Set<number>();
+    for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
     for (const e of allEmployeesForDept) {
-      if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-      if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+      if (e.user_id == null) continue;
+      const id = Number(e.user_id);
+      const live = Number(e.is_active) !== 0;
+      employeeUserIds.add(id);
+      if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+      if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
     }
     const statusMatches = (id: number) =>
       empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
 
     const filteredUsers = users.filter(
       (u: any) =>
-        (u.role === "user" || u.role === "admin") &&
+        (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
         (!user_id || u.id === user_id) &&
         (!department || departmentByUserId.get(u.id) === department) &&
         statusMatches(u.id) &&
@@ -1712,9 +1760,18 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const allEmployeesForDept = await queryDB("SELECT user_id, department, is_active FROM all_employees WHERE user_id IS NOT NULL");
       const departmentByUserId = new Map<number, string>();
       const inactiveUserIds = new Set<number>();
+      // Superadmins who are employees count too (see the monthly report).
+      const employeeUserIds = new Set<number>();
+      // Two Employee records on one login: active if any is (monthly report).
+      const activeUserIds = new Set<number>();
+      for (const e of allEmployeesForDept) if (e.user_id != null && Number(e.is_active) !== 0) activeUserIds.add(Number(e.user_id));
       for (const e of allEmployeesForDept) {
-        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
-        if (e.user_id != null && Number(e.is_active) === 0) inactiveUserIds.add(Number(e.user_id));
+        if (e.user_id == null) continue;
+        const id = Number(e.user_id);
+        const live = Number(e.is_active) !== 0;
+        employeeUserIds.add(id);
+        if (e.department && (live || !activeUserIds.has(id))) departmentByUserId.set(id, e.department);
+        if (!live && !activeUserIds.has(id)) inactiveUserIds.add(id);
       }
       const statusMatches = (id: number) =>
         empStatus === "active" ? !inactiveUserIds.has(Number(id)) : empStatus === "inactive" ? inactiveUserIds.has(Number(id)) : true;
@@ -1727,7 +1784,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       const relevantUsers = users.filter(
         (u: any) =>
-          (u.role === "user" || u.role === "admin") &&
+          (u.role === "user" || u.role === "admin" || (u.role === "superadmin" && employeeUserIds.has(Number(u.id)))) &&
           (!user_id || u.id === user_id) &&
           (!department || departmentByUserId.get(u.id) === department) &&
           statusMatches(u.id) &&
@@ -1891,6 +1948,47 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       res.status(500).json({ error: err.message });
     }
   });
+
+  // POST /api/attendance/offsite/withdraw — the person takes back their own off-site In / Out
+  // that still waits for approval (today's only), so what they give inside the circle counts.
+  app.post("/api/attendance/offsite/withdraw", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
+    try {
+      const day = todayInDhaka();
+      const rows: any[] =
+        (await queryDB(
+          "SELECT id FROM attendance_corrections WHERE user_id = ? AND attendance_date = ? AND status = 'pending' AND (offsite_in = 1 OR offsite_out = 1)",
+          [req.user.id, day]
+        )) || [];
+      if (!rows.length) return res.status(404).json({ error: "You have no off-site request waiting for today." });
+      let n = 0;
+      for (const r of rows) if (await closeOffsiteRequest(queryDB, createAlert, Number(r.id), "withdrawn")) n++;
+      res.json({ success: true, withdrawn: n });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Every 10 minutes: waiting In-only off-site requests that an earlier valid In (office
+  // machine punches arrive later than the phone) made pointless close themselves, so they
+  // do not pile up with the approver. One process only under PM2 cluster mode (jobRunner.ts).
+  async function sweepOffsite(): Promise<void> {
+    try {
+      const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g");
+      if (!groups.length) {
+        await reconcileOffsiteIn(queryDB, createAlert);
+        return;
+      }
+      for (const g of groups) {
+        await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => reconcileOffsiteIn(queryDB, createAlert));
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Off-site In clean-up failed: " + err.message);
+    }
+  }
+  if (runsBackgroundJobs()) {
+    setTimeout(sweepOffsite, 60_000);
+    setInterval(sweepOffsite, 10 * 60 * 1000);
+  }
 
   return { computeMonthlyReport };
 }

@@ -1,7 +1,8 @@
 import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
+  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown, Search, ArrowRight
 } from 'lucide-react';
 import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User, EXPLICIT_ONLY_LAYERS } from '../types';
 import { apiUrl } from '../lib/api';
@@ -101,7 +102,31 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [subView, setSubView] = useState<'templates' | 'assign'>('templates');
   const [requestType, setRequestType] = useState<ApprovalRequestType>('bill_claim');
 
-  const [templates, setTemplates] = useState<ApprovalTemplate[]>([]);
+  // Every request type's templates, with their chains (?with=chain); the
+  // Assign view and the editor still work on the chosen type's.
+  const [allTemplates, setAllTemplates] = useState<ApprovalTemplate[]>([]);
+  const templates = allTemplates.filter((t) => t.request_type === requestType);
+  // Templates list: search, type chips, Group by and Sort (kept on this computer).
+  const prefs = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('chr_approval_templates_view') || '{}') || {};
+    } catch {
+      return {};
+    }
+  })();
+  const [tSearch, setTSearch] = useState('');
+  const [tTypes, setTTypes] = useState<string[]>([]);
+  const [tGroup, setTGroup] = useState<'type' | 'approver' | 'status' | 'none'>(prefs.group || 'type');
+  const [tSort, setTSort] = useState<'def' | 'name' | 'users' | 'layers' | 'recent'>(prefs.sort || 'def');
+  const [hideInactive, setHideInactive] = useState<boolean>(!!prefs.hideInactive);
+  const [tCollapsed, setTCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      localStorage.setItem('chr_approval_templates_view', JSON.stringify({ group: tGroup, sort: tSort, hideInactive }));
+    } catch {
+      /* not kept in a private window */
+    }
+  }, [tGroup, tSort, hideInactive]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -142,10 +167,10 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const fetchTemplates = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/approval-templates?request_type=${requestType}`), {
+      const res = await fetch(apiUrl('/api/approval-templates?with=chain'), {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) setTemplates(await res.json());
+      if (res.ok) setAllTemplates(await res.json());
     } catch (err) {
       console.error('Failed to load approval templates', err);
     } finally {
@@ -172,8 +197,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   };
 
   useEffect(() => {
-    if (subView === 'templates') fetchTemplates();
-    else fetchAssignments();
+    // The Assign view's pickers need the templates too.
+    fetchTemplates();
+    if (subView !== 'templates') fetchAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subView, requestType]);
 
@@ -306,8 +332,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       if (!res.ok) throw new Error(data.error || 'Failed to save this template');
       setShowEditor(false);
       setMessage({ type: 'success', text: editingId ? 'Template updated.' : 'Template created.' });
-      if (typeDraft === requestType) fetchTemplates();
-      else setRequestType(typeDraft); // switches tab filter, which triggers its own fetch
+      fetchTemplates();
+      if (typeDraft !== requestType) setRequestType(typeDraft);
     } catch (err: any) {
       setEditorError(err.message || 'Failed to save this template');
     } finally {
@@ -419,7 +445,49 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     (k) => (k === DEFAULT_KEY ? 'Using the default' : templates.find((t) => String(t.id) === k)?.name || `Template #${k}`),
     fTemplate
   );
-  const shownRows = assignRows.filter((r) => passes(r));
+  // Assign view: Group by (Template / Department / Designation) and Sort.
+  const [aGroup, setAGroup] = useState<'none' | 'template' | 'dept' | 'desig'>(() => {
+    try {
+      return (JSON.parse(localStorage.getItem('chr_approval_assign_view') || '{}') || {}).group || 'none';
+    } catch {
+      return 'none';
+    }
+  });
+  const [aSort, setASort] = useState<'name' | 'id' | 'dept'>(() => {
+    try {
+      return (JSON.parse(localStorage.getItem('chr_approval_assign_view') || '{}') || {}).sort || 'name';
+    } catch {
+      return 'name';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('chr_approval_assign_view', JSON.stringify({ group: aGroup, sort: aSort }));
+    } catch {
+      /* not kept */
+    }
+  }, [aGroup, aSort]);
+  const assignGroupOf = (r: any): string =>
+    aGroup === 'template'
+      ? r.assigned_template_id
+        ? templates.find((t) => String(t.id) === String(r.assigned_template_id))?.name || r.effective_template_name || 'Own pick'
+        : `Default${defaultTemplate ? ` — ${defaultTemplate.name}` : ' (none — auto-approve)'}`
+      : aGroup === 'dept'
+        ? (r.department || '').trim() || 'No department'
+        : aGroup === 'desig'
+          ? (r.designation || '').trim() || 'No designation'
+          : '';
+  const shownRows = assignRows
+    .filter((r) => passes(r))
+    .sort((x, y) => {
+      const g = assignGroupOf(x).localeCompare(assignGroupOf(y));
+      if (g) return g;
+      if (aSort === 'id') return String(x.employee_code || '').localeCompare(String(y.employee_code || ''), undefined, { numeric: true });
+      if (aSort === 'dept') return String(x.department || '').localeCompare(String(y.department || '')) || String(x.employee_name).localeCompare(String(y.employee_name));
+      return String(x.employee_name).localeCompare(String(y.employee_name));
+    });
+  const assignGroupCount = new Map<string, number>();
+  shownRows.forEach((r) => assignGroupCount.set(assignGroupOf(r), (assignGroupCount.get(assignGroupOf(r)) || 0) + 1));
   // Department -> Designation -> User narrow each other: picking a Department
   // drops ticked Designations / Users outside it, so the User list (and the
   // table) only ever holds people of the chosen Departments.
@@ -511,6 +579,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
             </button>
           </div>
 
+          {subView === 'assign' && (
           <select
             value={requestType}
             onChange={(e) => setRequestType(e.target.value as ApprovalRequestType)}
@@ -522,6 +591,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               </option>
             ))}
           </select>
+          )}
         </div>
 
         {message && (
@@ -536,96 +606,241 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
         )}
       </div>
 
-      {/* --- TEMPLATES LIST --- */}
-      {subView === 'templates' && (
-        <div className="overflow-x-auto">
-          {loading ? (
-            <LoadingBlock />
-          ) : templates.length === 0 ? (
-            <div className="p-10 text-center text-sm text-slate-400">
-              No templates yet for {REQUEST_TYPES.find((r) => r.key === requestType)?.label}.
-              {isSuperAdmin ? ' Tap "New Template" to build one.' : ' Ask your Superadmin to build one.'}
+      {/* --- TEMPLATES LIST --- every request type at once, each with its whole chain */}
+      {subView === 'templates' && (() => {
+        const typeLabel = (k: string) => REQUEST_TYPES.find((r) => r.key === k)?.label || k;
+        const layersOf = (t: ApprovalTemplate) => {
+          const out: { label: string; who: string }[] = [];
+          if (t.uses_supervisor) out.push({ label: LAYER_NAMES[t.request_type]?.[1] || 'Supervisor', who: "Employee's own supervisor" });
+          (t.chain || []).forEach((c) =>
+            out.push({
+              label: c.label || layerLabel(t.request_type, out.length),
+              who:
+                c.approver_type === 'vehicle_maintainer'
+                  ? 'Vehicle maintainer'
+                  : c.approver_type === 'asset_fulfiller'
+                    ? 'Asset fulfiller'
+                    : c.approver_type === 'conveyance_disburser'
+                      ? 'Conveyance disburser'
+                      : c.approvers.join(' or ') || '—'
+            })
+          );
+          return out;
+        };
+        const needle = tSearch.trim().toLowerCase();
+        const list = allTemplates
+          .filter((t) => !tTypes.length || tTypes.includes(t.request_type))
+          .filter((t) => !hideInactive || t.is_active)
+          .filter((t) => !needle || [t.name, ...layersOf(t).map((l) => `${l.label} ${l.who}`)].join(' ').toLowerCase().includes(needle))
+          .sort((x, y) =>
+            tSort === 'name'
+              ? x.name.localeCompare(y.name)
+              : tSort === 'users'
+                ? (y.employee_count || 0) - (x.employee_count || 0)
+                : tSort === 'layers'
+                  ? layersOf(y).length - layersOf(x).length
+                  : tSort === 'recent'
+                    ? new Date(y.updated_at || 0).getTime() - new Date(x.updated_at || 0).getTime()
+                    : Number(!!y.is_default) - Number(!!x.is_default) || x.name.localeCompare(y.name)
+          );
+        const shownTypes = REQUEST_TYPES.filter((r) => !tTypes.length || tTypes.includes(r.key));
+        const noDefault = shownTypes.filter((r) => !allTemplates.some((t) => t.request_type === r.key && t.is_default && t.is_active));
+        const groupMap = new Map<string, ApprovalTemplate[]>();
+        const add = (k: string, t: ApprovalTemplate) => groupMap.set(k, [...(groupMap.get(k) || []), t]);
+        list.forEach((t) => {
+          if (tGroup === 'type') add(typeLabel(t.request_type), t);
+          else if (tGroup === 'status') add(!t.is_active ? 'Inactive' : t.is_default ? 'Default' : 'Active (not default)', t);
+          else if (tGroup === 'approver') [...new Set(layersOf(t).map((l) => l.who))].forEach((w) => add(w, t));
+        });
+        const groups = [...groupMap.entries()].sort((x, y) =>
+          tGroup === 'type'
+            ? REQUEST_TYPES.findIndex((r) => r.label === x[0]) - REQUEST_TYPES.findIndex((r) => r.label === y[0])
+            : y[1].length - x[1].length || x[0].localeCompare(y[0])
+        );
+        const ago = (iso?: string) => {
+          if (!iso) return '';
+          const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+          return d <= 0 ? 'changed today' : d === 1 ? 'changed yesterday' : `changed ${d} days ago`;
+        };
+        const row = (t: ApprovalTemplate) => (
+          <div key={t.id} className="grid grid-cols-1 lg:grid-cols-[minmax(170px,1fr)_minmax(0,3fr)_100px_130px_70px] gap-3 items-center px-4 sm:px-6 py-3 border-t border-slate-100 hover:bg-slate-50/60">
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900 text-sm">{t.name}</div>
+              <div className="text-[11px] text-slate-500">{typeLabel(t.request_type)}{t.updated_at ? ` · ${ago(t.updated_at)}` : ''}</div>
             </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
-                <tr>
-                  <th className="text-left px-4 py-3 font-semibold">Name</th>
-                  <th className="text-left px-4 py-3 font-semibold">Layers</th>
-                  <th className="text-left px-4 py-3 font-semibold">Default</th>
-                  <th className="text-left px-4 py-3 font-semibold">Status</th>
-                  <th className="text-right px-4 py-3 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {templates.map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-50/60">
-                    <td className="px-4 py-3 font-semibold text-slate-900">{t.name}</td>
-                    <td className="px-4 py-3 text-slate-600">{t.step_count ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {isSuperAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleDefault(t)}
-                          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full transition-colors ${
-                            t.is_default ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-400 hover:text-slate-600'
-                          }`}
-                        >
-                          {t.is_default ? <Star className="w-3 h-3" /> : <StarOff className="w-3 h-3" />}
-                          {t.is_default ? 'Default' : 'Make default'}
-                        </button>
-                      ) : t.is_default ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-700">
-                          <Star className="w-3 h-3" /> Default
+            <div className="flex flex-wrap items-center gap-1 min-w-0">
+              {layersOf(t).map((l, i) => (
+                <React.Fragment key={i}>
+                  {i > 0 && <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />}
+                  <span className="inline-flex items-center gap-1.5 max-w-full rounded-lg border border-slate-200 bg-slate-50 pl-1 pr-2 py-1 text-[11px]">
+                    <span className="w-4 h-4 rounded-full bg-sky-600 text-white text-[9px] font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                    <span className="min-w-0">
+                      <span className="block font-semibold text-slate-700 truncate">{l.label}</span>
+                      <span className="block text-[10px] text-slate-500 truncate">{l.who}</span>
+                    </span>
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+            <div className="text-xs tabular-nums">
+              {t.employee_count ? (
+                <>
+                  <span className="text-base font-bold text-slate-900">{t.employee_count}</span> <span className="text-slate-500">employees</span>
+                </>
+              ) : (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">Not used by anyone</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {isSuperAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => handleToggleDefault(t)}
+                  className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${t.is_default ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}
+                >
+                  {t.is_default ? <Star className="w-3 h-3" /> : <StarOff className="w-3 h-3" />} {t.is_default ? 'Default' : 'Make default'}
+                </button>
+              ) : (
+                t.is_default && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"><Star className="w-3 h-3" /> Default</span>
+              )}
+              {isSuperAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => handleToggleActive(t)}
+                  className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
+                >
+                  <Power className="w-3 h-3" /> {t.is_active ? 'Active' : 'Inactive'}
+                </button>
+              ) : (
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{t.is_active ? 'Active' : 'Inactive'}</span>
+              )}
+            </div>
+            <div className="flex lg:justify-end gap-1">
+              {isSuperAdmin && (
+                <>
+                  <button type="button" onClick={() => openEditModal(t.id)} aria-label={`Edit ${t.name}`} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button type="button" onClick={() => handleDelete(t.id)} aria-label={`Delete ${t.name}`} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+        return (
+          <div>
+            <div className="px-4 sm:px-6 pt-4 flex flex-col gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 flex-1 min-w-[220px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  <Search className="w-3.5 h-3.5 text-slate-400" />
+                  <input value={tSearch} onChange={(e) => setTSearch(e.target.value)} placeholder="Search a template name or an approver's name" aria-label="Search templates" className="bg-transparent text-xs outline-none flex-1 min-w-0" />
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                  Group by
+                  <select value={tGroup} onChange={(e) => setTGroup(e.target.value as any)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    <option value="type">Request type</option>
+                    <option value="approver">Approver (who is in the chain)</option>
+                    <option value="status">Default / Active / Inactive</option>
+                    <option value="none">No grouping</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                  Sort
+                  <select value={tSort} onChange={(e) => setTSort(e.target.value as any)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    <option value="def">Default first, then name</option>
+                    <option value="name">Name A–Z</option>
+                    <option value="users">Most employees</option>
+                    <option value="layers">Most layers</option>
+                    <option value="recent">Recently changed</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                  <input type="checkbox" checked={hideInactive} onChange={(e) => setHideInactive(e.target.checked)} className="rounded" /> Hide inactive
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Request type">
+                {[{ key: '', label: 'All types' }, ...REQUEST_TYPES].map((r) => {
+                  const n = r.key ? allTemplates.filter((t) => t.request_type === r.key).length : allTemplates.length;
+                  const on = r.key ? tTypes.includes(r.key) : tTypes.length === 0;
+                  return (
+                    <button
+                      key={r.key || 'all'}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setTTypes((prev) => (!r.key ? [] : prev.includes(r.key) ? prev.filter((x) => x !== r.key) : [...prev, r.key]))}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border ${on ? 'bg-[color:var(--g-accent,#ea580c)] border-[color:var(--g-accent,#ea580c)] text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {r.label}
+                      <span className={`text-[10px] px-1.5 rounded-full ${on ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 px-4 sm:px-6 py-2 bg-slate-50 border-y border-slate-200 text-xs text-slate-500">
+              <span><b className="text-slate-900">{list.length}</b> templates</span>
+              <span>Not used by anyone <b className="text-rose-600">{list.filter((t) => !t.employee_count).length}</b></span>
+              <span>Inactive <b className="text-slate-900">{list.filter((t) => !t.is_active).length}</b></span>
+            </div>
+            {noDefault.length > 0 && !loading && (
+              <div className="mx-4 sm:mx-6 mt-3 flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{noDefault.map((r) => r.label).join(', ')} {noDefault.length === 1 ? 'has' : 'have'} no active default template — anyone without a pick is auto-approved.</span>
+              </div>
+            )}
+            {loading ? (
+              <LoadingBlock />
+            ) : list.length === 0 ? (
+              <div className="p-10 text-center text-sm text-slate-400">
+                {allTemplates.length === 0 ? (isSuperAdmin ? 'No templates yet. Tap "New Template" to build one.' : 'No templates yet. Ask your Superadmin to build one.') : 'No template matches.'}
+              </div>
+            ) : tGroup === 'none' ? (
+              <div className="mt-2">{list.map(row)}</div>
+            ) : (
+              <div className="mt-2">
+                {groups.map(([k, l]) => {
+                  const open = !tCollapsed.has(k);
+                  const users = l.reduce((n, t) => n + (t.employee_count || 0), 0);
+                  const def = tGroup === 'type' ? l.find((t) => t.is_default && t.is_active) : undefined;
+                  return (
+                    <div key={k} className="border-t border-slate-200">
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        onClick={() =>
+                          setTCollapsed((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(k)) next.delete(k);
+                            else next.add(k);
+                            return next;
+                          })
+                        }
+                        className="w-full flex flex-wrap items-center gap-2 px-4 sm:px-6 py-2.5 text-left hover:bg-slate-50"
+                      >
+                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? '' : '-rotate-90'}`} />
+                        <span className="text-sm font-bold text-slate-900">{k}</span>
+                        <span className="text-xs text-slate-500">{l.length} template{l.length === 1 ? '' : 's'}</span>
+                        <span className="ml-auto flex flex-wrap gap-1.5">
+                          {tGroup === 'type' &&
+                            (def ? (
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">★ {def.name}</span>
+                            ) : (
+                              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">No default</span>
+                            ))}
+                          {tGroup !== 'approver' && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">{users} employees</span>}
                         </span>
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isSuperAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleActive(t)}
-                          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full transition-colors ${
-                            t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                          }`}
-                        >
-                          <Power className="w-3 h-3" /> {t.is_active ? 'Active' : 'Inactive'}
-                        </button>
-                      ) : (
-                        <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {t.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isSuperAdmin && (
-                        <div className="flex justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(t.id)}
-                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(t.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+                      </button>
+                      {open && l.map(row)}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* --- ASSIGN TO EMPLOYEES --- */}
       {subView === 'assign' && (
@@ -652,6 +867,23 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               {anyFilter && (
                 <button type="button" onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:underline">Clear filters</button>
               )}
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                Group by
+                <select value={aGroup} onChange={(e) => setAGroup(e.target.value as any)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                  <option value="none">No grouping</option>
+                  <option value="template">Template</option>
+                  <option value="dept">Department</option>
+                  <option value="desig">Designation</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                Sort
+                <select value={aSort} onChange={(e) => setASort(e.target.value as any)} className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl">
+                  <option value="name">Name A–Z</option>
+                  <option value="id">Employee ID</option>
+                  <option value="dept">Department</option>
+                </select>
+              </label>
               <span className="text-[11px] text-slate-500 ml-auto">Showing {shownRows.length} of {assignRows.length}</span>
             </div>
           )}
@@ -707,8 +939,16 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                     </td>
                   </tr>
                 )}
-                {shownRows.map((row) => (
-                  <tr key={row.employee_user_id} className="hover:bg-slate-50/60">
+                {shownRows.map((row, i) => (
+                  <React.Fragment key={row.employee_user_id}>
+                  {aGroup !== 'none' && (i === 0 || assignGroupOf(shownRows[i - 1]) !== assignGroupOf(row)) && (
+                    <tr className="bg-slate-50">
+                      <td colSpan={2} className="px-4 py-2 text-xs font-bold text-slate-800">
+                        {assignGroupOf(row)} <span className="font-normal text-slate-500">· {assignGroupCount.get(assignGroupOf(row))} employee{assignGroupCount.get(assignGroupOf(row)) === 1 ? '' : 's'}</span>
+                      </td>
+                    </tr>
+                  )}
+                  <tr className="hover:bg-slate-50/60">
                     <td className="px-4 py-3">
                       <div className="font-medium text-slate-900">{row.employee_name}</div>
                       <div className="text-[11px] text-slate-500">
@@ -735,6 +975,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                       </SearchSelect>
                     </td>
                   </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -744,8 +985,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
 
       {/* --- Template editor modal --- */}
       {showEditor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        createPortal(
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-200">
               <div>
                 <h3 className="text-base font-bold text-slate-900">{editingId ? 'Edit Template' : 'New Template'}</h3>
@@ -1057,7 +1299,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )
       )}
     </div>
   );

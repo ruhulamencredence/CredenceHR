@@ -32,6 +32,7 @@
 // clock ('YYYY-MM-DD HH:MM:SS'), the same way an approved Timesheet
 // correction writes them. Historical rows don't open approval requests.
 
+import { syncDivision } from "./BranchDivision";
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
@@ -814,6 +815,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
               today: today()
             }).catch(() => undefined);
             await queryDB(`UPDATE all_employees SET ${changed.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [...changed.map((k) => set[k]), Number(existing.id)]);
+            await syncDivision(queryDB, { employeeIds: [Number(existing.id)] }).catch(() => {});
           }
           await createLogin(Number(existing.id));
           await addPayment(Number(existing.id));
@@ -843,6 +845,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           }
           const r = await queryDB(`INSERT INTO all_employees (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, vals);
           ctx.byCode.set(codeKey, { id: r.insertId, employee_id: code, ...set, ...(relink ? { user_id: relink.id } : {}) });
+          await syncDivision(queryDB, { employeeIds: [Number(r.insertId)] }).catch(() => {});
           await createLogin(Number(r.insertId));
           await addPayment(Number(r.insertId));
         }

@@ -14,6 +14,7 @@ erDiagram
     int project_id FK
     int user_id FK
     timestamp submitted_at
+    varchar share_key
   }
   budget_submissions {
     int id PK
@@ -63,6 +64,14 @@ erDiagram
     int mpr_id FK
     int budget_item_id FK
     date entry_date
+  }
+  entry_edit_attempts {
+    int id PK
+    int entry_id FK
+    int user_id FK
+    text fields_json
+    varchar reason
+    int status_code
   }
   entry_edit_history {
     int id PK
@@ -187,6 +196,8 @@ erDiagram
   jobs ||--o{ entries : "job_id"
   mpr_numbers ||--o{ entries : "mpr_id"
   projects ||--o{ entries : "project_id"
+  entries ||..o{ entry_edit_attempts : "entry_id"
+  users ||..o{ entry_edit_attempts : "user_id"
   users ||--o{ entry_edit_history : "edited_by"
   entries ||--o{ entry_edit_history : "entry_id"
   entries ||..o{ entry_permanent_delete_log : "entry_id"

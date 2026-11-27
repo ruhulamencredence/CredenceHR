@@ -1,9 +1,14 @@
 import { signInDeviceFields } from '../lib/deviceKind';
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { ArrowUp, MapPin, Building2, Fingerprint, UserRound, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { BOOT_INTRO_DONE_EVENT, bootIntroPlaying } from '../lib/bootIntro';
 import credenceLogo from '../assets/credence-logo.png';
 import googlePlayIcon from '../assets/google-play-icon.png';
+// The illustration's first frame as a small picture (34 KB): shown at once;
+// the animation (its player + 865 KB of data) starts only after the visitor
+// touches or types on the page — so the sign-in page opens fast.
+import heroStill from '../assets/office-illustration-still.webp';
 import { AddToHomeScreenButton, isIOSDevice, isStandalone } from './AddToHomeScreen';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
@@ -64,6 +69,34 @@ interface AuthScreenProps {
 // small Lottie hero animation as the one signature color accent, a large
 // centered greeting, and a single pill-shaped input area.
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
+  // The illustration: the still picture first; the animation after the first
+  // touch / key / focus on the page (never with "reduce motion"). The app
+  // (APK) has it on the device already, so it starts at once there.
+  const [heroAnimate, setHeroAnimate] = useState(false);
+  const [heroAnimReady, setHeroAnimReady] = useState(false);
+  const onHeroReady = useCallback(() => setHeroAnimReady(true), []);
+  useEffect(() => {
+    try {
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    } catch {
+      // no matchMedia
+    }
+    if (Capacitor.isNativePlatform()) {
+      // The app's open animation is still on top: start after it, so the two
+      // don't fight over frames (lib/bootIntro.ts). The still shows meanwhile.
+      if (!bootIntroPlaying()) {
+        setHeroAnimate(true);
+        return;
+      }
+      const start = () => setHeroAnimate(true);
+      window.addEventListener(BOOT_INTRO_DONE_EVENT, start, { once: true });
+      return () => window.removeEventListener(BOOT_INTRO_DONE_EVENT, start);
+    }
+    const start = () => setHeroAnimate(true);
+    const evs = ['pointerdown', 'pointermove', 'keydown', 'focusin', 'touchstart', 'scroll'] as const;
+    evs.forEach((e) => window.addEventListener(e, start, { once: true, passive: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, start));
+  }, []);
   // Accepts either an Email (Admin-created accounts) or a Project Name (bulk-created
   // accounts log in with Project Name + Password, spaces are ignored) — sent to the
   // server as a single "identifier" field.
@@ -190,6 +223,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       willHideHandle?.remove();
     };
   }, [isNativeApp]);
+
+  // iPhone, typing: while compact the card is already at the top, above the
+  // keyboard. iOS (seen on iOS 15) still scrolls the page up by the
+  // keyboard's height on top of the page's own scroll, so the Workspace /
+  // Login ID card went off the top of the screen. Keep it pinned to the top.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!compact || !isIOSDevice()) return;
+    const pin = () => {
+      if (window.scrollY) window.scrollTo(0, 0);
+      if (rootRef.current && rootRef.current.scrollTop) rootRef.current.scrollTop = 0;
+    };
+    const timers = [0, 120, 350, 700].map((ms) => window.setTimeout(pin, ms));
+    // Only as the keyboard opens or changes height — afterwards the person
+    // can still scroll down to the button themselves.
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', pin);
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      vv?.removeEventListener('resize', pin);
+    };
+  }, [compact]);
 
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
@@ -396,16 +451,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div
+      ref={rootRef}
       // Scrolls (never overflow-hidden), so a focused field can always be
       // brought above the on-screen keyboard.
       className="min-h-dvh flex flex-col relative overflow-y-auto"
+      data-keyboard-pinned={iosHere ? '' : undefined}
       onFocusCapture={(e) => {
         if ((e.target as HTMLElement).matches('input, textarea')) setFieldFocused(true);
       }}
       onBlurCapture={() => window.setTimeout(() => setFieldFocused(!!document.activeElement?.matches?.('input, textarea')), 0)}
       style={{
         background: 'var(--g-bg-gradient)',
-        ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+        // Android only: an iPhone already shrinks the page by the keyboard
+        // (Keyboard resize 'body'), and the extra room let it scroll the
+        // card away.
+        ...(keyboardHeight > 0 && !iosHere ? { paddingBottom: keyboardHeight } : null)
       }}
     >
       <div
@@ -426,9 +486,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         >
           <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 lg:h-14 w-auto" />
           <div className="hero-art relative isolate w-60 h-60 sm:w-72 sm:h-72 lg:w-80 lg:h-80 pointer-events-none mt-2">
-            <Suspense fallback={<div className="w-full h-full" />}>
-              <AuthHeroLottie className="w-full h-full" />
-            </Suspense>
+            <img
+              src={heroStill}
+              alt=""
+              width={320}
+              height={320}
+              fetchPriority="high"
+              decoding="async"
+              className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${heroAnimReady ? 'opacity-0' : 'opacity-100'}`}
+            />
+            {heroAnimate && (
+              <Suspense fallback={null}>
+                <AuthHeroLottie className="absolute inset-0 w-full h-full" onReady={onHeroReady} />
+              </Suspense>
+            )}
           </div>
         </div>
 

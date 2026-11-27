@@ -42,12 +42,13 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// GET /api/calendar-attendance — the viewer's own Delay / Extreme Delay, and
+// GET /api/calendar-attendance — the viewer's own Present / Absent / Delay /
+// Extreme Delay, and
 // Leave for just the viewer, or their Department with the Monthly Attendance
 // Report module, or everyone for the Superadmin; see PayrollRoutes.ts.
 interface DayMark {
   user_id: number;
-  kind: 'delay' | 'extreme' | 'leave';
+  kind: 'present' | 'absent' | 'delay' | 'extreme' | 'leave';
   leave_type?: string;
   status?: 'approved' | 'pending';
 }
@@ -57,23 +58,30 @@ interface CalendarPerson {
   department: string | null;
 }
 
-type MarkFilter = 'all' | 'delay' | 'extreme' | 'leave' | `type:${string}`;
+type MarkFilter = 'all' | 'present' | 'absent' | 'delay' | 'extreme' | 'leave' | `type:${string}`;
 const matchesFilter = (m: DayMark, f: MarkFilter) =>
   f === 'all' || m.kind === f || (f.startsWith('type:') && m.kind === 'leave' && m.leave_type === f.slice(5));
 
-function markStyle(m: DayMark): { label: string; detail: string; dot: string; ring: string; text: string } {
+// The viewer's own day by the attendance policy: Present green, Absent red,
+// Delay yellow, Extreme Delay maroon (`cell` tints that day's square; Extreme
+// fills it, so it can't be mistaken for Absent). Leave is pink so it can't be
+// read as Present (violet / blue would turn into the theme's accent colour).
+function markStyle(m: DayMark): { label: string; detail: string; dot: string; ring: string; text: string; cell: string; solid?: boolean } {
   if (m.kind === 'leave') {
     const pending = m.status === 'pending';
     return {
       label: pending ? 'Pending' : 'Leave',
       detail: `${m.leave_type || ''} leave · ${pending ? 'Pending' : 'Approved'}`.trim(),
-      dot: pending ? 'bg-white ring-2 ring-inset ring-emerald-500' : 'bg-emerald-500',
-      ring: pending ? 'ring-emerald-300' : 'ring-emerald-500',
-      text: 'text-emerald-700'
+      dot: pending ? 'bg-white ring-2 ring-inset ring-pink-500' : 'bg-pink-500',
+      ring: pending ? 'ring-pink-300' : 'ring-pink-500',
+      text: 'text-pink-700',
+      cell: 'bg-pink-50 text-pink-800'
     };
   }
-  if (m.kind === 'extreme') return { label: 'Extreme', detail: 'Extreme Delay', dot: 'bg-rose-500', ring: 'ring-rose-500', text: 'text-rose-600' };
-  return { label: 'Delay', detail: 'Delay', dot: 'bg-orange-400', ring: 'ring-orange-400', text: 'text-orange-600' };
+  if (m.kind === 'present') return { label: 'Present', detail: 'Present', dot: 'bg-emerald-500', ring: 'ring-emerald-500', text: 'text-emerald-700', cell: 'bg-emerald-50 text-emerald-800' };
+  if (m.kind === 'absent') return { label: 'Absent', detail: 'Absent', dot: 'bg-red-600', ring: 'ring-red-600', text: 'text-red-700', cell: 'bg-red-50 text-red-800' };
+  if (m.kind === 'extreme') return { label: 'Extreme', detail: 'Extreme Delay', dot: 'bg-red-900', ring: 'ring-red-900', text: 'text-red-900', cell: 'bg-red-900 text-white', solid: true };
+  return { label: 'Delay', detail: 'Delay', dot: 'bg-yellow-400', ring: 'ring-yellow-400', text: 'text-yellow-700', cell: 'bg-yellow-50 text-yellow-800' };
 }
 
 // Profile photo (GET /api/profile/photo/:userId), initials until it loads or
@@ -256,24 +264,39 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     return Array.from(set).sort();
   }, [marksByDate]);
   const marksFor = (dateStr: string) => (marksByDate[dateStr] || []).filter((m) => matchesFilter(m, filter));
+  // The viewer's own day is shown by the colour (and weight) of its date number
+  // only — no filled square, no dot; a Weekend / Holiday keeps its own colour.
+  // A Pending leave is underlined with a dashed line. Today keeps its round
+  // badge, with a small status dot under it (renderMarks).
+  const ownMark = (dateStr: string) => {
+    const m = marksFor(dateStr).find((x) => x.user_id === me);
+    return m ? { style: markStyle(m), pending: m.kind === 'leave' && m.status === 'pending' } : null;
+  };
+  const ownCell = (dateStr: string) => ownMark(dateStr)?.style.text || '';
+  const ownNumberClass = (dateStr: string, isToday: boolean) => {
+    const o = ownMark(dateStr);
+    if (!o || isToday) return 'font-semibold';
+    return `font-extrabold ${o.pending ? 'underline decoration-dashed decoration-2 decoration-pink-500 underline-offset-[3px]' : ''}`;
+  };
 
-  // The viewer's own mark as a word, everyone else's Leave as faces.
+  // The viewer's own mark as the colour of the date (a dot only on today), everyone else's Leave as faces.
   const renderMarks = (dateStr: string, isToday: boolean) => {
     const all = marksFor(dateStr);
     if (all.length === 0) return null;
     const mine = all.find((m) => m.user_id === me);
     const marks = all.filter((m) => m.user_id !== me);
     const mineStyle = mine ? markStyle(mine) : null;
-    const word = mineStyle && (
-      <span
-        className={`inline-flex items-center gap-1 font-bold uppercase tracking-wide ${large ? 'text-[10px]' : 'text-[7px]'} ${
-          isToday && large ? 'text-white' : mineStyle.text
-        }`}
-      >
-        {large && <span className={`w-1.5 h-1.5 rounded-full ${mineStyle.dot}`} />}
-        {mineStyle.label}
-      </span>
-    );
+    // Colour only — the legend under the calendar says what each colour is, so
+    // the day's own square carries no word (the name stays for screen readers).
+    // Only today (whose number sits in a round badge) shows a dot; every other
+    // day is told by its number's colour, and the name stays for screen readers.
+    const word =
+      mineStyle &&
+      (isToday ? (
+        <span role="img" aria-label={mineStyle.detail} title={mineStyle.detail} className={`inline-block rounded-full ring-2 ring-white ${large ? 'w-2 h-2' : 'w-1.5 h-1.5'} ${mineStyle.dot}`} />
+      ) : (
+        <span className="sr-only">{mineStyle.detail}</span>
+      ));
     if (marks.length === 0) return word;
     const max = large ? (word ? 2 : 3) : word ? 1 : 2;
     return (
@@ -430,6 +453,8 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           aria-label="Show"
         >
           <option value="all">All</option>
+          <option value="present">Present</option>
+          <option value="absent">Absent</option>
           <option value="delay">Delay</option>
           <option value="extreme">Extreme Delay</option>
           <option value="leave">Leave</option>
@@ -472,10 +497,10 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                           ? entry.day_type === 'weekend'
                             ? 'bg-sky-50 text-sky-700'
                             : 'bg-amber-50 text-amber-700'
-                          : 'text-slate-700 hover:bg-slate-50'
+                          : ownCell(cell.dateStr) || 'text-slate-700 hover:bg-slate-50'
                   }`}
                 >
-                  <span className="font-semibold leading-none">{dates.main}</span>
+                  <span className={`${ownNumberClass(cell.dateStr, isToday && cell.inCurrentMonth)} leading-none`}>{dates.main}</span>
                   {dates.sub && <span className={`text-[10px] leading-none ${isToday && cell.inCurrentMonth ? 'text-white/80' : 'opacity-60'}`}>{dates.sub}</span>}
                   {entry && cell.inCurrentMonth && (
                     <span className="text-[10px] font-bold uppercase tracking-wide">
@@ -497,7 +522,8 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // the rest of this card. Edge-to-edge (no side padding) so the grid
         // lines actually reach the card's own rounded corners, same as the
         // Admin grid reaching its bordered container's edges.
-        <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
+        // data-no-edge-swipe: its own left/right swipe changes the month.
+        <div data-no-edge-swipe onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
           <div className="grid grid-cols-7 bg-white/30 border-b border-white/40">
             {weekdayLabels.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">
@@ -523,11 +549,11 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                         ? entry.day_type === 'weekend'
                           ? 'bg-sky-100/50 text-sky-700'
                           : 'bg-amber-100/50 text-amber-700'
-                        : 'text-slate-700'
+                        : ownCell(cell.dateStr) || 'text-slate-700'
                   }`}
                 >
                   <span
-                    className={`font-semibold ${
+                    className={`${ownNumberClass(cell.dateStr, isToday && cell.inCurrentMonth)} ${
                       isToday && cell.inCurrentMonth ? 'w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center' : ''
                     }`}
                   >
@@ -561,16 +587,22 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           <span className="w-2.5 h-2.5 rounded-full bg-sky-400" /> {dayTypeLabel('weekend')}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-orange-400" /> Delay
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Present
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Extreme
+          <span className="w-2.5 h-2.5 rounded-full bg-red-600" /> Absent
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Approved
+          <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" /> Delay
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-inset ring-emerald-500" /> Pending
+          <span className="w-2.5 h-2.5 rounded-full bg-red-900" /> Extreme
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-pink-500" /> Leave
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-inset ring-pink-500" /> Pending
         </span>
         {loading && <span className="ml-auto text-slate-300">Loading…</span>}
       </div>

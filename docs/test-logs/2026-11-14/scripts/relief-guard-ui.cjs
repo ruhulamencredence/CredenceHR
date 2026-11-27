@@ -1,0 +1,53 @@
+// UI: Guard Posts (today banner, struck-through sick guard, relief picker with
+// groups) on a computer, and the relief guard's My Attendance box on a phone.
+const { chromium, devices } = require('/opt/node-tools/node_modules/playwright/index.js');
+const B='http://localhost:3200', D=process.argv[2];
+(async()=>{
+ let pass=0,fail=0; const ok=(c,m)=>{c?pass++:fail++;console.log((c?'PASS ':'FAIL ')+m)};
+ const login=async(e)=>(await (await fetch(B+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:e,password:'ProbePass123',workspace:'credence'})})).json());
+ const A=await login('admin@credence.test'), N=await login('nurul.guard@credence.test');
+ const b=await chromium.launch();
+ const init=(ctx,a)=>ctx.addInitScript(([t,u])=>{localStorage.setItem('mpr_token',t);localStorage.setItem('mpr_user',JSON.stringify(u));localStorage.setItem('mpr_color_mode','light');for(let i=0;i<600;i++)localStorage.setItem(`credence_webpush_snooze_${i}`,String(Date.now()+9e9));localStorage.setItem('chr_feedback_snooze',String(Date.now()+9e9));localStorage.setItem('chr_welcome_seen_'+u.id,'1');},[a.token,a.user]);
+ let ctx=await b.newContext({viewport:{width:1600,height:1000}}); await init(ctx,A);
+ let p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(String(e)));
+ await p.goto(B+'/admin/duty-roster',{waitUntil:'domcontentloaded'}); await p.waitForTimeout(4500);
+ await p.getByRole('button',{name:/^Guard Posts$/}).first().click(); await p.waitForTimeout(2500);
+ const t=await p.locator('body').innerText();
+ ok(/Today: .*Abdul Hamid \(Sick Leave\)/.test(t),'banner: "Today: Abdul Hamid (Sick Leave) …"');
+ ok(await p.locator('span.line-through',{hasText:'Abdul Hamid'}).count()>=1,'board: the sick guard is struck through');
+ await p.screenshot({path:D+'/relief-board.png'});
+ ok(/Today: .*\(not checked in\)/.test(t),'banner: a no-show (not checked in 30+ min after the start) is flagged too');
+ await p.locator('div',{hasText:/^Today: Abdul Hamid/}).getByRole('button',{name:'Find relief'}).first().click(); await p.waitForTimeout(1500);
+ const pop=await p.locator('body').innerText();
+ ok(/Relief for Main Gate · Gulshan Tower/.test(pop),'picker: title names the post and site');
+ ok(/Same site — free then/i.test(pop)&&/Other sites — nearest first/i.test(pop),'picker: same-site and other-site groups');
+ ok(/\d+(\.\d)? km away/.test(pop),'picker: distance shown for other sites');
+ await p.locator('label',{hasText:'Mizanur Rahman'}).first().click(); await p.waitForTimeout(300);
+ ok(/can Check In \/ Out at Gulshan Tower for this duty only/.test(await p.locator('body').innerText()),'picker: says where and when they can check in');
+ await p.screenshot({path:D+'/relief-picker.png'});
+ await p.getByRole('button',{name:/Cancel/}).first().click();
+ await ctx.close();
+ // Put Nurul on relief now (API) and look at his phone
+ const H={Authorization:'Bearer '+A.token,'content-type':'application/json'};
+ const posts=await (await fetch(B+'/api/guard/posts',{headers:H})).json();
+ const mg=posts.posts.find(x=>x.name==='Main Gate'); const day=posts.shifts.find(s=>s.name==='Day');
+ const nEmp=posts.people.find(x=>x.name==='Nurul Amin');
+ const today=new Date(Date.now()+6*3600e3).toISOString().slice(0,10);
+ const rl=await (await fetch(B+'/api/guard/relief',{method:'POST',headers:H,body:JSON.stringify({employee_id:nEmp.id,date:today,post_id:mg.id,shift_id:day.id})})).json();
+ ctx=await b.newContext({...devices['Pixel 7'],geolocation:{latitude:23.7925,longitude:90.4078},permissions:['geolocation']}); await init(ctx,N);
+ p=await ctx.newPage(); p.on('pageerror',e=>errs.push(String(e)));
+ await p.emulateMedia({reducedMotion:'reduce'});
+ await p.goto(B+'/',{waitUntil:'domcontentloaded'}); await p.waitForTimeout(7000);
+ const pt=await p.locator('body').innerText();
+ ok(/RELIEF DUTY/.test(pt)&&/Gulshan Tower · Main Gate/.test(pt),'phone: My Attendance shows the relief duty and where');
+ ok(/You can check in there now/.test(pt),'phone: says he can check in there now');
+ ok(await p.getByRole('button',{name:/Check In here/}).count()===1,'phone: "Check In here" button');
+ await p.screenshot({path:D+'/relief-phone.png'});
+ await p.getByRole('button',{name:/Check In here/}).click(); await p.waitForTimeout(2500);
+ const conf=p.getByRole('button',{name:/Confirm/}).first();
+ ok(await conf.count()>0,'phone: tapping it opens the usual map confirm, at Gulshan Tower');
+ await p.screenshot({path:D+'/relief-phone-confirm.png'});
+ await fetch(B+'/api/guard/relief/'+rl.id,{method:'DELETE',headers:H});
+ console.log('errors:',errs.slice(0,3)); ok(errs.length===0,'no page errors');
+ console.log(`\n${pass} passed, ${fail} failed`); await b.close();
+})();

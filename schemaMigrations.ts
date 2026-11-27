@@ -340,7 +340,10 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     ["accrual_from", "CHAR(7) NULL DEFAULT NULL"],
     // 1 = weekends/holidays inside a leave come off the balance too (the
     // old rule); 0 = only the applicant's working days do (leaveDayCount.ts).
-    ["count_off_days", "TINYINT(1) NOT NULL DEFAULT 1"]
+    ["count_off_days", "TINYINT(1) NOT NULL DEFAULT 1"],
+    // Joiner & Probation rules (LeaveJoiner.ts, Leave Manage layer "joiner_rules"): both off by default.
+    ["probation_mode", "VARCHAR(10) NOT NULL DEFAULT 'full'"],
+    ["joiner_prorata", "TINYINT(1) NOT NULL DEFAULT 0"]
   ] as [string, string][]) {
     try {
       await dbPool.query(`ALTER TABLE leave_category_policies ADD COLUMN ${col} ${def}`);
@@ -1240,6 +1243,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure tracking_device_state table exists: " + err.message);
   }
+  // Which Android app the phone has (its versionCode / name), reported when
+  // the app opens — Employee Tracking shows who still has an app too old to
+  // stop at the end of their Tracking Schedule.
+  for (const [col, def] of [["app_build", "INT NULL"], ["app_version", "VARCHAR(40) NULL"], ["app_reported_at", "DATETIME NULL"]] as const) {
+    try {
+      await dbPool.query(`ALTER TABLE tracking_device_state ADD COLUMN ${col} ${def}`);
+    } catch {
+      // already there
+    }
+  }
   // Notices — Superadmin/Admin -> User popup shown right after the User logs in,
   // with optional custom Lottie animation (pasted JSON or a hosted URL) + free-form
   // text/HTML. See ADMIN_MODULE_KEYS ("notices") and the /api/notices* routes below.
@@ -1497,6 +1510,16 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     if (err.code !== "ER_DUP_FIELDNAME") {
       console.warn("⚠️ Could not add branches.branch_type column: " + err.message);
+    }
+  }
+  // is_archived — a retired Branch / Project is hidden from lists and pickers
+  // (Admin Panel can still show it) instead of being deleted, which would take
+  // its history with it. Default 0: nothing existing changes.
+  for (const table of ["branches", "projects"]) {
+    try {
+      await dbPool.query(`ALTER TABLE ${table} ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add ${table}.is_archived column: ` + err.message);
     }
   }
   // project_id — the Project (attendance check-in site + PEPM) this Branch
@@ -1819,6 +1842,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     // was an unindexed full table scan of every approval request ever
     // created. Ignore the error if it already exists.
     await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
+    // Approve Application -> History reads only rows touched since its From date.
+    await dbPool.query(`CREATE INDEX idx_approval_requests_updated ON approval_requests (updated_at)`).catch(() => {});
     // The Monthly Attendance Report (and the Admin Dashboard that reads it)
     // reads one month by date; claims and leave are read from a date on.
     await dbPool.query(`CREATE INDEX idx_attendance_date ON attendance (attendance_date)`).catch(() => {});

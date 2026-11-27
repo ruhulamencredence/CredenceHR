@@ -31,12 +31,12 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Reports</td>
 <td><code>reports</code></td>
-<td><code>read</code> Read Only<br><code>edit_add</code> Edit<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>submission_status</code> Budget Submission Status<br>🔒<code>dispatch_material</code> Dispatch Material (own)<br>🔒<code>dispatch_all</code> Dispatch Material: see all<br>🔒<code>po_import</code> P.O Import</td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>submission_status</code> Budget Submission Status<br>🔒<code>dispatch_material</code> Dispatch Material (own)<br>🔒<code>dispatch_all</code> Dispatch Material: see all<br>🔒<code>po_import</code> P.O Import<br>🔒<code>close_short</code> Undelivered MPR &amp; Close short</td>
 </tr>
 <tr>
 <td>Projects</td>
 <td><code>projects</code></td>
-<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>merge_projects</code> Merge projects</td>
 </tr>
 <tr>
 <td>Branches</td>
@@ -56,7 +56,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Users</td>
 <td><code>users</code></td>
-<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>block_account</code> Block Account<br>🔒<code>password_requests</code> Password requests (Forgot password)</td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>block_account</code> Block Account<br>🔒<code>password_requests</code> Password requests (Forgot password)<br>🔒<code>merge_accounts</code> Merge accounts</td>
 </tr>
 <tr>
 <td>Employees</td>
@@ -66,6 +66,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Departments</td>
 <td><code>departments</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
+</tr>
+<tr>
+<td>Designations</td>
+<td><code>designations</code></td>
 <td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
 </tr>
 <tr>
@@ -101,7 +106,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Bill Claim</td>
 <td><code>bill_claim</code></td>
-<td><code>read</code> Bill Claim<br>🔒<code>on_behalf</code> Claim on Behalf</td>
+<td><code>read</code> Bill Claim<br>🔒<code>on_behalf</code> Claim on Behalf<br><code>rules_readers</code> Who has read the rules</td>
 </tr>
 <tr>
 <td>Bill Disbursement</td>
@@ -136,7 +141,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Vehicle Management</td>
 <td><code>vehicle_management</code></td>
-<td><code>read</code> Vehicle Management<br>🔒<code>manage_drivers</code> Manage drivers<br>🔒<code>manage_vehicles</code> Edit / delete vehicles</td>
+<td><code>read</code> Vehicle Management<br>🔒<code>manage_drivers</code> Manage drivers<br>🔒<code>manage_vehicles</code> Edit / delete vehicles<br>🔒<code>pickups</code> Pick-ups (drop &amp; pick up rides)<br>🔒<code>trip_report</code> Drop &amp; pick up report</td>
 </tr>
 <tr>
 <td>Vehicle Maintainer (Ride Bypass)</td>
@@ -151,7 +156,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>MPR Edit Log</td>
 <td><code>editlog</code></td>
-<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+<td><code>read</code> Edit history &amp; Job Edit approvals<br>🔒<code>mpr_followup</code> Needs update &amp; People</td>
 </tr>
 <tr>
 <td>Exit / Offboarding</td>
@@ -181,7 +186,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Management Dashboard</td>
 <td><code>management_dashboard</code></td>
-<td><code>md_people</code> People (headcount, joined / left, workforce)<br><code>md_attendance</code> Attendance &amp; on leave today<br>🔒<code>md_money</code> Money (salary cost, money out)<br><code>md_approvals</code> Approvals<br><code>md_projects</code> Projects (PEPM) &amp; Targets<br><code>md_recruitment</code> Recruitment pipeline<br><code>md_fleet</code> Fleet &amp; assets</td>
+<td><code>md_people</code> People (headcount, joined / left, workforce)<br><code>md_attendance</code> Attendance &amp; on leave today<br>🔒<code>md_money</code> Money (salary cost, money out)<br><code>md_approvals</code> Approvals<br><code>md_projects</code> Projects (PEPM) &amp; Targets<br><code>md_recruitment</code> Recruitment pipeline<br><code>md_fleet</code> Fleet &amp; assets<br><code>md_calendar</code> Calendar (holidays + attendance, by the person's own role)</td>
 </tr>
 <tr>
 <td>HR Data Import</td>
@@ -196,7 +201,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>HR Operations</td>
 <td><code>hr_operations</code></td>
-<td><code>read</code> HR Operations<br>🔒<code>onboarding_create</code> Onboarding — Create login<br>🔒<code>onboarding_review</code> Onboarding — Review / Reject<br>🔒<code>onboarding_approve</code> Onboarding — Approve<br>🔒<code>reminders_receive</code> Reminders — receive &amp; view<br>🔒<code>requisitions</code> SIM &amp; ID card requisitions — issue / reject<br><code>quick_reports</code> Quick reports (probation, joiners, transfers, resignations, attendance, leave, headcount…)<br><code>quick_ot</code> Quick report: Overtime (OT) — who, how many hours, which days<br><code>hr_headcount</code> Office / Project &amp; Branch headcount<br>🔒<code>hr_emp_export</code> Export employees (Excel)</td>
+<td><code>read</code> HR Operations<br>🔒<code>onboarding_create</code> Onboarding — Create login<br>🔒<code>onboarding_review</code> Onboarding — Review / Reject<br>🔒<code>onboarding_approve</code> Onboarding — Approve<br>🔒<code>reminders_receive</code> Reminders — receive &amp; view<br>🔒<code>requisitions</code> SIM &amp; ID card requisitions — issue / reject<br><code>quick_reports</code> Quick reports (probation, joiners, transfers, resignations, attendance, leave, headcount…)<br><code>quick_ot</code> Quick report: Overtime (OT) — who, how many hours, which days<br><code>hr_headcount</code> Office / Project &amp; Branch headcount<br>🔒<code>hr_emp_export</code> Export employees (Excel)<br>🔒<code>p360_access</code> Service Book — Login &amp; Access log</td>
 </tr>
 <tr>
 <td>Task Management</td>
@@ -216,7 +221,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>Mail Administration</td>
 <td><code>mail_admin</code></td>
-<td><code>read</code> Mailbox list<br>🔒<code>mail_open</code> Open mailboxes (read only)<br>🔒<code>mail_password</code> See mailbox passwords<br>🔒<code>mail_settings</code> Internal delivery settings<br>🔒<code>mail_groups</code> Set up mail groups</td>
+<td><code>read</code> Mailbox list<br>🔒<code>mail_open</code> Open mailboxes (read only)<br>🔒<code>mail_password</code> See mailbox passwords<br>🔒<code>mail_settings</code> Internal delivery settings<br>🔒<code>mail_groups</code> Set up mail groups<br>🔒<code>mail_signature</code> Signature links (Website / Facebook / LinkedIn)</td>
 </tr>
 <tr>
 <td>Duty Roster</td>

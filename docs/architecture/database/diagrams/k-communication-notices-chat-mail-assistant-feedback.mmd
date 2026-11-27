@@ -32,6 +32,15 @@ erDiagram
     varchar status
     varchar topic
   }
+  chat_list_rooms {
+    int list_id PK,FK
+    int room_id PK,FK
+  }
+  chat_lists {
+    int id PK
+    int user_id FK
+    varchar name
+  }
   chat_message_hidden {
     int message_id PK,FK
     int user_id PK,FK
@@ -73,6 +82,7 @@ erDiagram
     int room_id PK,FK
     int user_id PK,FK
     int last_read_message_id
+    int delivered_up_to
   }
   chat_room_settings {
     int user_id PK,FK
@@ -173,6 +183,15 @@ erDiagram
     bigint uidvalidity
     bigint last_uid
   }
+  mail_folders {
+    int id PK
+    int user_id FK
+    int account_id
+    varchar path
+    varchar name
+    int parent_id
+    tinyint selectable
+  }
   mail_groups {
     int id PK
     varchar email
@@ -216,6 +235,10 @@ erDiagram
     int id PK
     tinyint internal_delivery
     varchar internal_domains
+    varchar unconnected_route
+    varchar sig_website
+    varchar sig_facebook
+    varchar sig_linkedin
   }
   mail_tasks {
     int id PK
@@ -305,6 +328,9 @@ erDiagram
   }
   users ||--o{ app_feedback : "user_id"
   users ||..o{ assistant_support_sessions : "user_id"
+  chat_lists ||--o{ chat_list_rooms : "list_id"
+  chat_rooms ||--o{ chat_list_rooms : "room_id"
+  users ||--o{ chat_lists : "user_id"
   chat_messages ||--o{ chat_message_hidden : "message_id"
   users ||--o{ chat_message_hidden : "user_id"
   chat_messages ||--o{ chat_message_reactions : "message_id"
@@ -332,6 +358,7 @@ erDiagram
   users ||..o{ mail_contacts : "user_id"
   users ||..o{ mail_events : "user_id"
   users ||..o{ mail_filters : "user_id"
+  users ||..o{ mail_folders : "user_id"
   users ||..o{ mail_messages : "user_id"
   users ||..o{ mail_personal_groups : "user_id"
   users ||..o{ mail_settings : "user_id"

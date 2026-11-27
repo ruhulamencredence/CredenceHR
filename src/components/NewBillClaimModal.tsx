@@ -300,8 +300,11 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
 
   const hasRefs = Object.keys(selectedRefs).length > 0;
   const refsTotal = Math.round(Object.values(selectedRefs).reduce((sum, v) => sum + (Number(v) || 0), 0) * 100) / 100;
-  // The Transport bill's amount comes from its check-in/outs when any are picked.
-  const refsDriveBill = (b: BillDraft) => hasRefs && transportBill?.key === b.key;
+  // Bill Claim Policy "Transport bills come only from Check In/Out": the
+  // Transport bill's amount is always its check-in/outs (never typed in), and a
+  // claim has one Transport bill. Off: only when some are picked.
+  const transportFromRefs = !!policy?.values.transport_from_check_in_out;
+  const refsDriveBill = (b: BillDraft) => (hasRefs || transportFromRefs) && transportBill?.key === b.key;
   const billAmount = (b: BillDraft) => (refsDriveBill(b) ? refsTotal : Number(b.amount) || 0);
   const billsTotal = bills.reduce((sum, b) => sum + billAmount(b), 0);
   const claimTotal = billsTotal;
@@ -360,7 +363,11 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           ? `Bill ${n}: ${formatDate(b.bill_date)} is already in another claim of yours — one date goes in one claim. Open that claim and edit it instead.`
           : `Bill ${n}: ${formatDate(b.bill_date)} was already claimed on an earlier day.`;
       const amt = billAmount(b);
+      if (transportFromRefs && isTransportBill(b) && transportBill?.key !== b.key) {
+        return `Bill ${n}: only one Transport bill per claim — tick all your check-in/outs on Bill ${bills.findIndex((x) => x.key === transportBill?.key) + 1}.`;
+      }
       if (refsDriveBill(b)) {
+        if (transportFromRefs && !hasRefs) return `Bill ${n}: a Transport bill needs its Check In/Out — tick the check-in/out(s) this travel was for.`;
         if (!(amt > 0)) return `Bill ${n}: enter the amount of each referenced check-in/out.`;
       } else if (!b.amount || !Number.isFinite(amt) || amt <= 0) return `Bill ${n}: enter an amount greater than 0.`;
       const cat = categories.find((c) => String(c.id) === b.category_id);
@@ -441,7 +448,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   return createPortal(
     <div
       data-kb-self=""
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+      className="liquid-glass-backdrop fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
         paddingBottom: keyboard.gap
@@ -449,11 +456,9 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           : 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
-      <div
-        className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col"
-        style={{ maxHeight: '100%' }}
-      >
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
+      <div className="max-w-lg w-full flex" style={{ maxHeight: '100%' }}>
+      <div className="liquid-glass liquid-glass-in rounded-[32px] w-full overflow-hidden flex flex-col">
+        <div className="px-5 pt-5 pb-3 flex items-center justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-slate-900">
               {editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Bill Claim'}
@@ -471,13 +476,14 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             type="button"
             onClick={close}
             disabled={submitting}
-            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-40"
+            aria-label="Close"
+            className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500 shrink-0 disabled:opacity-40"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto min-h-0" onFocusCapture={scrollFocusedFieldIntoView}>
+        <div className="px-5 pb-5 pt-1 space-y-4 overflow-y-auto min-h-0" onFocusCapture={scrollFocusedFieldIntoView}>
           {policyError && (
             <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -501,13 +507,16 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             </div>
           )}
 
-          <div className="flex items-center justify-between text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
             <span className="text-slate-500">
-              Claim Date: <span className="font-semibold text-slate-800">{formatDate(claimDate)}</span>
+              Claim Date: <span className="font-semibold text-slate-800 whitespace-nowrap">{formatDate(claimDate)}</span>
             </span>
             {policy && (
-              <span className="inline-flex items-center gap-1 text-slate-400" title="Set by Bill Claim Policy">
-                <ShieldCheck className="w-3.5 h-3.5" /> Dates allowed: {formatDate(minDate)} – {formatDate(maxDate)}
+              <span className="inline-flex flex-wrap items-center gap-x-1 text-slate-400" title="Set by Bill Claim Policy">
+                <ShieldCheck className="w-3.5 h-3.5" /> Dates allowed:{' '}
+                <span className="whitespace-nowrap">
+                  {formatDate(minDate)} – {formatDate(maxDate)}
+                </span>
               </span>
             )}
           </div>
@@ -604,11 +613,14 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                         className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                       >
                         <option value="">Category…</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
+                        {categories
+                          // One Transport bill per claim (policy): no second one.
+                          .filter((c) => !(transportFromRefs && isTransportName(c.name) && transportBill && transportBill.key !== b.key))
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
                       </SearchSelect>
                       <input
                         type="date"
@@ -654,7 +666,11 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                         {policy?.values.one_claim_per_date ? 'This date is already in another claim — edit that claim.' : 'This date was already claimed on an earlier day.'}
                       </p>
                     )}
-                    {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = its check-in/outs below ({money(refsTotal)}).</p>}
+                    {refsDriveBill(b) && (
+                      <p className="text-[10px] text-blue-600">
+                        Amount = its check-in/outs below ({money(refsTotal)}){transportFromRefs ? ' — it can\'t be typed in.' : '.'}
+                      </p>
+                    )}
                     {transportBill && transportBill.key !== b.key && isTransportBill(b) && (
                       <p className="text-[10px] text-slate-500">Check In/Out go with the first Transport bill (Bill {bills.findIndex((x) => x.key === transportBill.key) + 1}).</p>
                     )}
@@ -663,7 +679,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                       // so a bill added after it can't come between them.
                       <div className="mt-1 rounded-lg border border-blue-200 bg-white p-2">
                         <div className="text-[11px] font-semibold text-blue-700 mb-1 flex items-center gap-1.5">
-                          <Route className="w-3.5 h-3.5" /> Check In/Out for Bill {i + 1} (optional)
+                          <Route className="w-3.5 h-3.5" /> Check In/Out for Bill {i + 1} {transportFromRefs ? '(required)' : '(optional)'}
                         </div>
                         {loadingClaims ? (
                           <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
@@ -672,6 +688,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                         ) : claimsInRange.length === 0 ? (
                           <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
                             No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
+                            {transportFromRefs && ' A Transport bill comes from your Check In/Out — check in and out for the trip first, or choose another category.'}
                           </p>
                         ) : (
                           <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
@@ -723,10 +740,12 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                       </div>
                     )}
 
-                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
+                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null || cat.receipt_required) && (
                       <p className="text-[10px] text-slate-400">
+                        {cat.limits_for ? `For ${cat.limits_for}: ` : ''}
                         {[
                           cat.max_per_bill != null ? `Up to ${money(cat.max_per_bill)} per bill` : '',
+                          cat.daily_limit != null ? `${money(cat.daily_limit)} a day` : '',
                           cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
                           cat.receipt_required ? 'receipt needed' : ''
                         ]
@@ -805,12 +824,12 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           )}
         </div>
 
-        <div className="p-5 border-t border-slate-200 flex justify-end gap-3 shrink-0">
+        <div className="px-5 pb-5 pt-3 flex justify-end gap-3 shrink-0">
           <button
             type="button"
             onClick={close}
             disabled={submitting}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
+            className="liquid-glass-chip rounded-full px-4 py-2.5 disabled:opacity-50 text-slate-700 text-sm font-semibold"
           >
             Cancel
           </button>
@@ -818,12 +837,13 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             type="button"
             onClick={handleSubmit}
             disabled={submitting || !policy || !!todayClaimId}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
+            className="liquid-glass-button rounded-full inline-flex items-center gap-1.5 px-5 py-2.5 disabled:opacity-50 font-semibold text-sm"
           >
             {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}
             {editClaim ? (editClaim.edit_mode === 'pending' ? 'Save Changes' : 'Resubmit') : 'Submit Claim'}
           </button>
         </div>
+      </div>
       </div>
     </div>,
     document.body

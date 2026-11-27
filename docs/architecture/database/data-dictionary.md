@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৬৩টি টেবিল, ২৮৫৩টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৭টি টেবিল, ৩০১৪টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -73,6 +73,22 @@ Unique: `uq_assistant_learned_q`(question)
 | `closed_at` | datetime | হ্যাঁ |  | |
 | `closed_by` | int(11) | হ্যাঁ |  | |
 | `last_message_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `chat_list_rooms`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `list_id` | int(11) | না | PK  | FK → `chat_lists.id` |
+| `room_id` | int(11) | না | PK  | FK → `chat_rooms.id` |
+
+### `chat_lists`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | FK → `users.id` |
+| `name` | varchar(40) | না |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `chat_message_hidden`
 
@@ -155,6 +171,7 @@ Unique: `uniq_chat_room_member`(room_id,user_id)
 | `user_id` | int(11) | না | PK  | FK → `users.id` |
 | `last_read_message_id` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `delivered_up_to` | int(11) | হ্যাঁ |  | |
 
 ### `chat_room_settings`
 
@@ -333,6 +350,22 @@ Unique: `uq_mail_blob_sha`(sha256)
 | `uidvalidity` | bigint(20) | না | default 0 | |
 | `last_uid` | bigint(20) | না | default 0 | |
 
+### `mail_folders`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `account_id` | int(11) | না |  | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `path` | varchar(500) | না |  | |
+| `name` | varchar(255) | না |  | |
+| `parent_id` | int(11) | হ্যাঁ |  | |
+| `selectable` | tinyint(1) | না | default 1 | |
+| `system_role` | varchar(20) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+Unique: `uq_mail_folder_path`(account_id,path)
+
 ### `mail_groups`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -386,6 +419,7 @@ Unique: `uq_mail_group_email`(email)
 | `scheduled_at` | datetime | হ্যাঁ |  | |
 | `send_error` | varchar(500) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `via_server` | tinyint(1) | না | default 0 | |
 | `via_internal` | tinyint(1) | না | default 0 | |
 | `flags_changed_at` | datetime | হ্যাঁ |  | |
 
@@ -415,6 +449,7 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `timezone` | varchar(80) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 | `picture_senders_json` | text | হ্যাঁ |  | |
+| `send_via_server` | tinyint(1) | না | default 0 | |
 
 ### `mail_signature_images`
 
@@ -436,6 +471,10 @@ Unique: `uq_mail_uid`(account_id,folder_role,uid)
 | `internal_domains` | varchar(1000) | না | default 'credencehousinglimited.com' | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `unconnected_route` | varchar(10) | না | default 'server' | |
+| `sig_website` | varchar(300) | হ্যাঁ |  | |
+| `sig_facebook` | varchar(300) | হ্যাঁ |  | |
+| `sig_linkedin` | varchar(300) | হ্যাঁ |  | |
 
 ### `mail_tasks`
 
@@ -786,7 +825,7 @@ HR action (পদোন্নতি, বদলি, increment…), চিঠি �
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
 | `ref_no` | varchar(100) | না |  | |
-| `employee_id` | int(11) | না |  | FK → `all_employees.id` |
+| `employee_id` | int(11) | হ্যাঁ |  | FK → `all_employees.id` |
 | `letter_type` | varchar(40) | না |  | |
 | `template_id` | int(11) | হ্যাঁ |  | |
 | `subject` | varchar(255) | না |  | |
@@ -803,6 +842,7 @@ HR action (পদোন্নতি, বদলি, increment…), চিঠি �
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `emailed_to` | varchar(255) | হ্যাঁ |  | |
 | `emailed_at` | timestamp | হ্যাঁ |  | |
+| `onboarding_id` | int(11) | হ্যাঁ |  | |
 
 ### `hr_onboarding_items`
 
@@ -1200,6 +1240,7 @@ Unique: `uniq_guard_need`(post_id,shift_id)
 | `is_active` | tinyint(1) | না | default 1 | |
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+| `project_id` | int(11) | হ্যাঁ |  | logical → `projects` |
 
 ### `guard_relief`
 
@@ -1457,6 +1498,9 @@ Unique: `unique_user_department`(user_id,department)
 | `mode` | varchar(10) | হ্যাঁ |  | |
 | `battery_pct` | int(11) | হ্যাঁ |  | |
 | `reported_at` | timestamp | না | default current_timestamp() | |
+| `app_build` | int(11) | হ্যাঁ |  | |
+| `app_version` | varchar(40) | হ্যাঁ |  | |
+| `app_reported_at` | datetime | হ্যাঁ |  | |
 
 ### `tracking_employee_access`
 
@@ -1488,6 +1532,7 @@ Unique: `unique_user_employee`(user_id,employee_pk)
 |---|---|---|---|---|
 | `id` | int(11) | না | PK  | |
 | `buffer_minutes` | int(11) | না | default 30 | |
+| `after_minutes` | int(11) | না | default 0 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
 
@@ -1526,6 +1571,8 @@ Unique: `uq_user_attendance_project`(user_id,project_id)
 | `reminder_minutes` | int(11) | না | default 60 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `ride_gap_minutes` | int(11) | না | default 30 | |
+| `start_early_minutes` | int(11) | না | default 30 | |
 
 ### `zk_attendance_logs`
 
@@ -1675,6 +1722,37 @@ Unique: `app_id`(app_id)
 | `new_accounts_app` | tinyint(1) | না | default 1 | |
 | `updated_by` | int(11) | হ্যাঁ |  | |
 | `updated_at` | datetime | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+### `data_cleanup_batches`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_id` | int(11) | হ্যাঁ |  | কোম্পানি-মালিকানা (code-level scope) |
+| `kind` | varchar(20) | না |  | |
+| `mode` | varchar(20) | হ্যাঁ |  | |
+| `count` | int(11) | না | default 0 | |
+| `reason` | text | না |  | |
+| `filters_json` | text | হ্যাঁ |  | |
+| `actor_id` | int(11) | না |  | |
+| `actor_name` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | timestamp | না | default current_timestamp() | |
+| `restored_at` | datetime | হ্যাঁ |  | |
+| `restored_by` | int(11) | হ্যাঁ |  | |
+| `restored_count` | int(11) | হ্যাঁ |  | |
+
+### `data_cleanup_trash`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `batch_id` | int(11) | না |  | |
+| `kind` | varchar(20) | না |  | |
+| `record_id` | varchar(40) | না |  | |
+| `label` | varchar(500) | হ্যাঁ |  | |
+| `rows_json` | longtext | না |  | |
+| `restored` | tinyint(1) | না | default 0 | |
+| `created_at` | timestamp | না | default current_timestamp() | |
 
 ### `employee_template_assignments`
 
@@ -1868,6 +1946,20 @@ Unique: `token_hash`(token_hash)
 | `detail` | text | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
+### `user_access_log`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `employee_id` | int(11) | হ্যাঁ |  | logical → `all_employees` |
+| `actor_id` | int(11) | হ্যাঁ |  | |
+| `actor_name` | varchar(150) | হ্যাঁ |  | |
+| `source` | varchar(40) | না | default 'users' | |
+| `action` | varchar(120) | না |  | |
+| `changes_json` | text | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
 ### `user_app_access`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -1918,6 +2010,22 @@ Unique: `unique_user_company`(user_id,company_id)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `uniq_user_device`(user_id,device_id)
+
+### `user_merge_log`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `from_user_id` | int(11) | না |  | |
+| `from_name` | varchar(255) | হ্যাঁ |  | |
+| `from_login` | varchar(255) | হ্যাঁ |  | |
+| `to_user_id` | int(11) | না |  | |
+| `to_name` | varchar(255) | হ্যাঁ |  | |
+| `kept_access` | varchar(10) | না |  | |
+| `kept_password` | varchar(10) | না |  | |
+| `moved_json` | mediumtext | হ্যাঁ |  | |
+| `merged_by` | int(11) | হ্যাঁ |  | |
+| `merged_at` | datetime | হ্যাঁ | default current_timestamp() | |
 
 ### `user_profile_details`
 
@@ -2054,6 +2162,7 @@ Unique: `uniq_session_key`(session_key)
 | `can_update_check_out` | tinyint(1) | না | default 0 | |
 | `attendance_projects_by_branch` | tinyint(1) | না | default 0 | |
 | `can_request_items` | tinyint(1) | না | default 0 | |
+| `non_employee_reason` | varchar(255) | হ্যাঁ |  | |
 
 Unique: `email`(email), `username`(username)
 
@@ -2129,8 +2238,9 @@ Unique: `uniq_web_push_endpoint`(endpoint)
 | `project_id` | int(11) | না |  | logical → `projects` |
 | `user_id` | int(11) | না |  | logical → `users` |
 | `submitted_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `share_key` | varchar(40) | না | default '' | |
 
-Unique: `unique_budget_project`(budget_id,project_id)
+Unique: `unique_budget_project_share`(budget_id,project_id,share_key)
 
 ### `budget_submissions`
 
@@ -2235,6 +2345,10 @@ Unique: `uniq_dmci_material`(group_id,material_key)
 | `category_sub3` | varchar(150) | হ্যাঁ |  | |
 | `category_sector` | varchar(100) | হ্যাঁ |  | |
 | `rate_calculated_at` | timestamp | হ্যাঁ |  | |
+| `closed_short_qty` | decimal(14,3) | না | default 0.000 | |
+| `closed_short_at` | datetime | হ্যাঁ |  | |
+| `closed_short_by` | int(11) | হ্যাঁ |  | |
+| `closed_short_reason` | varchar(500) | হ্যাঁ |  | |
 | `md_status` | varchar(20) | না | default 'pending' | |
 | `md_target_qty` | decimal(14,2) | হ্যাঁ |  | |
 | `md_dispatched_qty` | decimal(14,2) | না | default 0.00 | |
@@ -2245,6 +2359,19 @@ Unique: `uniq_dmci_material`(group_id,material_key)
 | `md_queued_by` | int(11) | হ্যাঁ |  | |
 | `md_confirmed_at` | timestamp | হ্যাঁ |  | |
 | `md_confirmed_by` | int(11) | হ্যাঁ |  | |
+| `for_project_id` | int(11) | হ্যাঁ |  | |
+
+### `entry_edit_attempts`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `entry_id` | int(11) | না |  | logical → `entries` |
+| `user_id` | int(11) | হ্যাঁ |  | logical → `users` |
+| `fields_json` | text | হ্যাঁ |  | |
+| `reason` | varchar(500) | হ্যাঁ |  | |
+| `status_code` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `entry_edit_history`
 
@@ -2471,11 +2598,13 @@ Movement claim, Conveyance Bill Claim (bill ও লাইন), অনুমো�
 | `is_active` | tinyint(1) | না | default 1 | |
 | `sort_order` | int(11) | না | default 0 | |
 | `max_per_bill` | decimal(12,2) | হ্যাঁ |  | |
+| `daily_limit` | decimal(12,2) | হ্যাঁ |  | |
 | `monthly_limit` | decimal(12,2) | হ্যাঁ |  | |
 | `receipt_required` | tinyint(1) | না | default 0 | |
 | `deleted_at` | timestamp | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `designation_limits` | text | হ্যাঁ |  | |
 
 ### `bill_claim_department_access`
 
@@ -2560,6 +2689,30 @@ Unique: `uniq_bcp_company_key`(company_id,policy_key)
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 Unique: `claim_id`(claim_id)
+
+### `bill_claim_rule_reads`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | bigint(20) | না | PK auto_increment | |
+| `company_ref` | int(11) | না |  | |
+| `user_id` | int(11) | না |  | logical → `users` |
+| `version_id` | int(11) | না |  | |
+| `action` | varchar(16) | না |  | |
+| `device` | varchar(60) | হ্যাঁ |  | |
+| `ip` | varchar(64) | হ্যাঁ |  | |
+| `created_at` | datetime | না |  | |
+
+### `bill_claim_rule_versions`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `company_ref` | int(11) | না |  | |
+| `rules_hash` | char(64) | না |  | |
+| `changed_by` | varchar(150) | হ্যাঁ |  | |
+| `summary` | varchar(255) | হ্যাঁ |  | |
+| `created_at` | datetime | না |  | |
 
 ### `bill_claims`
 
@@ -2820,6 +2973,7 @@ Unique: `uniq_mobile_sim_number`(company_id,phone_number)
 | `branch_id` | int(11) | হ্যাঁ |  | FK → `branches.id` |
 | `joining_date` | date | হ্যাঁ |  | |
 | `gets_ot` | tinyint(1) | না | default 0 | |
+| `designation_id` | int(11) | হ্যাঁ |  | logical → `designations` |
 
 Unique: `zk_device_pin`(zk_device_pin)
 
@@ -2838,6 +2992,7 @@ Unique: `zk_device_pin`(zk_device_pin)
 | `project_id` | int(11) | হ্যাঁ | UNI  | FK → `projects.id` |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `branch_type` | enum('head_office','project_site') | না | default 'project_site' | |
+| `is_archived` | tinyint(1) | না | default 0 | |
 
 Unique: `unique_branch_project`(project_id), `unique_company_branch_name`(company_id,branch_name)
 
@@ -2878,6 +3033,24 @@ Unique: `unique_company_code`(group_id,short_code)
 
 Unique: `unique_workspace_code`(workspace_code)
 
+### `department_team_auto`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `team_id` | int(11) | না |  | FK → `department_teams.id` |
+| `branch` | varchar(150) | না |  | |
+| `department_id` | int(11) | হ্যাঁ |  | logical → `departments` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
+### `department_team_auto_done`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `rule_id` | int(11) | না | PK  | |
+| `employee_id` | int(11) | না | PK  | logical → `all_employees` |
+| `created_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
 ### `department_team_members`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -2916,6 +3089,25 @@ Unique: `uniq_team_member`(employee_id)
 | `head_user_id` | int(11) | হ্যাঁ |  | |
 
 Unique: `unique_company_name`(company_id,name)
+
+### `designations`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `code` | varchar(20) | না | UNI  | |
+| `code_no` | int(11) | না |  | |
+| `name` | varchar(150) | না |  | |
+| `name_key` | varchar(150) | না |  | |
+| `level` | int(11) | হ্যাঁ |  | |
+| `is_active` | tinyint(1) | না | default 1 | |
+| `is_deleted` | tinyint(1) | না | default 0 | |
+| `merged_into` | int(11) | হ্যাঁ |  | |
+| `created_by` | int(11) | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+
+Unique: `uq_designation_code`(code)
 
 ### `employee_advances`
 
@@ -3218,6 +3410,19 @@ Unique: `employee_id`(employee_id)
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
+### `project_merge_log`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `from_project_id` | int(11) | না |  | |
+| `from_name` | varchar(255) | হ্যাঁ |  | |
+| `into_project_id` | int(11) | না |  | |
+| `into_name` | varchar(255) | হ্যাঁ |  | |
+| `moved_json` | mediumtext | হ্যাঁ |  | |
+| `merged_by` | int(11) | হ্যাঁ |  | |
+| `merged_at` | datetime | হ্যাঁ | default current_timestamp() | |
+
 ### `projects`
 
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
@@ -3231,6 +3436,8 @@ Unique: `employee_id`(employee_id)
 | `location_label` | varchar(255) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `location_radius` | int(11) | হ্যাঁ |  | |
+| `is_archived` | tinyint(1) | না | default 0 | |
+| `entry_scope` | varchar(10) | না | default 'team' | |
 
 Unique: `unique_company_project_name`(company_id,project_name)
 
@@ -3387,6 +3594,8 @@ Unique: `unique_user_category`(user_id,category_id)
 | `carry_forward_max` | decimal(5,1) | হ্যাঁ |  | |
 | `accrual_from` | char(7) | হ্যাঁ |  | |
 | `count_off_days` | tinyint(1) | না | default 1 | |
+| `probation_mode` | varchar(10) | না | default 'full' | |
+| `joiner_prorata` | tinyint(1) | না | default 0 | |
 
 Unique: `ucompany_uniq_leave_category_policy`(company_id,category_key)
 
@@ -3591,7 +3800,7 @@ Unique: `unique_driver_employee`(employee_id)
 | `start_time` | varchar(10) | না |  | |
 | `estimated_duration_hours` | decimal(5,2) | না |  | |
 | `expected_return_at` | datetime | হ্যাঁ |  | |
-| `status` | enum('pending','approved','assigned','ongoing','rejected','cancelled','completed','expired') | না | default 'pending' | |
+| `status` | enum('pending','approved','assigned','ongoing','rejected','cancelled','completed','expired','dropped') | না | default 'pending' | |
 | `decided_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `decided_at` | timestamp | হ্যাঁ |  | |
 | `rejection_reason` | text | হ্যাঁ |  | |
@@ -3615,6 +3824,32 @@ Unique: `unique_driver_employee`(employee_id)
 | `start_reminded_at` | datetime | হ্যাঁ |  | |
 | `assigned_by` | int(11) | হ্যাঁ |  | |
 | `started_by` | int(11) | হ্যাঁ |  | |
+| `trip_type` | varchar(16) | না | default 'round' | |
+| `trip_type_asked` | varchar(16) | হ্যাঁ |  | |
+| `trip_changed_by` | int(11) | হ্যাঁ |  | |
+| `trip_changed_at` | datetime | হ্যাঁ |  | |
+| `pickup_mode` | varchar(8) | হ্যাঁ |  | |
+| `pickup_at` | datetime | হ্যাঁ |  | |
+| `pickup_from` | varchar(255) | হ্যাঁ |  | |
+| `return_to` | varchar(255) | হ্যাঁ |  | |
+| `leg` | varchar(16) | হ্যাঁ |  | |
+| `dropped_at` | datetime | হ্যাঁ |  | |
+| `drop_vehicle_id` | int(11) | হ্যাঁ |  | |
+| `drop_driver_user_id` | int(11) | হ্যাঁ |  | |
+| `drop_driver_name` | varchar(150) | হ্যাঁ |  | |
+| `released_mid_ride` | tinyint(1) | না | default 0 | |
+| `release_reason` | varchar(500) | হ্যাঁ |  | |
+| `released_by` | int(11) | হ্যাঁ |  | |
+| `waited_minutes` | int(11) | হ্যাঁ |  | |
+| `pickup_called_at` | datetime | হ্যাঁ |  | |
+| `pickup_assigned_by` | int(11) | হ্যাঁ |  | |
+| `pickup_assigned_at` | datetime | হ্যাঁ |  | |
+| `pickup_started_at` | datetime | হ্যাঁ |  | |
+| `picked_up_at` | datetime | হ্যাঁ |  | |
+| `pickup_cancelled_at` | datetime | হ্যাঁ |  | |
+| `pickup_reminded_at` | datetime | হ্যাঁ |  | |
+| `pickup_start_reminded_at` | datetime | হ্যাঁ |  | |
+| `early_start_reason` | varchar(255) | হ্যাঁ |  | |
 | `destination_lat` | decimal(10,7) | হ্যাঁ |  | |
 | `destination_lng` | decimal(10,7) | হ্যাঁ |  | |
 | `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |

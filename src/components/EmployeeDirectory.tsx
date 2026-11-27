@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useElementHeight } from '../lib/useElementHeight';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { onDirectorySearch, takeDirectorySearch } from '../lib/directorySearch';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -461,6 +463,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
   // search bar has scrolled out from under the sticky header. Navbar reads
   // both through the useHeaderSearchState() subscription in headerSearch.ts.
   const searchBarRef = useRef<HTMLDivElement>(null);
+  // Desktop: the sticky search bar's height, so the list's column titles
+  // stick right under it (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight();
   useEffect(() => {
     // We stay mounted (just hidden) while some other mobile section is
     // showing, so only dock our search box into the header while we're
@@ -469,7 +474,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
     registerHeaderSearch({
       value: search,
       onChange: setSearch,
-      placeholder: 'Search by name or Employee ID…'
+      placeholder: 'Search by name, ID or branch / project…'
     });
     return () => unregisterHeaderSearch();
   }, [isActive, search]);
@@ -498,7 +503,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
         ]);
         if (!empRes.ok) throw new Error((await empRes.json()).error || 'Failed to load the Employee Directory');
         // Only people still working here — someone who has left isn't listed.
-        setEmployees(((await empRes.json()) as any[]).filter((e) => e.is_active));
+        // Senior designations first (the Designations page's level), then by name.
+        const lvl = (e: any) => (e.designation_level == null ? 9999 : Number(e.designation_level));
+        setEmployees(
+          ((await empRes.json()) as any[])
+            .filter((e) => e.is_active)
+            .sort((a, b) => lvl(a) - lvl(b) || String(a.name || '').localeCompare(String(b.name || '')))
+        );
         if (deptRes.ok) setDepartments(await deptRes.json());
       } catch (err: any) {
         setError(err.message || 'Failed to load the Employee Directory');
@@ -534,7 +545,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
   const matching = useMemo(() => {
     return employees.filter((e) => {
       if (companyFilter && e.company_code !== companyFilter) return false;
-      if (searchQ && !e.name.toLowerCase().includes(searchQ) && !(e.employee_id || '').toLowerCase().includes(searchQ)) return false;
+      // Name, Employee ID, or the Branch / Project (and Division / Unit) they
+      // work at — typing a project's name lists its people.
+      if (searchQ && ![e.name, e.employee_id, e.branch, e.division, e.unit].some((v) => String(v || '').toLowerCase().includes(searchQ))) return false;
       if (designationFilter && e.designation !== designationFilter) return false;
       return true;
     });
@@ -606,6 +619,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
 
   const activeCount = employees.filter((e) => e.is_active).length;
 
+  // Opened from the Dashboard search with a person picked: search for them,
+  // with the other filters cleared so they show (lib/directorySearch.ts).
+  useEffect(() => {
+    const show = (text: string) => {
+      setSearch(text);
+      setDepartmentFilter('');
+      setDesignationFilter('');
+      setCompanyFilter('');
+    };
+    const waiting = takeDirectorySearch();
+    if (waiting) show(waiting);
+    return onDirectorySearch(show);
+  }, []);
+
   const clearFilters = () => {
     setSearch('');
     setDepartmentFilter('');
@@ -623,7 +650,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
           </div>
         )}
 
-        <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
+        {/* overflow-clip (not hidden): still trims to the rounded corners, but
+            isn't a scroll box, so the search bar below can stick to the page. */}
+        <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-clip">
           {/* Header */}
           <div className="p-6 border-b border-slate-200 hidden sm:flex sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-start gap-3">
@@ -664,14 +693,16 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
           {/* Search & Control Bar */}
           {/* Phone: a white pill search box and a row of department chips,
               in the same white-card look as the employee cards below. */}
-          <div className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
+          {/* Desktop: stays under the header while the list scrolls (phones dock
+              the search box into the header instead — headerSearch.ts). */}
+          <div ref={barRef} className="px-1 pt-1 pb-3 sm:p-6 sm:border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3 sm:sticky sm:top-16 sm:z-20 sm:bg-white">
             <div className="relative flex-1" ref={searchBarRef}>
               <Search className="w-4 h-4 text-slate-400 absolute left-4 sm:left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name or Employee ID…"
+                placeholder="Search by name, Employee ID or branch / project…"
                 className="w-full pl-10 sm:pl-9 pr-9 py-3 sm:py-2.5 bg-white sm:bg-slate-50 border-0 sm:border sm:border-slate-200 rounded-full sm:rounded-xl text-sm text-slate-900 shadow-[0_8px_24px_-10px_rgba(15,23,42,0.25)] sm:shadow-none focus:ring-2 focus:ring-[color:var(--g-accent)] sm:focus:ring-blue-600 focus:outline-none"
               />
               {search && (
@@ -977,15 +1008,23 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, use
                         </a>
                       )}
                       {!emp.email && !emp.phone && <p className="text-slate-400">No contact info on file</p>}
+                      {/* Where they work — the Branch / Project the search also looks at. */}
+                      {emp.branch && (
+                        <p className="flex items-center gap-1.5 truncate" title={officeLocationOf(emp) || emp.branch}>
+                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> <span className="truncate">{emp.branch}</span>
+                        </p>
+                      )}
                     </div>
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="overflow-x-auto xl:overflow-x-visible -mx-4 sm:mx-0">
+                {/* Wide screens: no side-scroll box, so the column titles stick to
+                    the page right under the sticky search bar (barH). */}
                 <table className="w-full text-left border-collapse min-w-[720px]">
-                  <thead>
-                    <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                  <thead className="sticky z-10 bg-white shadow-[inset_0_-1px_0_#e2e8f0]" style={{ top: 64 + barH }}>
+                    <tr className="text-[11px] uppercase tracking-wider text-slate-500">
                       <th className="px-3 py-2 font-semibold">Name &amp; ID</th>
                       <th className="px-3 py-2 font-semibold">Designation</th>
                       {multiCompany && <th className="px-3 py-2 font-semibold">Company</th>}

@@ -19,8 +19,10 @@
  *
  * Smooth on slow phones: the app itself is starting underneath at the same
  * moment and keeps the phone's main thread busy, so every moving part only
- * animates transform / opacity (and a small blur), which the GPU runs on its
- * own. Nothing animates width, left/top or a clip-path, which would have to
+ * animates transform / opacity, each on its own GPU layer (will-change), which
+ * the GPU runs by itself. No blur and no shadow over a moving part: those
+ * are redrawn on the main thread every frame. The CREDENCE shadow is drawn
+ * into each letter's own layer once instead of over the whole word. Nothing animates width, left/top or a clip-path, which would have to
  * be redrawn on the busy main thread every frame and stutter. The smile is a
  * picture drawn once (shadow included) and stretched open.
  * The timeline also waits (at most PRELOAD_MAX_MS) until the pictures and
@@ -29,6 +31,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { markBootIntroDone as showApp, markBootIntroPlaying } from '../lib/bootIntro';
 // Inlined (data URL), so the first frame is there at once, like index.html's.
 import tileImg from '../assets/boot/app-icon-336.webp?inline';
 import hrImg from '../assets/boot/hr.png';
@@ -46,23 +49,31 @@ import signatureFont from '../assets/boot/manchester-signature.woff';
 const LETTERS = [letter0, letter1, letter2, letter3, letter4, letter5, letter6, letter7];
 
 // Timeline, in ms from mount.
+// A little longer and softer than before, so each move eases in and out
+// instead of snapping; the dot still hands over to the fill exactly
+// (fill = dot + dotDur).
 const T = {
-  tileOut: 150, tileOutDur: 380,
-  letters: 420, letterDur: 620, letterStagger: 40,
-  wedge: 1000, wedgeDur: 480,
-  track: 1150, trackDur: 250,
-  bar: 1200, barDur: 2300,
-  dot: 1350, dotDur: 600,
-  fill: 1950, fillDur: 750,
-  hr: 2350, hrDur: 650,
-  tag: 2700, tagDur: 700,
-  exit: 3700, exitDur: 450,
+  tileOut: 150, tileOutDur: 460,
+  letters: 430, letterDur: 760, letterStagger: 50,
+  wedge: 1060, wedgeDur: 560,
+  track: 1180, trackDur: 300,
+  bar: 1220, barDur: 2450,
+  dot: 1400, dotDur: 680,
+  fill: 2080, fillDur: 860,
+  hr: 2480, hrDur: 760,
+  tag: 2850, tagDur: 820,
+  exit: 3900, exitDur: 520,
 };
 const DONE_MS = T.exit + T.exitDur;
 // Longest the splash frame is held while the pictures / font load.
 const PRELOAD_MAX_MS = 1500;
+// Longest it then waits for the app's first render to settle.
+const IDLE_MAX_MS = 350;
 
-const EASE_OUT = 'cubic-bezier(.22,1,.36,1)';
+// Cubic ease-out: starts gently enough not to jump, lands softly.
+const EASE_OUT = 'cubic-bezier(.33,1,.68,1)';
+// CREDENCE shadow, drawn into each letter's own layer (see header).
+const SHADOW = 'drop-shadow(0 6px 10px rgba(150,50,0,0.3))';
 const EASE_IN_OUT = 'cubic-bezier(.45,0,.55,1)';
 
 function anim(name: string, dur: number, delay: number, ease = EASE_OUT) {
@@ -95,8 +106,14 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
     const settled = Promise.all(waits.map((w) => w.catch(() => undefined)));
     const capped = new Promise((r) => setTimeout(r, PRELOAD_MAX_MS));
     void Promise.race([settled, capped]).then(() => {
-      // Two frames, so the first animated frame isn't the one React just built.
-      requestAnimationFrame(() => requestAnimationFrame(() => alive && setGo(true)));
+      // Wait for the first quiet moment (the app's own first render underneath
+      // is the heaviest work of the start; at most IDLE_MAX_MS), then two
+      // frames, so the first animated frame isn't the one React just built
+      // and the opening moves don't drop frames.
+      const start = () => requestAnimationFrame(() => requestAnimationFrame(() => alive && setGo(true)));
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o: { timeout: number }) => number }).requestIdleCallback;
+      if (ric) ric(start, { timeout: IDLE_MAX_MS });
+      else setTimeout(start, 60);
     });
     return () => {
       alive = false;
@@ -106,8 +123,25 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (!go) return;
     const finish = setTimeout(onDone, DONE_MS);
-    return () => clearTimeout(finish);
+    // The app shows again as the fade-out starts, so it is revealed as before.
+    const reveal = setTimeout(showApp, T.exit);
+    return () => {
+      clearTimeout(finish);
+      clearTimeout(reveal);
+    };
   }, [go, onDone]);
+
+  // The app underneath is hidden (html[data-boot-intro], index.css) while the
+  // intro covers it: its own moving parts (the sign-in picture, page
+  // animations) would otherwise be redrawn every frame behind the intro and
+  // take the frames the intro needs.
+  useEffect(() => {
+    markBootIntroPlaying();
+    return showApp;
+  }, []);
+  useEffect(() => {
+    if (leaving) showApp();
+  }, [leaving]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -167,8 +201,8 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
       dot,
       keyframes: `
 @font-face{font-family:'CredenceSignature';src:url(${signatureFont}) format('woff');font-display:block}
-@keyframes chrTileOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.82)}}
-@keyframes chrRise{from{transform:translateY(110%)}to{transform:translateY(0)}}
+@keyframes chrTileOut{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.86)}}
+@keyframes chrRise{from{transform:translate3d(0,140%,0)}to{transform:translate3d(0,0,0)}}
 @keyframes chrWedge{0%{opacity:0;transform:translate(-6px,-26px) rotate(-90deg) scale(.5)}62%{opacity:1;transform:translate(0,1px) rotate(6deg) scale(1.04);animation-timing-function:${EASE_IN_OUT}}100%{opacity:1;transform:none}}
 @keyframes chrFadeIn{from{opacity:0}to{opacity:1}}
 @keyframes chrFadeOut{from{opacity:1}to{opacity:0}}
@@ -176,8 +210,8 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
 @keyframes chrDot{0%{transform:translate(${W / 2}px,${low}px) scale(0);opacity:1;animation-timing-function:cubic-bezier(.34,1.4,.64,1)}25%{transform:translate(${W / 2 - dot / 2}px,${low - dot / 2}px) scale(1);opacity:1;animation-timing-function:cubic-bezier(.65,0,.35,1)}100%{transform:translate(0px,${lineTop}px) scale(${W / dot},${line / dot});opacity:1}}
 @keyframes chrCap{0%{transform:scaleY(${capStart});opacity:1;animation-timing-function:cubic-bezier(.4,0,.6,1)}30%{transform:scaleY(${capShallow});animation-timing-function:${EASE_OUT}}100%{transform:scaleY(1);opacity:1}}
 @keyframes chrBase{0%{transform:scaleY(${baseStart});opacity:1;animation-timing-function:cubic-bezier(.4,0,.6,1)}30%{transform:scaleY(1)}100%{transform:scaleY(1);opacity:1}}
-@keyframes chrSoft{from{opacity:0;transform:translateY(12px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
-@keyframes chrTag{from{opacity:0;transform:translateY(8px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+@keyframes chrSoft{from{opacity:0;transform:translate3d(0,12px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes chrTag{from{opacity:0;transform:translate3d(0,10px,0) scale(.985)}to{opacity:1;transform:translate3d(0,0,0) scale(1)}}
 `,
     };
   }, []);
@@ -186,12 +220,14 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
     <div
       onClick={() => setLeaving(true)} // let an impatient user tap through
       aria-hidden="true"
+      className="boot-intro"
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 9999,
         overflow: 'hidden',
         contain: 'strict',
+        willChange: 'opacity',
         background: 'linear-gradient(160deg, #ff9238 0%, #f47920 45%, #e2600e 100%)',
         animation: leaving ? 'chrFadeOut 300ms ease-out both' : anim('chrFadeOut', T.exitDur, T.exit, EASE_IN_OUT),
       }}
@@ -267,12 +303,12 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
         }}
       >
         {/* HR */}
-        <div style={{ position: 'absolute', left: 0, right: 0, top: 486, display: 'flex', justifyContent: 'center', opacity: 0, animation: anim('chrSoft', T.hrDur, T.hr, 'cubic-bezier(.37,0,.63,1)') }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 486, display: 'flex', justifyContent: 'center', opacity: 0, willChange: 'transform, opacity', animation: anim('chrSoft', T.hrDur, T.hr, 'cubic-bezier(.37,0,.63,1)') }}>
           <img src={hrImg} alt="" style={{ width: 104, height: 'auto', display: 'block' }} />
         </div>
 
         {/* Slogan lockup */}
-        <div style={{ position: 'absolute', left: 0, right: 0, top: 556, display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0, animation: anim('chrTag', T.tagDur, T.tag, 'cubic-bezier(.33,0,.2,1)') }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 556, display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0, willChange: 'transform, opacity', animation: anim('chrTag', T.tagDur, T.tag, 'cubic-bezier(.33,0,.2,1)') }}>
           <p style={{ margin: 0, fontFamily: 'Inter, system-ui, sans-serif', fontSize: 9.5, fontWeight: 700, letterSpacing: 5, paddingLeft: 5, color: '#c2510a', whiteSpace: 'nowrap' }}>
             OUR PEOPLE &nbsp;·&nbsp; OUR PRIDE
           </p>
@@ -282,34 +318,36 @@ export function BootIntroAnimation({ onDone }: { onDone: () => void }) {
         </div>
 
         {/* CREDENCE: letters rise from a hidden baseline, then the wedge flips on */}
-        <div style={{ position: 'absolute', left: 55, top: 305, width: 250, height: 50, filter: 'drop-shadow(0 6px 10px rgba(150,50,0,0.3))' }}>
-          <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: 55, top: 305, width: 250, height: 50 }}>
+          {/* clip box reaches 16px lower, so the letters' shadow isn't cut off;
+              the letters wait 70px down (140%), below it */}
+          <div style={{ position: 'absolute', left: -12, right: -12, top: 0, bottom: -16, overflow: 'hidden' }}>
             {LETTERS.map((src, i) => (
               <img
                 key={i}
                 src={src}
                 alt=""
-                style={{ position: 'absolute', inset: 0, width: 250, height: 50, display: 'block', transform: 'translateY(110%)', willChange: 'transform', animation: anim('chrRise', T.letterDur, T.letters + i * T.letterStagger) }}
+                style={{ position: 'absolute', left: 12, top: 0, width: 250, height: 50, display: 'block', filter: SHADOW, transform: 'translate3d(0,140%,0)', willChange: 'transform', animation: anim('chrRise', T.letterDur, T.letters + i * T.letterStagger) }}
               />
             ))}
           </div>
           <img
             src={wedgeImg}
             alt=""
-            style={{ position: 'absolute', inset: 0, width: 250, height: 50, display: 'block', opacity: 0, transformOrigin: '125px 18px', animation: anim('chrWedge', T.wedgeDur, T.wedge, 'cubic-bezier(.33,0,.2,1)') }}
+            style={{ position: 'absolute', inset: 0, width: 250, height: 50, display: 'block', opacity: 0, filter: SHADOW, transformOrigin: '125px 18px', willChange: 'transform, opacity', animation: anim('chrWedge', T.wedgeDur, T.wedge, 'cubic-bezier(.33,0,.2,1)') }}
           />
         </div>
 
         {/* Loading line, under CREDENCE */}
         <div style={{ position: 'absolute', top: 396, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
-          <div style={{ width: 120, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden', opacity: 0, animation: anim('chrFadeIn', T.trackDur, T.track, 'ease-out') }}>
+          <div style={{ width: 120, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.25)', overflow: 'hidden', opacity: 0, willChange: 'opacity', animation: anim('chrFadeIn', T.trackDur, T.track, 'ease-out') }}>
             <div style={{ height: 3, width: 120, borderRadius: 2, background: '#ffffff', transform: 'scaleX(0)', transformOrigin: '0 50%', willChange: 'transform', animation: anim('chrBar', T.barDur, T.bar, EASE_IN_OUT) }} />
           </div>
         </div>
 
         {/* The icon from the splash, centred; melts away first */}
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img src={tileImg} alt="" style={{ width: 112, height: 112, display: 'block', animation: anim('chrTileOut', T.tileOutDur, T.tileOut, EASE_IN_OUT) }} />
+          <img src={tileImg} alt="" style={{ width: 112, height: 112, display: 'block', willChange: 'transform, opacity', animation: anim('chrTileOut', T.tileOutDur, T.tileOut, EASE_IN_OUT) }} />
         </div>
       </div>
     </div>

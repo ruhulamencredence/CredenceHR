@@ -16,7 +16,7 @@ const SA = await login('admin@credence.test', 'AdminPass123');
 const day = (n) => new Date(Date.now() + n * 864e5).toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
 
 // ---- QA-01 Admin Dashboard parts follow the modules ----
-const mkAdmin = async (email, modules) => { const id = (await api(SA, 'POST', '/api/users', { name: email.split('@')[0], email, password: 'QaCheck#2026', role: 'admin' })).body.id; await api(SA, 'PUT', `/api/users/${id}/module-permissions`, { modules }); return login(email, 'QaCheck#2026'); };
+const mkAdmin = async (email, modules) => { const id = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: email.split('@')[0], email, password: 'QaCheck#2026', role: 'admin' })).body.id; await api(SA, 'PUT', `/api/users/${id}/module-permissions`, { modules }); return login(email, 'QaCheck#2026'); };
 const A0 = await mkAdmin('qa.none@credence.test', []);
 const AE = await mkAdmin('qa.emp@credence.test', ['employees']);
 const e = await api(SA, 'POST', '/api/employees', { name: 'Birthday Person', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', date_of_birth: `1990-${day(2).slice(5)}` });
@@ -41,9 +41,9 @@ T('QA-04', [d1, d2, l1, n1].every((r) => r.status >= 400 && r.status < 500), 'To
 // ---- Password rule: any password the person likes (company policy), not empty ----
 const simple = ['1234', '111111', 'password', 'a'];
 const created = [];
-for (const pw of simple) created.push((await api(SA, 'POST', '/api/users', { name: 'Simple', email: `simple.${created.length}@credence.test`, password: pw, role: 'user' })).status);
+for (const pw of simple) created.push((await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Simple', email: `simple.${created.length}@credence.test`, password: pw, role: 'user' })).status);
 T('PWD-01', created.every((s) => s >= 200 && s < 300), `Simple passwords are accepted when creating a user (${simple.join(', ')})`, created.join(','));
-const empty = await api(SA, 'POST', '/api/users', { name: 'Empty', email: 'empty.pw@credence.test', password: '', role: 'user' });
+const empty = await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'Empty', email: 'empty.pw@credence.test', password: '', role: 'user' });
 T('PWD-02', empty.status === 400, 'An empty password is refused', J(empty));
 const S1 = await login('simple.0@credence.test', '1234');
 T('PWD-03', !!S1, 'The user signs in with the simple password 1234');

@@ -1,6 +1,7 @@
 // Load .env before any other module: imports run before this file's own
 // code, so modules that read process.env when imported (WebSecurity,
 // MailRoutes, AiAssistantRoutes, companyScope…) otherwise saw it empty.
+import { validInFor } from "./OffsiteReconcile";
 import "dotenv/config";
 import express from "express";
 import path from "path";
@@ -20,10 +21,12 @@ import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./d
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
-import { registerUserManagementRoutes } from "./UserManagement";
+import { registerUserManagementRoutes, ensureUserExtraColumns } from "./UserManagement";
+import { ensureUserRecordsGuard } from "./UserRecordsGuard";
 import { registerBillClaimRoutes, disburseConveyanceBill } from "./BillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
+import { registerBranchToolsRoutes } from "./BranchTools";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
@@ -34,6 +37,7 @@ import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollI
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
+import { registerMprEditLogRoutes, ensureMprEditLogSchema } from "./MprEditLogRoutes";
 import { registerDebugRoutes } from "./DebugRoutes";
 import { registerProjectRoutes } from "./ProjectRoutes";
 import { registerAuthRoutes } from "./AuthRoutes";
@@ -56,7 +60,10 @@ import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { startTrackingWakeJob } from "./TrackingWake";
 import { appAccessFor, appMaskStore, maskRowsForApp, registerAppAccessRoutes } from "./AppAccess";
-import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus } from "./AccountBlock";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes, isSeparatedJobStatus, INACTIVE_MESSAGE } from "./AccountBlock";
+import { registerProjectMergeRoutes } from "./ProjectMergeRoutes";
+import { registerAccountMergeRoutes } from "./AccountMergeRoutes";
+import { registerDesignationRoutes } from "./DesignationRoutes";
 import { setApprovalReconcileHandler, requestApprovalReconcile } from "./approvalReconcile";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { registerHrReminderRoutes } from "./HrRemindersRoutes";
@@ -103,12 +110,16 @@ import { registerLoanPlanRoutes } from "./LoanPlan";
 import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
+import { registerEmployeeActivityRoutes } from "./EmployeeActivityRoutes";
+import { registerMyTeamRoutes } from "./MyTeamRoutes";
+import { ensureUserAccessLogSchema, userAccessLogMiddleware } from "./UserAccessLog";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerHrQuickReportsRoutes, ensureHrQuickReportsSchema } from "./HrQuickReports";
 import { payrollAmountGuard } from "./payrollAmountMask";
 import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
+import { registerDataCleanupRoutes } from "./DataCleanupRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
 import { recordClaimHistory } from "./BillClaimHistory";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
@@ -301,6 +312,7 @@ async function initDB() {
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
+    await ensureMprEditLogSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
     await ensureTrackingScheduleSchema(dbPool);
@@ -369,6 +381,10 @@ async function initDB() {
     // Pay and service records keep their Employee from being deleted
     // (EmployeeRecordsGuard.ts) — after every table above exists.
     await ensureEmployeeRecordsGuard(dbPool);
+    // …and a login's work (attendance, claims, leave…) outlives the login (UserRecordsGuard.ts).
+    await ensureUserRecordsGuard(dbPool);
+    // Service Book -> Login & Access log (UserAccessLog.ts).
+    await ensureUserAccessLogSchema(queryDB);
     // Employee logins sign in with their Employee ID (EmployeeLoginId.ts).
     await backfillEmployeeLoginIds(queryDB);
     await autoLinkByEmployeeId(queryDB);
@@ -376,6 +392,8 @@ async function initDB() {
     await ensureRequisitionSchema(queryDB).catch((e: any) => console.warn("⚠️ Requisitions table: " + e.message));
     // PEPM Project teams: the per-Project Final Submit locks (PepmTeam.ts).
     await ensurePepmTeamSchema(queryDB).catch((e: any) => console.warn("⚠️ PEPM project locks: " + e.message));
+    // Add New User: why a login isn't an Employee's (UserManagement.ts).
+    await ensureUserExtraColumns(queryDB);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) {
       startZkSyncSchedule(dbPool);
@@ -407,7 +425,7 @@ const BILL_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "bill_claim", "disbursement", "employees", "departments", "designations", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "management_dashboard", "data_import", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -417,10 +435,11 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 // Users: the generic layers plus "block_account" (Block / Unblock a login,
 // AccountBlock.ts) and "password_requests" (Forgot password requests,
 // PasswordResetRoutes.ts) — neither part of the no-saved-layers default.
-const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
+// "merge_accounts" (explicit-only): Users -> Merge accounts (AccountMergeRoutes.ts).
+const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests", "merge_accounts"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["notices", "departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
+const PERMISSION_LAYER_MODULES = ["editlog", "notices", "departments", "designations", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "bill_claim", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "user_feedback", "document_vault", "employees", "recruitment", "data_import", "vehicle_management", "management_dashboard"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -480,7 +499,9 @@ const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice
 // Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
-const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
+// "rules_readers" = Bill Claim Policy -> Who has read the rules (and its
+// reminder), a page of its own; reading, so on by default.
+const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf", "rules_readers"] as const;
 // HR Operations: "read" = the module as it was; New Joiner Onboarding
 // (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
 // application and its temporary login), "onboarding_review" (see, reject,
@@ -488,7 +509,7 @@ const BILL_CLAIM_LAYER_KEYS = ["read", "on_behalf"] as const;
 // explicit-only — the no-saved-layers default is "read" alone.
 // "reminders_receive" (explicit-only too): HR reminders of probation,
 // contract, document, retirement and increment dates (HrRemindersRoutes.ts).
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot", "hr_headcount", "hr_emp_export"] as const;
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive", "requisitions", "quick_reports", "quick_ot", "hr_headcount", "hr_emp_export", "p360_access"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -517,7 +538,8 @@ const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list", "dept_summary", "cust
 // stays inside CredenceHR) on / off and set which domains are ours.
 // "mail_groups" = add / change / remove central mail groups (everyone with
 // "read" sees them). Explicit-only as well.
-const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups"] as const;
+// "mail_signature" = set the Website / Facebook / LinkedIn links every Credence design signature carries. Explicit-only.
+const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups", "mail_signature"] as const;
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -535,7 +557,7 @@ const FEEDBACK_LAYER_KEYS = ["read", "feedback_resolve"] as const;
 // only the parts it is given (ManagementDashboardRoutes.ts leaves the rest
 // out of the reply). "md_money" (Salary cost, Money out) is explicit-only;
 // an account with the module and no saved layers gets every other part.
-const MANAGEMENT_DASHBOARD_LAYER_KEYS = ["md_people", "md_attendance", "md_money", "md_approvals", "md_projects", "md_recruitment", "md_fleet"] as const;
+const MANAGEMENT_DASHBOARD_LAYER_KEYS = ["md_people", "md_attendance", "md_money", "md_approvals", "md_projects", "md_recruitment", "md_fleet", "md_calendar"] as const;
 const MANAGEMENT_DASHBOARD_DEFAULT_LAYERS = MANAGEMENT_DASHBOARD_LAYER_KEYS.filter((k) => k !== "md_money");
 // Recruitment (ATS, RecruitmentRoutes.ts): "read" = everything the module did
 // before; "email_candidates" = email a candidate about their interview (set,
@@ -547,7 +569,9 @@ const RECRUITMENT_LAYER_KEYS = ["read", "email_candidates", "edit_candidates"] a
 // drivers list); "manage_drivers" = add / change / remove drivers;
 // "manage_vehicles" = edit / delete a vehicle (VehicleManagementRoutes.ts).
 // Explicit-only — the no-saved-layers default is "read" alone.
-const VEHICLE_LAYER_KEYS = ["read", "manage_drivers", "manage_vehicles"] as const;
+// "pickups" = Vehicle Management -> Pick-ups (see and give cars to drop & pick up rides);
+// "trip_report" = the Drop & pick up report. Both explicit-only.
+const VEHICLE_LAYER_KEYS = ["read", "manage_drivers", "manage_vehicles", "pickups", "trip_report"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
@@ -566,7 +590,10 @@ const DOCUMENT_VAULT_LAYER_KEYS = ["read", "sign_request", "esign_settings"] as 
 // sees only the rows it sent there or dispatched; "dispatch_all" (also
 // explicit-only) shows everyone's.
 // "po_import" (explicit-only): Reports -> P.O Import (PoImportRoutes.ts).
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import"] as const;
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all", "po_import", "close_short"] as const;
+// MPR Edit Log: read = edit history + Job Edit approvals (as before);
+// mpr_followup = Needs update & People (explicit-only, left out of the default).
+const EDITLOG_LAYER_KEYS = ["read", "mpr_followup"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -576,14 +603,14 @@ const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete
 // set — see requireLeaveManagerLayer() below.
 // "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
 // left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
-const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules", "joiner_rules"] as const;
 // HR Data Import's layers: one tick per kind of data that can be imported.
 // Having a module (Employees, Leave, Payroll…) is NOT enough to import into
 // it — the account also needs the HR Data Import module and that kind's tick
 // here. All explicit-only: an account with no saved layers gets none.
 // (Salary import keeps its own explicit Payroll layer "salary_bulk_upload".)
 const DATA_IMPORT_LAYER_KEYS = ["import_employees", "import_leave", "import_movement_claims", "import_bill_claims", "import_attendance", "import_office_attendance"] as const;
-const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
+const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules" && k !== "joiner_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
 // endpoint (UserManagement.ts) accepts — a single map instead of one flat
@@ -593,10 +620,14 @@ const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== 
 // is rolled onto this system.
 const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   departments: PERMISSION_LAYER_KEYS,
-  projects: PERMISSION_LAYER_KEYS,
+  // Admin Panel -> Designations (DesignationRoutes.ts): one list for all companies.
+  designations: PERMISSION_LAYER_KEYS,
+  // Projects -> Merge projects (ProjectMergeRoutes.ts), explicit-only.
+  projects: [...PERMISSION_LAYER_KEYS, "merge_projects"],
   approvals: PERMISSION_LAYER_KEYS,
   users: USERS_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
+  editlog: EDITLOG_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
@@ -1514,6 +1545,12 @@ async function performApprovalAction(
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
+  // A ride request is never turned down without saying why — the rider sees
+  // the reason (Ride Status and the alert). Ride Requests already asked for
+  // it; Approve Application and the API now must too.
+  if (request.source_type === "vehicle_requisition" && action === "rejected" && !String(remarks || "").trim()) {
+    throw new ApprovalActionError(400, "Write why this ride is rejected — the rider sees it.");
+  }
   // An attendance correction for a day whose salary is already processed /
   // paid can't be approved (it would change a closed month) — checked before
   // anything is recorded, so the request is never left half-approved.
@@ -1982,6 +2019,17 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     c.project_id,
     c.attendance_date
   ]);
+  // An off-site In never moves the day's In later: if an In at the same time or
+  // earlier already counts (a Project In or the office machine), that one stays
+  // and only the Out (if any) is applied (OffsiteReconcile.ts).
+  let keptEarlierIn: Date | null = null;
+  if (Number(c.offsite_in) === 1 && c.requested_check_in_at) {
+    const valid = await validInFor(queryDB, Number(c.user_id), toDateOnlyString(c.attendance_date) || "");
+    if (valid && valid.at.getTime() <= new Date(c.requested_check_in_at).getTime()) {
+      keptEarlierIn = valid.at;
+      c.requested_check_in_at = null;
+    }
+  }
   // An off-site In / Out (AttendanceRoutes.ts offsitePunch) also brings the
   // place it was given; an ordinary correction has none and changes no place.
   const offIn = Number(c.offsite_in) === 1 && c.requested_check_in_at;
@@ -2011,7 +2059,7 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
         offOut ? 1 : 0,
         existing[0].id]
     );
-  } else {
+  } else if (c.requested_check_in_at || c.requested_check_out_at) {
     await queryDB(
       `INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at,
                                check_in_lat, check_in_lng, check_in_distance_m, check_in_remarks, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks,
@@ -2029,7 +2077,9 @@ async function finalizeAttendanceCorrection(correctionId: number, approvedBy: nu
     correctionId
   ]).catch(() => undefined);
   await queryDB("UPDATE attendance_corrections SET status = 'approved', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [
-    remarks,
+    keptEarlierIn
+      ? `${remarks ? remarks + " " : ""}[In kept at the earlier time already counted: ${keptEarlierIn.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" })}]`
+      : remarks,
     approvedBy,
     correctionId
   ]);
@@ -2963,6 +3013,8 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   // No database error text in API answers (ApiErrors.ts).
   maskDatabaseErrors(app);
+  // Service Book -> Login & Access: what each change to a login changed (UserAccessLog.ts).
+  app.use(userAccessLogMiddleware(queryDB));
   // ZKTeco machines on the internet send their punches here (ADMS "Cloud
   // server", /iclock/...) — only registered push machines are answered
   // (zkMachines.ts).
@@ -2992,6 +3044,10 @@ async function startServer() {
       if (state === "blocked") {
         res.setHeader("X-Account-Blocked", "1");
         return res.status(401).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
+      if (state === "inactive") {
+        res.setHeader("X-Account-Blocked", "1");
+        return res.status(401).json({ error: INACTIVE_MESSAGE, code: "ACCOUNT_BLOCKED" });
       }
       if (state === "removed") {
         res.setHeader("X-Account-Blocked", "removed");
@@ -3181,7 +3237,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "merge_projects" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "mail_signature" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3210,7 +3266,9 @@ async function startServer() {
             ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
           : moduleKey === "employees"
             ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-            : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+            : moduleKey === "bill_claim"
+              ? ["read", "rules_readers"]
+            : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -3250,7 +3308,9 @@ async function startServer() {
         ? ["read", "quick_reports", "quick_ot", "hr_headcount"]
       : moduleKey === "employees"
         ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
-        : moduleKey === "office_attendance" || moduleKey === "bill_claim" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
+        : moduleKey === "bill_claim"
+          ? ["read", "rules_readers"]
+        : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -3279,7 +3339,7 @@ async function startServer() {
   // before the Users routes so /api/users/attendance-projects/bulk is
   // never read as a user id.
   const { replaceAttendanceProjects } = registerAttendanceProjectRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, todayInDhaka });
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
+  registerUserManagementRoutes(app, { hasModuleLayer, authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS, replaceAttendanceProjects });
   // Admin Panel -> Users -> Module Access: Mobile App switch and App ticks
   // (after the Users routes, so the access audit log records changes).
   registerAppAccessRoutes(app, { authenticateToken, requireModuleGrantAccess, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, activeCompanyId, activeGroupId });
@@ -3289,11 +3349,19 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
+  registerBranchToolsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
   // Head of Department + teams with their own Supervisor (DepartmentTeams.ts).
   registerDepartmentTeamsRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, onChange: () => requestApprovalReconcile() });
 
   // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
   registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  // Admin Panel -> Designations (module "designations"): one list for all companies, permanent codes.
+  registerDesignationRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  // Admin Panel -> Users -> Merge accounts (layer "merge_accounts").
+  registerAccountMergeRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
+
+  // Admin Panel -> Projects -> Merge projects (layer "merge_projects").
+  registerProjectMergeRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
 
   // Self Service -> Leave Management: true for a Superadmin (implicit, every
   // account), or for an Admin/User the Superadmin has explicitly granted
@@ -3445,7 +3513,7 @@ async function startServer() {
   registerFingerprintRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
 
   // Projects routes live in ProjectRoutes.ts.
-  registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer });
+  registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer });
 
   // Remote Attendance (check-in/check-out, status, mine, corrections,
   // Admin list, and reports) now lives in AttendanceRoutes.ts — registered
@@ -3695,6 +3763,9 @@ async function startServer() {
   // Employee 360 (HR Operations -> Service Book): experience / education /
   // family / training records + every other module's data for one Employee.
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
+  registerEmployeeActivityRoutes(app, { authenticateToken, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB });
+  // Self Service -> My Team: a Head / Supervisor's own people, read-only (no module — see the file).
+  registerMyTeamRoutes(app, { authenticateToken, queryDB });
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert, hasModuleLayer });
@@ -3776,7 +3847,8 @@ async function startServer() {
   });
 
   // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
-  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka });
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka });
+  registerDataCleanupRoutes(app, { authenticateToken, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined, adjustLeaveTypeBalance, closedPayMonthFor });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template
@@ -3854,6 +3926,8 @@ async function startServer() {
     parseQtyNumber,
     toDateOnlyString
   });
+  // Admin Panel -> MPR Edit Log: history, refused tries, Needs update, People.
+  registerMprEditLogRoutes(app, { authenticateToken, requireModule, requireModuleLayer, queryDB, todayInDhaka });
 
 
   // Self Service -> Leave Balances & Leave Applications — kept in its own

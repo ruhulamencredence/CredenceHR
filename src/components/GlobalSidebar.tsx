@@ -1,10 +1,11 @@
 import { setNavEntries } from '../lib/navRegistry';
+import { useEdgeSwipeDrawer } from '../lib/useEdgeSwipeDrawer';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   PackageCheck,
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
-  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
+  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity, BadgeCheck,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, Megaphone, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
@@ -58,6 +59,11 @@ interface NavItem {
 interface GlobalSidebarProps {
   open: boolean;
   onClose: () => void;
+  // Overlay only: lets a drag from the screen's left edge open the drawer
+  // (useEdgeSwipeDrawer.ts). Left out, only the hamburger opens it.
+  onOpen?: () => void;
+  // The home screen is showing: the drag may start anywhere on it.
+  swipeAnywhere?: boolean;
   // 'overlay' (default) — the original mobile drawer: fixed, slides in over
   // a backdrop, closable via the X button / backdrop tap / selecting an item.
   // 'persistent' — desktop web: a permanent left column sitting beside the
@@ -127,10 +133,14 @@ interface GlobalSidebarProps {
 // granted, side by side. Visual language (profile header, violet glass
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
-  open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
+  open, onClose, onOpen, swipeAnywhere = false, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToBillClaims,
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
+  // Phone: the drawer follows a finger dragged from the left edge (or back).
+  const drawerRef = useRef<HTMLElement>(null);
+  const dragX = useEdgeSwipeDrawer({ enabled: !isPersistent, anywhere: swipeAnywhere, open, onOpen, onClose, drawerRef });
+  const dragging = !isPersistent && dragX != null;
   // One group open at a time (tap another and the first closes); the group
   // holding the page on screen opens by itself (see the effect further down).
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -547,6 +557,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   const departmentsItem: NavItem[] = [
     { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments'), href: adminHref('departments') },
+    { key: 'designations', label: 'Designations', icon: BadgeCheck, onClick: () => onGoToAdminModule('designations'), href: adminHref('designations') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Employee" — Employees, Employee Tracking, Asset Management. No longer
@@ -758,10 +769,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     },
     // SIM & ID Card: the company SIM given to you (limit, bills) and asking HR for a SIM / ID card.
     { key: 'g_sim_self', label: 'SIM & ID Card', icon: Smartphone, entries: pick('myMobileSim', 'myRequisitions') },
-    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
   const managementDashboardItem = itemByKey.get('management_dashboard') || null;
+  // Credence Mail and Chat sit on their own at the top of Self Service,
+  // not inside a group.
+  const selfTopItems: NavItem[] = ['credenceMail', 'chat'].map((k) => itemByKey.get(k)).filter((i): i is NavItem => !!i);
   const adminTopItems: NavItem[] = [adminDashboardItem, managementDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
   const adminGroups = makeGroups([
     {
@@ -771,7 +785,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       // A person's whole journey in one place: joining (Recruitment ->
       // Onboarding) and leaving (Exit / Offboarding) sit together.
       entries: pick(
-        'employees', 'departments', 'tracking',
+        'employees', 'departments', 'designations', 'tracking',
         { heading: 'Joining & Exit' }, 'recruitment', 'hr_operations_onboarding', 'exit_offboarding',
         { heading: 'People & Records' }, 'performance_management', 'grievance_disciplinary', 'document_vault'
       )
@@ -809,6 +823,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Which group an item lives in (search shows it beside the name).
   const groupLabelOf = new Map<string, string>();
   for (const g of allGroups) for (const e of g.entries) if (isItem(e)) groupLabelOf.set(e.key, g.label);
+  for (const i of selfTopItems) groupLabelOf.set(i.key, 'Self Service');
   for (const i of adminTopItems) groupLabelOf.set(i.key, 'Admin Panel');
 
   // The group holding the page on screen opens by itself, so its highlight
@@ -858,7 +873,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // input there, same as every other label in that mode.
   const [sidebarSearch, setSidebarSearch] = useState('');
   const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
-  const allSearchableItems: NavItem[] = [dashboardSearchItem, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
+  const allSearchableItems: NavItem[] = [dashboardSearchItem, ...selfTopItems, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
   const searchQuery = sidebarSearch.trim().toLowerCase();
   const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
   // The search box's results (the full column's dropdown and the minimized
@@ -1105,9 +1120,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       {!isPersistent && (
         <div
           onClick={onClose}
-          className={`fixed inset-0 z-[1100] bg-slate-900/40 transition-opacity duration-300 ${
+          data-gsidebar-backdrop
+          className={`fixed inset-0 z-[1100] bg-slate-900/40 ${dragging ? '' : 'transition-opacity duration-300'} ${
             open ? 'opacity-100 pointer-events-auto backdrop-blur-[2px]' : 'opacity-0 pointer-events-none'
           }`}
+          style={dragging ? { opacity: dragX! / (drawerRef.current?.offsetWidth || 264) } : undefined}
         />
       )}
 
@@ -1120,13 +1137,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           App.tsx — so it only needs a modest z-index, just enough to layer
           over page content it happens to sit beside.) */}
       <aside
+        ref={drawerRef}
         data-tour={isPersistent ? 'sidebar' : undefined}
         className={
           isPersistent
             ? `gsidebar hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] ${
                 collapsed ? 'w-[64px]' : 'w-[264px]'
               }`
-            : `gsidebar fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
+            : `gsidebar fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] ${dragging ? '' : 'transition-transform duration-300 ease-out'} ${
                 open ? 'translate-x-0' : '-translate-x-[110%]'
               }`
         }
@@ -1136,6 +1154,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           boxShadow: isPersistent ? 'none' : '12px 0 40px rgba(47,0,94,0.35)',
           borderRight: isPersistent ? '1px solid rgba(255,255,255,0.08)' : undefined,
           paddingTop: isPersistent ? undefined : 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
+          // While a finger drags it: exactly where the finger is.
+          // (`translate`, the same property Tailwind's translate-x classes set.)
+          ...(dragging ? { translate: `${dragX! - (drawerRef.current?.offsetWidth || 264)}px 0` } : {}),
         }}
       >
         {!isPersistent && (
@@ -1295,7 +1316,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {editingFavs ? (
                 <div className="rounded-xl bg-black/15 p-1.5 max-h-64 overflow-y-auto">
                   <p className="px-2 pb-1 text-[10.5px] text-white/55">Pick up to 4 ({favItems.length}/4)</p>
-                  {[...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))]
+                  {[...selfTopItems, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))]
                     .filter((i, idx, arr) => arr.findIndex((x) => x.key === i.key) === idx)
                     .map((i) => {
                       const on = favItems.some((f) => f.key === i.key);
@@ -1331,13 +1352,18 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             </>
           )}
 
-          {selfGroups.length > 0 &&
+          {(selfGroups.length > 0 || selfTopItems.length > 0) &&
             (collapsed ? (
               <div className="h-px mx-2 my-2 bg-white/15" />
             ) : (
               sectionHeading('self', 'Self Service')
             ))}
-          {(collapsed || !hiddenSections.includes('self')) && selfGroups.map(renderMenuGroup)}
+          {(collapsed || !hiddenSections.includes('self')) && (
+            <>
+              {selfTopItems.map(renderItem)}
+              {selfGroups.map(renderMenuGroup)}
+            </>
+          )}
 
           {(adminTopItems.length > 0 || adminGroups.length > 0) && (
             <>

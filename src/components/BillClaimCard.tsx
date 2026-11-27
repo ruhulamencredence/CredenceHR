@@ -17,6 +17,8 @@ import { readDraft } from '../lib/formDraft';
 import { BillClaimDetailModal } from './BillClaimDetailModal';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { BillClaimRulesSheet, type RulesReading } from './BillClaimRulesSheet';
+import { Info, Lock } from 'lucide-react';
 
 interface BillClaimCardProps {
   token: string;
@@ -63,6 +65,39 @@ export const BillClaimCard: React.FC<BillClaimCardProps> = ({ token, onBack }) =
   // The claim open in the form for editing / resubmitting.
   const [editingClaim, setEditingClaim] = useState<BillClaim | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // (i) Rules: read and confirm the Bill Claim rules before the first claim
+  // (and again after they change) — until then New Claim stays locked.
+  const [reading, setReading] = useState<RulesReading | null>(null);
+  const [rulesOpen, setRulesOpen] = useState<'confirm' | 'view' | null>(null);
+  const rulesOk = !!reading?.confirmed_at;
+  useEffect(() => {
+    let alive = true;
+    fetch(apiUrl('/api/bill-claim-rules/mine'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: RulesReading | null) => {
+        if (!alive || !d) return;
+        setReading(d);
+        if (!d.confirmed_at) setRulesOpen('confirm');
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+  const openNewClaim = () => (rulesOk ? setShowNewClaim(true) : setRulesOpen('confirm'));
+  const rulesChip = (
+    <button
+      type="button"
+      onClick={() => setRulesOpen(rulesOk ? 'view' : 'confirm')}
+      className={`relative inline-flex items-center gap-1.5 shrink-0 rounded-full pl-1 pr-2.5 py-1 text-[11px] font-bold bg-sky-50 text-sky-700 ${rulesOk ? '' : 'ring-2 ring-offset-1 ring-orange-400 animate-pulse'}`}
+      aria-label="Bill Claim rules"
+    >
+      <span className="w-[18px] h-[18px] rounded-full bg-sky-600 text-white grid place-items-center">
+        <Info className="w-3 h-3" />
+      </span>
+      Rules
+    </button>
+  );
   const [tab, setTab] = useState<ClaimTab>('pending');
   // In the phone app the server sends the last 3 months only (X-History-Limited).
   const [limited, setLimited] = useState(false);
@@ -125,18 +160,28 @@ useLiveRefresh(() => fetchClaims(true));
           <Wallet className="w-4 h-4 text-indigo-600" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-slate-900">Bill Claim</div>
+          <div className="text-sm font-medium text-slate-900 flex items-center gap-2">Bill Claim {rulesChip}</div>
           <div className="text-xs text-slate-400">Submit an expense claim for approval</div>
         </div>
         <button
           type="button"
-          onClick={() => setShowNewClaim(true)}
-          className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors shrink-0"
+          onClick={openNewClaim}
+          title={rulesOk ? undefined : 'Read the Bill Claim rules first'}
+          className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors shrink-0 ${rulesOk ? '' : 'opacity-60'}`}
         >
-          <Plus className="w-3.5 h-3.5" /> New Claim
+          {rulesOk ? <Plus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} New Claim
         </button>
       </div>
 
+      {/* Phone: the page title is in the app header, so the (i) Rules chip sits here. */}
+      <div className="md:hidden flex items-center justify-between gap-2 px-3 pt-2">
+        {rulesChip}
+        {reading && !rulesOk && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600">
+            <Lock className="w-3 h-3" /> Read the rules to claim
+          </span>
+        )}
+      </div>
       {message && <div className="mx-4 mt-2 text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700">{message}</div>}
 
       {/* Bottom Content — My Bill Claims history. Extra top padding on
@@ -164,8 +209,10 @@ useLiveRefresh(() => fetchClaims(true));
                 type="button"
                 onClick={() => setTab(t.key)}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full transition-colors ${
-                  active ? 'text-white shadow-sm bg-indigo-600' : 'text-slate-500 hover:text-slate-700'
+                  active ? 'text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
+                // The app's accent colour, like every other page's tabs.
+                style={active ? { background: 'var(--g-accent, #7f00ff)' } : undefined}
               >
                 {t.label}
                 <span
@@ -230,8 +277,10 @@ useLiveRefresh(() => fetchClaims(true));
           </div>
 
           {/* Desktop — a real row table instead of the mobile card list, same
-              pattern ClaimsPanel.tsx uses for Check In/Out. */}
-          <div className="hidden md:block max-h-72 overflow-y-auto overflow-x-auto">
+              pattern ClaimsPanel.tsx uses for Check In/Out. It reaches down to
+              the bottom of the window (it used to stop at 18rem, a short box
+              on a big screen) and scrolls inside after that. */}
+          <div className="hidden md:block max-h-[max(18rem,calc(100dvh-18rem))] overflow-y-auto overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0">
                 <tr>
@@ -304,18 +353,34 @@ useLiveRefresh(() => fetchClaims(true));
           the card sidesteps that entirely. */}
       <button
         type="button"
-        onClick={() => setShowNewClaim(true)}
-        // Liquid glass pill — same translucent gradient + blur + glossy inset
-        // highlight + colored drop shadow treatment as Check In/Out's and
-        // Submit Leave's floating buttons, instead of the old flat solid
-        // color.
-        className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-indigo-400/90 via-indigo-600/90 to-violet-700/90 shadow-[0_10px_28px_-6px_rgba(79,70,229,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(79,70,229,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
-        style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
+        onClick={openNewClaim}
+        // Same pill as Check In/Out's "Add Check In/Out": the app's accent
+        // colour, centred above the bottom bar (clear of the Assistant tab).
+        className="md:hidden fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 h-[52px] px-6 rounded-full text-white text-[15px] font-bold whitespace-nowrap active:scale-95 transition-transform"
+        style={{
+          bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))',
+          background: 'var(--g-accent, #7f00ff)',
+          boxShadow: '0 14px 30px -10px rgba(var(--g-accent-rgb, 127, 0, 255), 0.7)'
+        }}
       >
-        <Plus className="w-3.5 h-3.5" /> New Claim
+        {rulesOk ? <Plus className="w-[18px] h-[18px]" strokeWidth={2.6} /> : <Lock className="w-[16px] h-[16px]" />} New Claim
       </button>
 
-      {(showNewClaim || editingClaim) && (
+      {rulesOpen && (
+        <BillClaimRulesSheet
+          token={token}
+          reading={reading}
+          mode={rulesOpen}
+          onConfirmed={(r) => {
+            setReading(r);
+            setRulesOpen(null);
+            setMessage('Thanks — you can file Bill Claims now.');
+          }}
+          onClose={() => setRulesOpen(null)}
+        />
+      )}
+
+      {(showNewClaim || editingClaim) && rulesOk && (
         <NewBillClaimModal
           key={editingClaim ? `edit-${editingClaim.id}` : 'new'}
           token={token}

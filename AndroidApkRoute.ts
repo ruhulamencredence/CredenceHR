@@ -228,6 +228,12 @@ function servable(file: string): string | null {
 
 const versions = new Map<string, { code: number; name: string | null } | null>();
 // What the login page's button would send now, and its version.
+/** The versionCode of the APK on the server now (null = none). */
+export function latestApkBuild(): number | null {
+  const v = currentApk()?.version;
+  return v && Number.isFinite(Number(v.code)) ? Number(v.code) : null;
+}
+
 function currentApk(): { file: string; version: { code: number; name: string | null } | null } | null {
   const file = findApk(LOGIN_PAGE_APK) || findApk("CredenceHR.zip") || findApk("CredenceHR-android-debug.zip") || newestApk();
   const send = file && servable(file);
@@ -250,11 +256,27 @@ export function registerApkDownload(app: Express) {
   // The Android app on the server (downloads/) and its version, for the
   // app's own "Update available" popup (src/components/AppUpdatePrompt.tsx).
   // Public like the download itself: a version number, nothing else.
+  // An app older than this (versionCode) can't be used until it's updated:
+  // the phone shows "Update required" with no Later (AppUpdatePrompt.tsx).
+  // Default = built before Tracking Schedule (14 Nov 2026) — the "Old app —
+  // update needed" in Employee Tracking. ANDROID_MIN_BUILD changes it (0 =
+  // nobody is made to update). Only asked when the APK here is newer, so
+  // there is always something to update to.
+  const minBuild = () => {
+    const v = Number(process.env.ANDROID_MIN_BUILD);
+    return Number.isFinite(v) && v >= 0 && String(process.env.ANDROID_MIN_BUILD ?? "").trim() !== "" ? v : 456877;
+  };
   app.get("/api/app/android-latest", (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     const apk = currentApk();
     if (!apk || !apk.version) return res.json({ available: false });
-    res.json({ available: true, version_code: apk.version.code, version_name: apk.version.name, url: `/downloads/${LOGIN_PAGE_APK}` });
+    res.json({
+      available: true,
+      version_code: apk.version.code,
+      version_name: apk.version.name,
+      url: `/downloads/${LOGIN_PAGE_APK}`,
+      min_version_code: Math.min(minBuild(), apk.version.code)
+    });
   });
 
   app.get(/^\/downloads\/([^/]+\.apk)$/i, (req, res) => {

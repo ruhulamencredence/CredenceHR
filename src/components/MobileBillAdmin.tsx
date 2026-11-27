@@ -14,11 +14,12 @@
 //   Reports   — MobileBillReports.tsx.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useElementHeight } from '../lib/useElementHeight';
 import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { readWorkbook } from '../lib/readWorkbook';
-import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, History, Inbox, Users, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { BarChart3, CheckCircle2, UserPlus, FileDown, FileSpreadsheet, History, Inbox, Users, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
@@ -115,10 +116,39 @@ export const MobileBillAdmin: React.FC<{ token: string }> = ({ token }) => {
   );
 };
 
-const Card: React.FC<{ label: string; value: string; cls?: string }> = ({ label, value, cls }) => (
-  <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
-    <div className="text-[11px] font-semibold text-slate-500">{label}</div>
-    <div className={`text-xl font-bold ${cls || 'text-slate-900'}`}>{value}</div>
+const Card: React.FC<{ label: string; value: string; cls?: string; onClick?: () => void; on?: boolean; hint?: string }> = ({ label, value, cls, onClick, on, hint }) => {
+  const body = (
+    <>
+      <div className="text-[11px] font-semibold text-slate-500">{label}</div>
+      <div className={`text-xl font-bold ${cls || 'text-slate-900'}`}>{value}</div>
+    </>
+  );
+  // A card that filters the table below it ("Not given to anyone" -> the stock SIMs).
+  return onClick ? (
+    <button type="button" onClick={onClick} title={hint} aria-pressed={!!on}
+      className={`text-left rounded-2xl bg-white border px-4 py-3 hover:border-teal-400 ${on ? 'border-teal-500 ring-2 ring-teal-500/20' : 'border-slate-200'}`}>
+      {body}
+    </button>
+  ) : (
+    <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">{body}</div>
+  );
+};
+
+// A SIM's department: its holder's, else (a spare SIM) the duty location it was put to.
+const simDept = (x: { employee?: { department?: string | null } | null; employee_id?: number | null; duty_location?: string | null }) =>
+  x.employee?.department || (x.employee_id ? '' : x.duty_location || '');
+const deptList = (rows: any[] | null) => [...new Set((rows || []).map(simDept).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const NO_DEPT = '__none__';
+const deptMatch = (want: string, row: any) => !want || (want === NO_DEPT ? !simDept(row) : simDept(row) === want);
+const DeptFilter: React.FC<{ value: string; onChange: (v: string) => void; options: string[]; cls?: string }> = ({ value, onChange, options, cls }) => (
+  <div className="min-w-[200px] sm:min-w-[260px]" title={value && value !== NO_DEPT ? value : undefined}>
+    <SearchSelect className={cls || filterCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— All departments —</option>
+      {options.map((d) => (
+        <option key={d} value={d}>{d}</option>
+      ))}
+      <option value={NO_DEPT}>(No department)</option>
+    </SearchSelect>
   </div>
 );
 
@@ -144,9 +174,13 @@ interface BillRow {
 }
 
 const BillsTab: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky filter bar's height, so the column titles stick
+  // right under it (lib/useElementHeight.ts).
+  const [barRef, barH] = useElementHeight(110);
   const [month, setMonth] = useState(thisMonth());
   const [rows, setRows] = useState<BillRow[] | null>(null);
   const [operator, setOperator] = useState('');
+  const [dept, setDept] = useState('');
   const [q, setQ] = useState('');
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
@@ -169,9 +203,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     return (rows || []).filter(
       (r) =>
         (!operator || r.operator === operator) &&
+        deptMatch(dept, r) &&
         (!s || [r.phone_number, r.employee?.name, r.employee?.employee_code, r.employee?.department, r.duty_location].some((v) => String(v || '').toLowerCase().includes(s)))
     );
-  }, [rows, operator, q]);
+  }, [rows, operator, dept, q]);
   const billed = shown.filter((r) => r.amount != null);
   const sum = (k: 'amount' | 'payable' | 'excess') => billed.reduce((a, r) => a + Number(r[k] || 0), 0);
   const unpaid = billed.filter((r) => !r.paid_at).length;
@@ -190,7 +225,21 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
-  const sheetRows = billed.map((r, i) => ({
+  // The payment sheet (PDF and Excel) reads Department, then Designation, then
+  // Mobile Number; people with no Department / Designation go last.
+  const byDeptDesignation = (a: BillRow, b: BillRow) => {
+    const cmp = (x?: string | null, y?: string | null) => {
+      const p = String(x || '').trim();
+      const q = String(y || '').trim();
+      if (!p && q) return 1;
+      if (p && !q) return -1;
+      return p.localeCompare(q, undefined, { sensitivity: 'base', numeric: true });
+    };
+    return cmp(a.employee?.department, b.employee?.department) || cmp(a.employee?.designation, b.employee?.designation) || cmp(a.phone_number, b.phone_number);
+  };
+  const sheetList = useMemo(() => [...billed].sort(byDeptDesignation), [billed]);
+
+  const sheetRows = sheetList.map((r, i) => ({
     SL: i + 1,
     Name: r.employee?.name || '',
     'Emp. ID': r.employee?.employee_code || '',
@@ -229,7 +278,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
       autoTable(doc, {
         ...standardTable(startY),
         head: [['Serial', 'Name', 'Emp. ID', 'Designation', 'Department', 'Duty Location', 'Mobile Number', 'Operator', 'Official Ceiling', 'Bill Amount', 'Company Pays', 'Excess Amount']],
-        body: billed.map((r, i) => [
+        body: sheetList.map((r, i) => [
           String(i + 1),
           r.employee?.name || '-',
           r.employee?.employee_code || '',
@@ -261,6 +310,8 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
 
   return (
     <div className="space-y-3">
+      {/* Desktop: filters and buttons stay under the header while the list scrolls. */}
+      <div ref={barRef} className="space-y-3 md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
       <div className="flex flex-wrap items-end gap-2">
         <div>
           <label className={labelCls}>Bill month</label>
@@ -274,6 +325,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
               <option key={o}>{o}</option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className={labelCls}>Department</label>
+          <DeptFilter value={dept} onChange={setDept} options={deptList(rows)} cls={inputCls} />
         </div>
         <div className="flex-1 min-w-[180px] relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -303,6 +358,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
           )
         )}
       </div>
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <Card label="Numbers billed" value={rows ? `${billed.length} / ${shown.length}` : '–'} />
@@ -316,9 +372,9 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
       {!rows ? (
         <LoadingBlock />
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto xl:overflow-clip">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-slate-50 text-slate-500 sticky z-10 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
               <tr>
                 {['Employee', 'Department', 'Duty location', 'Mobile', 'Limit', 'Bill', 'Company pays', 'Excess', ''].map((h, i) => (
                   <th key={h + i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i >= 4 && i <= 7 ? 'text-right' : 'text-left'}`}>
@@ -678,12 +734,19 @@ interface Meta {
 }
 
 const SimsTab: React.FC<{ token: string }> = ({ token }) => {
+  // Desktop: the sticky filter bar's height, so the column titles stick
+  // right under it (lib/useElementHeight.ts).
+  const [sbarRef, sbarH] = useElementHeight(110);
   const [sims, setSims] = useState<MbSim[] | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [q, setQ] = useState('');
   const [operator, setOperator] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive' | 'unassigned' | ''>('active');
+  const [dept, setDept] = useState('');
   const [editing, setEditing] = useState<MbSim | 'new' | null>(null);
+  // Opened from a stock SIM's "Give to employee" button: the popup leads with picking the person.
+  const [giving, setGiving] = useState(false);
+  const openSim = (x: MbSim | 'new', give = false) => { setGiving(give); setEditing(x); };
   const [importing, setImporting] = useState(false);
   // "From Employees": office SIMs from Employees -> Contact No.
   const [fromEmployees, setFromEmployees] = useState(false);
@@ -708,21 +771,23 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       (x) =>
         (!operator || x.operator === operator) &&
         (!status || (status === 'unassigned' ? !x.employee_id && x.status === 'active' : x.status === status)) &&
+        deptMatch(dept, x) &&
         (!s || [x.phone_number, x.employee?.name, x.employee?.employee_code, x.employee?.department, x.duty_location].some((v) => String(v || '').toLowerCase().includes(s)))
     );
-  }, [sims, q, operator, status]);
+  }, [sims, q, operator, status, dept]);
   const active = (sims || []).filter((s) => s.status === 'active');
   const holders = new Set(active.filter((s) => s.employee_id).map((s) => s.employee_id));
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Card label="Active SIMs" value={sims ? String(active.length) : '–'} />
+        <Card label="Active SIMs" value={sims ? String(active.length) : '–'} onClick={() => setStatus('active')} on={status === 'active'} hint="Show all active SIMs" />
         <Card label="Employees holding SIMs" value={sims ? String(holders.size) : '–'} />
-        <Card label="Not given to anyone" value={sims ? String(active.filter((s) => !s.employee_id).length) : '–'} cls="text-amber-600" />
+        <Card label="Not given to anyone" value={sims ? String(active.filter((s) => !s.employee_id).length) : '–'} cls="text-amber-600" onClick={() => setStatus('unassigned')} on={status === 'unassigned'} hint="Show only the SIMs in stock (not given to anyone)" />
         <Card label="Total monthly limit" value={sims ? tk(active.reduce((a, s) => a + s.limit_amount, 0)) : '–'} cls="text-teal-700" />
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      {/* Desktop: search and filters stay under the header while the list scrolls. */}
+      <div ref={sbarRef} className="flex flex-wrap items-end gap-2 md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
         <div className="flex-1 min-w-[180px] relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input className={`${inputCls} pl-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, number, Emp. ID…" />
@@ -733,9 +798,10 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
             <option key={o}>{o}</option>
           ))}
         </select>
+        <DeptFilter value={dept} onChange={setDept} options={deptList(sims)} />
         <select className={filterCls} value={status} onChange={(e) => setStatus(e.target.value as any)}>
           <option value="active">Active</option>
-          <option value="unassigned">Not given to anyone</option>
+          <option value="unassigned">Not given to anyone (stock)</option>
           <option value="inactive">Turned off</option>
           <option value="">All</option>
         </select>
@@ -751,6 +817,17 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {note && <p className="text-sm text-emerald-700">{note}</p>}
+      {status === 'unassigned' && (
+        <div className="rounded-2xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-900">
+          <div className="font-bold text-sm mb-1.5">These SIMs are in stock — not given to anyone. To give one to an employee:</div>
+          <ol className="grid sm:grid-cols-3 gap-2">
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">1</span><span>Press <b>Give to employee</b> on the SIM's row (on the right).</span></li>
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">2</span><span>In <b>Give to</b>, type the employee's name or ID and pick them.</span></li>
+            <li className="flex gap-2"><span className="shrink-0 w-5 h-5 rounded-full bg-teal-600 text-white grid place-items-center text-[11px] font-bold">3</span><span>Check the monthly limit (their type's limit, or a custom amount) and press <b>Give SIM</b>.</span></li>
+          </ol>
+          <div className="mt-1.5 text-teal-800/80">The SIM then leaves stock and shows under the employee (and in their My SIM &amp; Bill). To take it back later: Edit → Given to: Nobody.</div>
+        </div>
+      )}
       {fromEmployees && (
         <SimsFromEmployeesSheet
           token={token}
@@ -765,12 +842,12 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       {!sims ? (
         <LoadingBlock />
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
+        <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto xl:overflow-clip">
           <table className="w-full text-xs">
-            <thead className="bg-slate-50 text-slate-500">
+            <thead className="bg-slate-50 text-slate-500 sticky z-10 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + sbarH }}>
               <tr>
-                {['Mobile', 'Employee', 'Department / Work station', 'Duty location', 'Limit', 'Last bill', ''].map((h, i) => (
-                  <th key={i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i === 4 || i === 5 ? 'text-right' : 'text-left'}`}>
+                {['Mobile', 'Employee', 'Department / Work station', 'Duty location', 'Limit', 'Last bill', 'Action'].map((h, i) => (
+                  <th key={i} className={`px-3 py-2 font-semibold whitespace-nowrap ${i >= 4 ? 'text-right' : 'text-left'}`}>
                     {h}
                   </th>
                 ))}
@@ -785,7 +862,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                 </tr>
               )}
               {shown.map((s) => (
-                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => setEditing(s)}>
+                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/60 cursor-pointer" onClick={() => openSim(s, !s.employee_id && s.status === 'active')}>
                   <td className="px-3 py-2 whitespace-nowrap">
                     <div className="font-mono font-semibold">{s.phone_number}</div>
                     <OperatorBadge op={s.operator} />
@@ -817,12 +894,69 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
                       <span className="text-slate-300">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {s.pending_requests > 0 && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">request</span>}
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <div className="inline-flex items-center gap-2">
+                      {s.pending_requests > 0 && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">request</span>}
+                      {!s.employee_id && s.status === 'active' ? (
+                        <button type="button" className={`${btnMain} !py-1.5`} onClick={(e) => { e.stopPropagation(); openSim(s, true); }} title={`Give ${s.phone_number} to an employee`}>
+                          <UserPlus className="w-3.5 h-3.5" /> Give to employee
+                        </button>
+                      ) : (
+                        <button type="button" className={`${btnLight} !py-1.5`} onClick={(e) => { e.stopPropagation(); openSim(s); }} title={`Edit ${s.phone_number}: holder, limit, duty location, turn off`}>
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
+            {/* The rows shown (after search / filters), summed — stays at the bottom while scrolling. */}
+            {shown.length > 0 &&
+              (() => {
+                const given = shown.filter((x) => x.employee_id);
+                const people = new Set(given.map((x) => x.employee_id)).size;
+                const billed = shown.filter((x) => x.last_bill);
+                const over = billed.filter((x) => x.last_bill!.amount > x.last_bill!.limit_amount);
+                return (
+                  <tfoot className="sticky bottom-0 bg-slate-50 border-t-2 border-slate-200 text-slate-700 shadow-[0_-1px_0_rgba(15,23,42,0.08)]">
+                    <tr>
+                      <td className="px-3 py-2.5 font-bold whitespace-nowrap">
+                        {shown.length} SIM{shown.length === 1 ? '' : 's'}
+                        {shown.length !== (sims || []).length && <span className="font-normal text-slate-500"> of {(sims || []).length}</span>}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <b>{people}</b> {people === 1 ? 'person' : 'people'} · <span className="text-amber-700 font-semibold">{shown.length - given.length} not given</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
+                        {(() => {
+                          const ops = new Map<string, number>();
+                          for (const x of shown) ops.set(x.operator, (ops.get(x.operator) || 0) + 1);
+                          return [...ops.entries()].map(([o, n]) => `${o} ${n}`).join(' · ');
+                        })()}
+                      </td>
+                      <td />
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <div className="font-bold">{tk(shown.reduce((a, x) => a + Number(x.limit_amount || 0), 0))}</div>
+                        <div className="text-[10px] text-slate-400">total limit</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        {billed.length ? (
+                          <>
+                            <div className="font-bold">{tk(billed.reduce((a, x) => a + Number(x.last_bill!.amount || 0), 0))}</div>
+                            <div className={`text-[10px] ${over.length ? 'text-rose-600 font-semibold' : 'text-slate-400'}`}>
+                              last bills{over.length ? ` · ${over.length} over limit` : ''}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
           </table>
         </div>
       )}
@@ -831,6 +965,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
           token={token}
           meta={meta}
           sim={editing === 'new' ? null : editing}
+          give={giving}
           onClose={() => setEditing(null)}
           onDone={() => {
             setEditing(null);
@@ -858,7 +993,7 @@ interface SimDetail extends MbSim {
   requests: MbRequest[];
 }
 
-const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose: () => void; onDone: () => void }> = ({ token, meta, sim, onClose, onDone }) => {
+const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; give?: boolean; onClose: () => void; onDone: () => void }> = ({ token, meta, sim, give, onClose, onDone }) => {
   const [f, setF] = useState({
     phone_number: sim?.phone_number || '',
     operator: sim?.operator || '',
@@ -914,7 +1049,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
   };
 
   return (
-    <Modal title={sim ? `SIM ${sim.phone_number}` : 'Give a SIM'} onClose={onClose} wide>
+    <Modal title={give && sim ? `Give SIM ${sim.phone_number} to an employee` : sim ? `SIM ${sim.phone_number}` : 'Give a SIM'} onClose={onClose} wide>
       <div className="grid md:grid-cols-2 gap-5">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -932,17 +1067,26 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
               </select>
             </div>
           </div>
-          <div>
-            <label className={labelCls}>Given to</label>
-            <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
+          <div className={give ? 'rounded-2xl border-2 border-teal-400 bg-teal-50/60 p-3 -mx-1' : ''}>
+            <label className={labelCls}>{give ? 'Give to — type a name or Employee ID' : 'Given to'}</label>
+            <SearchSelect className={inputCls} value={f.employee_id} onChange={(e) => {
+              const v = e.target.value;
+              // Giving a stock SIM: the limit follows the new holder's type when one is set (changeable below).
+              const pick = meta.employees.find((x) => String(x.id) === v);
+              setF((o) => ({ ...o, employee_id: v, ...(give && pick && pick.type_limit != null ? { limit_source: 'type' } : {}) }));
+            }}>
               <option value="">— Nobody (spare SIM) —</option>
               {empOptions.map((e) => (
                 <option key={e.id} value={e.id}>{personLabel(e)}</option>
               ))}
             </SearchSelect>
-            {emp && (
+            {emp ? (
               <p className="text-[11px] text-slate-500 mt-1">
                 {[emp.designation, emp.department, emp.work_station].filter(Boolean).join(' · ')} · Type: {emp.employee_type || 'not set'}
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Nobody: the SIM is kept in stock (SIM Inventory → In stock). Open it here later and pick the new employee to give it — its limit then follows their type.
               </p>
             )}
           </div>
@@ -1008,7 +1152,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
               <span />
             )}
             <button type="button" className={btnMain} disabled={saving || !f.phone_number} onClick={save}>
-              {saving ? 'Saving…' : sim ? 'Save' : 'Give SIM'}
+              {saving ? 'Saving…' : !sim || (give && f.employee_id) ? 'Give SIM' : 'Save'}
             </button>
           </div>
         </div>

@@ -280,7 +280,7 @@ export const AttendanceProjectsEditor: React.FC<{
           </p>
         )
       ) : (
-        <p className="text-[11px] text-slate-500">Any project this person can otherwise see.</p>
+        <p className="text-[11px] text-slate-500">Any of the company’s projects — the person checks in at whichever one they are at.</p>
       )}
       {busy && <Spinner size={12} />}
       {error && <p className="text-[11px] text-rose-600">{error}</p>}

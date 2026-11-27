@@ -14,6 +14,7 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { ChatImageViewer, useChatImageUrl, type ChatImageItem } from './chat/ChatImageViewer';
 import { UserAvatar } from './UserAvatar';
 import { MultiSelectFilter } from './MultiSelectFilter';
 import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
@@ -22,8 +23,9 @@ import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward, Reply, Star, BellOff, Eraser, Timer, Archive, Pin
 } from 'lucide-react';
+import { ChatListChips, ChatRoomMenu, chipMatches, isUnread, useChatLists, type ChatChip } from './chat/ChatListActions';
 import { GroupAvatar, GroupHeader, GroupSettings, MuteRow, StarredPopup, isMuted, DisappearRow, InviteLinkRow, JoinInvitePopup } from './chat/GroupInfo';
 import { formatDate } from '../lib/formatDate';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
@@ -159,15 +161,18 @@ function useAttachmentUrl(token: string, messageId: number): string | null {
   return url;
 }
 
-const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token, messageId }) => {
-  const url = useAttachmentUrl(token, messageId);
+// A photo in a bubble (or the Photos grid); tapping it opens the in-app
+// viewer with every photo of the conversation (chat/ChatImageViewer.tsx).
+const AttachmentImage: React.FC<{ token: string; messageId: number; onOpen?: () => void }> = ({ token, messageId, onOpen }) => {
+  const url = useChatImageUrl(token, messageId);
   if (!url) return <div className="w-48 h-32 bg-slate-200 rounded-lg animate-pulse" />;
   return (
     <img
       src={url}
       alt="attachment"
+      data-testid="chat-photo"
       className="max-w-[240px] max-h-[240px] rounded-lg object-cover cursor-pointer"
-      onClick={() => window.open(url, '_blank')}
+      onClick={onOpen}
     />
   );
 };
@@ -192,12 +197,33 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // The photo viewer: which photos (this conversation's, or the Photos grid's) and where to start.
+  const [photoViewer, setPhotoViewer] = useState<{ images: ChatImageItem[]; startId: number } | null>(null);
+  const conversationPhotos = useCallback(
+    (): ChatImageItem[] =>
+      messages
+        .filter((m) => m.message_type === 'image' && m.has_attachment)
+        .map((m) => ({ id: m.id, sender_name: m.sender_name, created_at: m.created_at, filename: m.attachment_filename })),
+    [messages]
+  );
+  useEffect(() => setPhotoViewer(null), [activeRoomId]);
   const [roomSearch, setRoomSearch] = useState('');
   // Chat list: only one-to-one chats with people of these Departments (empty = all).
   const [roomDepts, setRoomDepts] = useState<string[]>([]);
   // Phone bottom bar: which list the room column shows, and the "+" menu.
   const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
+  // The chat list, each account's own (chat/ChatListActions.tsx): the
+  // Archived view, the filter chip, and the open menu of one chat (anchor =
+  // the ⌄ on a computer; null = the sheet on a phone).
+  const [showArchived, setShowArchived] = useState(false);
+  const [chip, setChip] = useState<ChatChip>('all');
+  const chatLists = useChatLists(token);
+  const [rowMenu, setRowMenu] = useState<{ room: ChatRoom; anchor: DOMRect | null } | null>(null);
+  const longPress = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean; x: number; y: number }>({ timer: null, fired: false, x: 0, y: 0 });
+  useBackButtonClose(showArchived && !rowMenu, () => setShowArchived(false));
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+  // The list header's "+" menu (new chat / group / community / join).
+  const [headMenuOpen, setHeadMenuOpen] = useState(false);
   const canCall = user.role === 'superadmin' || !!user.can_use_calls;
   // Android app: what this phone allows for calls with the app closed (CallSetupCard.tsx).
   const callSetup = useCallSetup();
@@ -216,7 +242,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<number>>(new Set());
-  const [otherReadMessageId, setOtherReadMessageId] = useState<number | null>(null);
+  // Ticks on your own messages: for every other member, how far they have read
+  // and how far it has reached them (server: /api/chat/rooms/:id/receipts).
+  // One tick = sent; two grey = reached everyone; two blue = everyone has read.
+  const [receipts, setReceipts] = useState<{ id: number; read: number; delivered: number }[]>([]);
+  const receiptsRoomRef = useRef<number | null>(null);
+  const loadReceipts = useCallback(
+    async (roomId: number) => {
+      try {
+        const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/receipts`), { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && activeRoomIdRef.current === roomId) setReceipts((await res.json()).others || []);
+      } catch {
+        // the ticks simply stay as they were
+      }
+    },
+    [token]
+  );
+  const minRead = receipts.length ? Math.min(...receipts.map((r) => r.read)) : 0;
+  const minDelivered = receipts.length ? Math.min(...receipts.map((r) => Math.max(r.delivered, r.read))) : 0;
   // Group/community "Seen by ..." — who has read at least this far, for
   // just YOUR most recent message in the room (see fetchSeenBy below).
   // WhatsApp shows this per-message via long-press; here it's shown inline
@@ -471,12 +514,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const onRead = ({ roomId, userId, messageId }: { roomId: number; userId: number; messageId: number }) => {
       if (roomId !== activeRoomIdRef.current) return;
       if (userId !== user.id) {
-        setOtherReadMessageId((prev) => Math.max(prev || 0, messageId));
+        setReceipts((prev) => prev.map((r) => (r.id === userId ? { ...r, read: Math.max(r.read, messageId), delivered: Math.max(r.delivered, messageId) } : r)));
       }
       // Someone (including a THIRD member in a group, not just "the other
       // participant" tracked above) just read further — the "Seen by ..."
       // caption on our last own message may need to grow.
       setSeenByRefreshTick((v) => v + 1);
+    };
+    const onDelivered = ({ roomId, userId, messageId }: { roomId: number; userId: number; messageId: number }) => {
+      if (roomId !== activeRoomIdRef.current || userId === user.id) return;
+      setReceipts((prev) => prev.map((r) => (r.id === userId ? { ...r, delivered: Math.max(r.delivered, messageId) } : r)));
+    };
+    // An admin deleted this group for everyone.
+    const onRoomDeleted = ({ roomId }: { roomId: number }) => {
+      if (roomId === activeRoomIdRef.current) {
+        activeRoomIdRef.current = null;
+        setActiveRoomId(null);
+        setShowInfoPanel(false);
+        setMessages([]);
+      }
+      fetchRooms();
     };
     const onPresence = ({ userId, online }: { userId: number; online: boolean }) => {
       setOnlineUserIds((prev) => {
@@ -487,7 +544,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       });
     };
     const onMembersChanged = ({ roomId }: { roomId: number }) => {
-      if (roomId === activeRoomIdRef.current) fetchMembers(roomId);
+      if (roomId === activeRoomIdRef.current) {
+        fetchMembers(roomId);
+        void loadReceipts(roomId);
+      }
       fetchRooms();
     };
     // Group name / photo / description / settings changed.
@@ -523,6 +583,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     socket.on('message_unsent', onUnsent);
     socket.on('user_typing', onTyping);
     socket.on('message_read', onRead);
+    socket.on('message_delivered', onDelivered);
+    socket.on('room_deleted', onRoomDeleted);
     socket.on('presence_change', onPresence);
     socket.on('members_changed', onMembersChanged);
     // Who is online right now — presence_change only reports changes, and
@@ -539,6 +601,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('message_unsent', onUnsent);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
+      socket.off('message_delivered', onDelivered);
+      socket.off('room_deleted', onRoomDeleted);
       socket.off('presence_change', onPresence);
       socket.off('members_changed', onMembersChanged);
       socket.off('room_updated', onRoomUpdated);
@@ -555,12 +619,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setEditing(null);
       setPins([]);
       setPinIndex(0);
-      setOtherReadMessageId(null);
+      setReceipts([]);
+      receiptsRoomRef.current = roomId;
       setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
       activeRoomIdRef.current = roomId;
       void fetchPins(roomId);
+      void loadReceipts(roomId);
       // Members are needed up-front for @mention autocomplete in a group/
       // community, not just when the info panel is opened — see
       // handleTyping/mentionCandidates below.
@@ -588,7 +654,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       }
       setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, unread_count: 0 } : r)));
     },
-    [token, rooms, fetchMembers]
+    [token, rooms, fetchMembers, loadReceipts]
   );
 
   // Push-notification deep link (see App.tsx's pendingChatRoomId) — opens
@@ -633,9 +699,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }, []);
 
+  // A new message while a chat is open scrolls down smoothly; opening a chat
+  // jumps straight to the newest message (no scrolling by hand), and keeps it
+  // there for a moment while pictures and files lay out and make the list taller.
+  const openedScrollRoom = useRef<number | null>(null);
   useEffect(() => {
-    scrollMessagesToBottom(true);
-  }, [messages.length, scrollMessagesToBottom]);
+    if (activeRoomId === null) {
+      openedScrollRoom.current = null;
+      return;
+    }
+    if (loadingMessages || !messages.length) return;
+    if (openedScrollRoom.current === activeRoomId) {
+      scrollMessagesToBottom(true);
+      return;
+    }
+    openedScrollRoom.current = activeRoomId;
+    scrollMessagesToBottom(false);
+    const timers = [60, 200, 500, 1000].map((ms) => setTimeout(() => scrollMessagesToBottom(false), ms));
+    return () => timers.forEach(clearTimeout);
+  }, [messages.length, activeRoomId, loadingMessages, scrollMessagesToBottom]);
 
   // window.visualViewport is the standards-based, actually-reliable way to
   // know the real visible area in a WebView, keyboard included — unlike
@@ -1029,9 +1111,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const byDept = roomDepts.length
       ? byTab.filter((r) => r.type === 'direct' && !!r.other_participant && roomDepts.includes(deptOf.get(r.other_participant.id) || ''))
       : byTab;
-    if (!q) return byDept;
-    return byDept.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory]);
+    // Archived chats only in the Archived view (a search finds them too);
+    // the filter chip; pinned chats on top (first pinned first).
+    const byArchive = byDept.filter((r) => (q ? true : showArchived ? !!r.archived : !r.archived));
+    const byChip = showArchived ? byArchive : byArchive.filter((r) => chipMatches(r, chip));
+    const found = q ? byChip.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q)) : byChip;
+    return showArchived ? found : [...found.filter((r) => r.pinned), ...found.filter((r) => !r.pinned)];
+  }, [rooms, roomSearch, user.id, listTab, roomDepts, directory, showArchived, chip]);
+  const archivedRooms = rooms.filter((r) => r.archived);
+  const archivedUnread = archivedRooms.filter(isUnread).length;
+  const pinnedCount = rooms.filter((r) => r.pinned).length;
   const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
     window.dispatchEvent(
       new CustomEvent('credence:start-call', {
@@ -1081,20 +1170,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             <UserRound className="w-5 h-5" />
           </button>
           <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
-            <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
+            {/* Opens on hover / focus on a computer, and on a tap too: Safari on
+                iPhone doesn't focus a tapped button, so focus-within alone
+                never opened it there (the Dashboard chat head's window). */}
+            {headMenuOpen && <div className="fixed inset-0 z-10" onClick={() => setHeadMenuOpen(false)} />}
+            <button type="button" onClick={() => setHeadMenuOpen((v) => !v)} aria-label="New chat" aria-expanded={headMenuOpen} className="relative z-20 p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
             </button>
-            <div className="hidden group-hover:block group-focus-within:block absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-44 z-20">
-              <button type="button" onClick={() => setShowNewChatModal('direct')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+            <div className={`${headMenuOpen ? 'block' : 'hidden'} group-hover:block group-focus-within:block absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-44 z-20`}>
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('direct'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-slate-400" /> New Chat
               </button>
-              <button type="button" onClick={() => setShowNewChatModal('group')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('group'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Users className="w-4 h-4 text-slate-400" /> New Group
               </button>
-              <button type="button" onClick={() => setShowNewChatModal('community')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setShowNewChatModal('community'); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-slate-400" /> New Community
               </button>
-              <button type="button" onClick={() => setJoinCode('')} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
+              <button type="button" onClick={() => { setHeadMenuOpen(false); setJoinCode(''); }} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">
                 <LinkIcon className="w-4 h-4 text-slate-400" /> Join with a link
               </button>
             </div>
@@ -1120,6 +1213,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 </button>
               )}
             </div>
+          )}
+          {listTab !== 'calls' && !showArchived && (
+            <ChatListChips chip={chip} setChip={setChip} rooms={rooms} lists={chatLists.lists} onCreate={chatLists.create} onRemove={chatLists.remove} />
           )}
         </div>
         <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
@@ -1147,11 +1243,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </button>
             </div>
           )}
-          {filteredRooms.length === 0 && (
+          {listTab !== 'calls' && showArchived && (
+            <div className="px-4 py-2.5 border-b border-slate-100 flex items-center gap-2 bg-slate-50/70">
+              <button type="button" onClick={() => setShowArchived(false)} className="p-1.5 -ml-1.5 rounded-full hover:bg-slate-200/60" aria-label="Back to chats">
+                <ArrowLeft className="w-4 h-4 text-slate-600" />
+              </button>
+              <span className="text-sm font-bold text-slate-800">Archived</span>
+              <span className="ml-auto text-[11px] text-slate-500">Stay here when new messages come</span>
+            </div>
+          )}
+          {listTab !== 'calls' && !showArchived && !roomSearch.trim() && archivedRooms.length > 0 && (
+            <button type="button" onClick={() => setShowArchived(true)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 hover:bg-slate-50 text-left">
+              <span className="w-11 flex justify-center shrink-0">
+                <Archive className="w-5 h-5 text-slate-500" />
+              </span>
+              <span className="flex-1 text-sm font-semibold text-slate-700">Archived</span>
+              <span className={`text-xs font-bold ${archivedUnread ? 'text-emerald-600' : 'text-slate-400'}`}>{archivedUnread || archivedRooms.length}</span>
+            </button>
+          )}
+          {filteredRooms.length === 0 && showArchived && <div className="p-8 text-center text-sm text-slate-400">No archived chats.</div>}
+          {filteredRooms.length === 0 && !showArchived && (
             <div className="p-8 text-center text-sm text-slate-400">
               {roomDepts.length > 0
                 ? 'No chat with anyone in these departments yet — tap + to start one.'
-                : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+                : chip !== 'all' && listTab !== 'calls'
+                  ? chip === 'unread' ? 'No unread chats.' : chip === 'favorites' ? 'No favourites yet — open a chat\'s menu (⌄, or hold it on a phone) and Add to Favorites.' : 'No chats in this list yet — open a chat\'s menu and Add to list.'
+                  : listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
             </div>
           )}
           {filteredRooms.map((room) => {
@@ -1170,8 +1287,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               <button
                 key={room.id}
                 type="button"
-                onClick={() => openRoom(room.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-50 text-left ${
+                onClick={() => {
+                  // A hold that opened the menu isn't also a tap.
+                  if (longPress.current.fired) {
+                    longPress.current.fired = false;
+                    return;
+                  }
+                  openRoom(room.id);
+                }}
+                // Computer: right-click opens the chat's menu.
+                onContextMenu={(e) => {
+                  if (listTab === 'calls') return;
+                  e.preventDefault();
+                  setRowMenu({ room, anchor: new DOMRect(e.clientX, e.clientY, 0, 0) });
+                }}
+                // Phone: hold the chat for half a second.
+                onTouchStart={(e) => {
+                  if (listTab === 'calls') return;
+                  const t = e.touches[0];
+                  longPress.current.fired = false;
+                  longPress.current.x = t.clientX;
+                  longPress.current.y = t.clientY;
+                  if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                  longPress.current.timer = setTimeout(() => {
+                    longPress.current.fired = true;
+                    try { navigator.vibrate?.(15); } catch { /* no vibration */ }
+                    setRowMenu({ room, anchor: null });
+                  }, 500);
+                }}
+                onTouchMove={(e) => {
+                  const t = e.touches[0];
+                  if (Math.abs(t.clientX - longPress.current.x) > 10 || Math.abs(t.clientY - longPress.current.y) > 10) {
+                    if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (longPress.current.timer) clearTimeout(longPress.current.timer);
+                }}
+                className={`group/row w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-50 text-left select-none ${
                   activeRoomId === room.id ? 'bg-blue-50' : ''
                 }`}
               >
@@ -1221,11 +1374,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     <span className="text-xs text-slate-500 truncate">{previewPrefix}{previewText}</span>
                     <span className="shrink-0 flex items-center gap-1">
                       {isMuted(room) && <BellOff className="w-3.5 h-3.5 text-slate-400" aria-label="Muted" />}
+                      {room.pinned && !showArchived && <Pin className="w-3.5 h-3.5 text-slate-400 rotate-45" aria-label="Pinned" />}
                       {room.unread_count > 0 && (
                         <span className={`${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1`}>
                           {room.unread_count > 99 ? '99+' : room.unread_count}
                         </span>
                       )}
+                      {room.unread_count === 0 && room.marked_unread && (
+                        <span className={`w-3 h-3 rounded-full ${isMuted(room) ? 'bg-slate-400' : 'bg-emerald-500'}`} aria-label="Marked as unread" />
+                      )}
+                      {/* Computer: the chat's menu, shown on hover. */}
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Options for ${name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowMenu({ room, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setRowMenu({ room, anchor: (e.currentTarget as HTMLElement).getBoundingClientRect() });
+                          }
+                        }}
+                        className={`hidden md:inline-flex w-0 opacity-0 overflow-hidden group-hover/row:w-6 group-hover/row:opacity-100 focus:w-6 focus:opacity-100 h-6 items-center justify-center rounded-full bg-white border border-slate-200 text-slate-500 transition-all ${
+                          rowMenu?.room.id === room.id ? '!w-6 !opacity-100' : ''
+                        }`}
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </span>
                     </span>
                   </div>
                 </div>
@@ -1234,6 +1413,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             );
           })}
         </div>
+
+        {rowMenu && (
+          <ChatRoomMenu
+            token={token}
+            room={rooms.find((r) => r.id === rowMenu.room.id) || rowMenu.room}
+            roomName={roomDisplayName(rowMenu.room, user.id)}
+            anchor={rowMenu.anchor}
+            pinnedCount={pinnedCount}
+            lists={chatLists.lists}
+            onCreateList={chatLists.create}
+            onClose={() => setRowMenu(null)}
+            onChanged={fetchRooms}
+            onGone={(id) => {
+              if (activeRoomId === id) {
+                setActiveRoomId(null);
+                setMessages([]);
+              }
+            }}
+            onCleared={(id) => {
+              if (activeRoomId === id) setMessages((prev) => prev.filter((m) => m.starred));
+            }}
+            userId={user.id}
+          />
+        )}
 
         {/* Phone bottom bar (full-screen Chat only): a floating glass pill
             with Chats / Groups / Calls / your photo — the active one widens
@@ -1543,7 +1746,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     </div>
                   );
                 const isMe = msg.sender_id === user.id;
-                const isRead = isMe && otherReadMessageId !== null && msg.id <= otherReadMessageId;
+                const isRead = isMe && minRead > 0 && msg.id <= minRead;
+                const isDelivered = isMe && minDelivered > 0 && msg.id <= minDelivered;
                 const unsent = !!msg.unsent_at;
                 // Long-press (phone) or right-click / the ⌄ button (computer)
                 // opens the message menu: react, reply, copy, delete.
@@ -1665,7 +1869,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                                 <div className="truncate">{msg.reply_to_content}</div>
                               </button>
                             )}
-                            {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
+                            {msg.message_type === 'image' && msg.has_attachment && (
+                              <AttachmentImage token={token} messageId={msg.id} onOpen={() => setPhotoViewer({ images: conversationPhotos(), startId: msg.id })} />
+                            )}
                             {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
                             {msg.message_type === 'file' && msg.has_attachment && (
                               <a
@@ -1687,7 +1893,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           {msg.starred && !unsent && <Star className="w-3 h-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
                           {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
+                          {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-sky-500" aria-label="Seen" /> : isDelivered ? <CheckCheck size={14} aria-label="Delivered" /> : <Check size={14} aria-label="Sent" />)}
                         </div>
                       </div>
                       <ReactionChips reactions={msg.reactions} meId={user.id} mine={isMe} onOpen={() => setWhoMsg(msg)} />
@@ -1954,7 +2160,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
             {activeRoom.type === 'direct' && (profile?.person ? <PersonDetails person={profile.person} /> : <div className="px-4 py-3 text-xs text-slate-400">Loading…</div>)}
-            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => <AttachmentImage token={token} messageId={id} />} onOpenFile={(id) => void openAttachment(id)} />}
+            {profile && <SharedMedia media={profile.media} links={profile.links} renderImage={(id) => (
+                  <AttachmentImage
+                    token={token}
+                    messageId={id}
+                    onOpen={() =>
+                      setPhotoViewer({
+                        images: profile.media
+                          .filter((m) => m.message_type === 'image')
+                          .map((m) => ({ id: m.id, sender_name: m.sender_name, created_at: m.created_at, filename: m.attachment_filename })),
+                        startId: id
+                      })
+                    }
+                  />
+                )} onOpenFile={(id) => void openAttachment(id)} />}
             {activeRoom.type === 'direct' && profile && (
               <CommonGroups
                 groups={profile.commonGroups}
@@ -2064,6 +2283,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
             >
               <LogOut className="w-4 h-4" /> Leave {activeRoom.type === 'community' ? 'Community' : 'Group'}
+            </button>
+          )}
+          {activeRoom.type !== 'direct' && (isRoomAdmin || user.role === 'superadmin') && (
+            <button
+              type="button"
+              onClick={async () => {
+                const what = activeRoom.type === 'community' ? 'community' : 'group';
+                if (!(await confirmDialog(`Delete this ${what} for everyone? All its messages, photos and files are removed for every member. This can't be undone.`, { tone: 'danger', confirmLabel: `Delete ${what}` }))) return;
+                const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                if (!res.ok) {
+                  const d = await res.json().catch(() => ({}));
+                  await confirmDialog(d.error || 'Could not delete it.', { tone: 'danger', confirmLabel: 'OK', cancelLabel: 'Close' });
+                  return;
+                }
+                setShowInfoPanel(false);
+                setActiveRoomId(null);
+                fetchRooms();
+              }}
+              className="p-4 border-t border-slate-100 flex items-center gap-2 text-sm font-medium text-rose-600 hover:bg-rose-50"
+            >
+              <Trash2 className="w-4 h-4" /> Delete {activeRoom.type === 'community' ? 'Community' : 'Group'} for everyone
             </button>
           )}
         </div>
@@ -2231,6 +2471,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           }}
         />
       )}
+      {photoViewer && <ChatImageViewer token={token} images={photoViewer.images} startId={photoViewer.startId} onClose={() => setPhotoViewer(null)} />}
     </div>
   );
 };
@@ -2301,7 +2542,11 @@ const MemberPickerModal: React.FC<{
         className="liquid-glass liquid-glass-in rounded-[32px] w-full md:w-96 flex flex-col overflow-hidden"
         // Fixed height (not max-height): the popup used to grow and shrink
         // with every letter typed in the search box, so it jumped around.
-        style={{ height: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : 'min(80dvh, 600px)', maxHeight: '80dvh' }}
+        // 100% = the box this popup covers: the screen, or — opened from the
+        // dashboard's chat head — the chat window, which shrinks to the part
+        // above the keyboard; a fixed 600px sheet stood taller than that
+        // window and its title and search box were cut off at the top.
+        style={{ height: keyboardInset ? `calc(100dvh - ${keyboardInset + 24}px)` : 'min(100%, 80dvh, 600px)', maxHeight: '100%' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pt-4 pb-3 flex items-center justify-between shrink-0">

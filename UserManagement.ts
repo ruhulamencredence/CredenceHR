@@ -22,10 +22,11 @@ import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
 import { appOn } from "./AppAccess";
-import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
+import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate, ensureRoleAccessTemplates } from "./AccessTemplateDefaults";
 import { passwordProblem } from "./src/lib/passwordPolicy";
 import { getTrackingScopeLists } from "./TrackingScope";
 import { employeeIdConflict } from "./EmployeeLoginId";
+import { keptUserRecordsOf } from "./UserRecordsGuard";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -42,6 +43,9 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // Who is a Head / Supervisor is Departments data: shown in the Users list
+  // only to an account with the Departments module's Read layer.
+  hasModuleLayer?: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   // AttendanceProjects.ts: replaces an account's check-in Project list — an
   // older screen sending the single attendance_project_id lands there too.
   replaceAttendanceProjects?: (queryDB: any, userId: number, rows: { project_id: number; valid_from: string | null; valid_to: string | null }[], by: number) => Promise<void>;
@@ -70,6 +74,16 @@ interface UserManagementRouteDeps {
   // set. A module_key not present in this map doesn't support layers yet.
   moduleLayerKeySets: Record<string, readonly string[]>;
 }
+
+// Why a login was made for someone who isn't an Employee (Add New User).
+export async function ensureUserExtraColumns(queryDB: (sql: string, params?: any[]) => Promise<any>): Promise<void> {
+  try {
+    await queryDB("/*unscoped*/ ALTER TABLE users ADD COLUMN non_employee_reason VARCHAR(255) NULL");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ users.non_employee_reason: " + err?.message);
+  }
+}
+
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
   const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets, replaceAttendanceProjects } = deps;
@@ -247,6 +261,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), async (_req: any, res) => {
     try {
       await ensureDefaultAccessTemplate(queryDB);
+      await ensureRoleAccessTemplates(queryDB, activeCompanyId());
       const rows: any = await queryDB("SELECT * FROM access_templates");
       res.json((rows as any[]).map(serializeTemplate).sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err: any) {
@@ -315,10 +330,45 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   });
 
   // 6. User Management (Admin Only)
+  // Add New User: who the login is for. An Employee's login comes from their
+  // Employee record (this list), and a new joiner's from HR Operations ->
+  // Onboarding — never a free-standing login for a staff member, which later
+  // turns into a duplicate account when the Employee is imported. A login for
+  // someone who isn't an Employee (auditor, vendor, a system account) needs a
+  // reason (users.non_employee_reason).
+  app.get("/api/users/employees-without-login", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (_req: any, res) => {
+    try {
+      const rows: any[] =
+        (await queryDB(
+          "SELECT id, name, employee_id, designation, department, email FROM all_employees WHERE user_id IS NULL AND COALESCE(is_active, 1) = 1 ORDER BY name"
+        )) || [];
+      res.json(rows.map((r) => ({ id: Number(r.id), name: r.name, employee_id: r.employee_id, designation: r.designation, department: r.department, email: r.email })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
-      const { name, email, password, role } = req.body;
-      if (!name || !email || !password) {
+      const { password, role } = req.body;
+      let { name, email } = req.body;
+      const employeeRowId = req.body.employee_id ? Number(req.body.employee_id) : null;
+      const nonEmployeeReason = String(req.body.non_employee_reason || "").trim().slice(0, 255);
+      let employee: any = null;
+      if (employeeRowId) {
+        const rows: any[] = (await queryDB("SELECT id, name, employee_id, email, user_id FROM all_employees WHERE id = ?", [employeeRowId])) || [];
+        employee = rows[0];
+        if (!employee) return res.status(404).json({ error: "Employee not found." });
+        if (employee.user_id) return res.status(400).json({ error: "This employee already has a login." });
+        name = employee.name;
+        email = String(email || employee.email || "").trim() || null;
+      } else if (nonEmployeeReason.length < 5) {
+        return res.status(400).json({
+          error:
+            "Pick the Employee this login is for. A new joiner gets their login from HR Operations → Onboarding → New Joiners. For someone who isn't an employee, say who they are (at least 5 letters)."
+        });
+      }
+      if (!name || (!email && !employee?.employee_id) || !password) {
         return res.status(400).json({ error: "Name, email and password are required" });
       }
       const pwBad = passwordProblem(password, { email, name });
@@ -326,9 +376,17 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: pwBad });
       }
 
-      const existing = await queryDB("SELECT id FROM users WHERE email = ?", [email]);
-      if (existing.length > 0) {
-        return res.status(400).json({ error: "Email already registered" });
+      if (email) {
+        const existing = await queryDB("SELECT id FROM users WHERE email = ?", [email]);
+        if (existing.length > 0) {
+          return res.status(400).json({ error: "Email already registered" });
+        }
+      }
+      // An Employee signs in with their Employee ID (EmployeeLoginId.ts).
+      const username = employee?.employee_id ? String(employee.employee_id).trim() : null;
+      if (username) {
+        const clash = await queryDB("SELECT id FROM users WHERE username = ?", [username]);
+        if (clash.length > 0) return res.status(400).json({ error: "That Employee ID is already another account's Login ID." });
       }
 
       // Only a Superadmin may hand out the Admin role. A plain Admin creating a new
@@ -338,11 +396,12 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const password_hash = await bcrypt.hash(password, 10);
 
       const result = await queryDB(
-        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
-        [name, email, password_hash, userRole]
+        "INSERT INTO users (name, email, username, password_hash, role, non_employee_reason) VALUES (?, ?, ?, ?, ?, ?)",
+        [name, email || null, username, password_hash, userRole, employee ? null : nonEmployeeReason]
       );
+      if (employee) await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ? AND user_id IS NULL", [result.insertId, employee.id]);
 
-      res.json({ success: true, id: result.insertId, name, email, role: userRole });
+      res.json({ success: true, id: result.insertId, name, email, username, role: userRole, employee_id: employee ? Number(employee.id) : null });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to create user" });
     }
@@ -520,6 +579,27 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
           }))
         );
       }
+      // Department Head (departments.head_user_id) and team Supervisor
+      // (department_teams.supervisor_user_id) — only for an account allowed to
+      // read Departments (Superadmin always); otherwise the fields are left out.
+      const seesDeptRoles =
+        req.user.role === "superadmin" || (!!deps.hasModuleLayer && (await deps.hasModuleLayer(req.user, "departments", "read").catch(() => false)));
+      const headOf = new Map<number, string[]>();
+      const supervisorOf = new Map<number, string[]>();
+      if (seesDeptRoles) {
+        const add = (m: Map<number, string[]>, uid: any, label: string) => {
+          const k = Number(uid);
+          if (!k) return;
+          const list = m.get(k) || [];
+          if (!list.includes(label)) list.push(label);
+          m.set(k, list);
+        };
+        const heads: any[] = (await queryDB("SELECT head_user_id, name FROM departments WHERE head_user_id IS NOT NULL").catch(() => [])) || [];
+        for (const h of heads) add(headOf, h.head_user_id, String(h.name));
+        const sups: any[] =
+          (await queryDB("SELECT t.supervisor_user_id, d.name FROM department_teams t JOIN departments d ON d.id = t.department_id WHERE t.supervisor_user_id IS NOT NULL").catch(() => [])) || [];
+        for (const t of sups) add(supervisorOf, t.supervisor_user_id, String(t.name));
+      }
       // Mobile App on (AppAccess.ts): the account's own switch, or the
       // workspace's "New accounts get the Mobile App" when it has none.
       const appRows: any[] = (await queryDB("SELECT id, can_use_app, group_id, role, is_platform_admin FROM users").catch(() => [])) || [];
@@ -528,6 +608,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       res.json(visibleUsers.map((u: any) => ({
         ...u,
         app_on: appOnById.get(Number(u.id)) ?? true,
+        dept_head_of: seesDeptRoles ? headOf.get(Number(u.id)) || [] : undefined,
+        dept_supervisor_of: seesDeptRoles ? supervisorOf.get(Number(u.id)) || [] : undefined,
         employee_active: !inactiveUsers.has(Number(u.id)),
         // From the linked Employee record (Users page department filter).
         department: departmentByUser.get(Number(u.id)) || null,
@@ -1978,6 +2060,17 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       if (target[0].role === "admin" && req.user.role !== "superadmin") {
         return res.status(403).json({ error: "Only the Superadmin can remove an Admin account." });
       }
+      // A login with work behind it (attendance, claims, leave, tasks,
+      // documents…) is never deleted — those records would go with it
+      // (UserRecordsGuard.ts). Block login keeps everything.
+      const kept = await keptUserRecordsOf(queryDB, Number(id));
+      if (kept.length) {
+        const list = kept.map((k) => `${k.count} ${k.label}${k.count === 1 ? "" : "s"}`).join(", ");
+        return res.status(409).json({
+          error: `This login has records that must be kept (${list}). Use Block login instead — it stops the sign-in and keeps everything.`,
+          kept
+        });
+      }
       await queryDB("DELETE FROM user_project_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
@@ -1992,6 +2085,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM users WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
+      // The database's own guard (ON DELETE RESTRICT) caught a record the list above missed.
+      if (err?.code === "ER_ROW_IS_REFERENCED_2" || err?.errno === 1451) {
+        return res.status(409).json({ error: "This login has records that must be kept. Use Block login instead — it stops the sign-in and keeps everything." });
+      }
       res.status(500).json({ error: err.message });
     }
   });

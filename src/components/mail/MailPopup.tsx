@@ -11,7 +11,20 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
-import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { useKeyboardGap, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+
+// Every Credence Mail popup on a phone: start below the status bar (the
+// Android app draws under it) and keep clear of the on-screen keyboard. The
+// card itself is capped at the room that's left (max-h-full), so with the
+// keyboard open it shrinks and scrolls inside — it never slides up off the
+// top of the screen with its title and search box.
+export const SHEET_TOP_PAD = 'max-sm:pt-[max(0.75rem,calc(var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))_+_0.5rem))]';
+export function useSheetKeyboardPad(extra = 8): React.CSSProperties | undefined {
+  const { gap } = useKeyboardGap();
+  return gap ? { paddingBottom: gap + extra } : undefined;
+}
+// A popup's search box stays at the top while its list scrolls under it.
+export const stickySearchCls = 'sticky top-0 z-10 -mx-1 px-1 pt-1 pb-2 bg-white/85 backdrop-blur-sm rounded-b-xl';
 
 export const MailPopup: React.FC<{
   title: React.ReactNode;
@@ -23,15 +36,15 @@ export const MailPopup: React.FC<{
   footer?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, icon, onClose, size = 'lg', head, footer, children }) => {
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad(0);
   useBackButtonClose(true, onClose);
   const width = size === 'md' ? 'sm:max-w-md' : size === 'xl' ? 'sm:max-w-4xl' : 'sm:max-w-2xl';
   // Drawn at the top of the page (a portal), so a popup opened from inside a
   // table cell (e.g. HR Letters -> Signatures) doesn't take on the cell's
   // right-aligned, no-wrap text or get cut by its scrolling.
   const popup = (
-    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 text-left whitespace-normal" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined} onClick={onClose}>
-      <div className={`w-full ${width} max-h-[92dvh] sm:max-h-[90vh] flex`} onClick={(e) => e.stopPropagation()}>
+    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 max-sm:pt-[calc(var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))_+_1.5rem)] text-left whitespace-normal" style={keyboardPad} onClick={onClose}>
+      <div className={`w-full ${width} max-h-full sm:max-h-[90vh] flex`} onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-t-[32px] sm:rounded-[32px] w-full flex flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-3">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 min-w-0 truncate">

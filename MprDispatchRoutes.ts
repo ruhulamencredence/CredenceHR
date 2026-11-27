@@ -194,20 +194,26 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     ]).catch(() => undefined);
 
   // The Qty the row asked for: its own requisitioned Qty, else the Budget
-  // row's Req. Qty. null when neither is a number.
+  // row's Req. Qty. null when neither is a number. The part closed short
+  // (set aside, Undelivered MPR) is no longer owed, so it comes off.
   async function targetOf(entryId: number): Promise<number | null> {
     const rows: any[] =
       (await queryDB(
-        `SELECT e.requisitioned_qty, bi.req_qty FROM entries e LEFT JOIN budget_items bi ON bi.id = e.budget_item_id WHERE e.id = ?`,
+        `SELECT e.requisitioned_qty, COALESCE(e.closed_short_qty, 0) AS closed_short_qty, bi.req_qty FROM entries e LEFT JOIN budget_items bi ON bi.id = e.budget_item_id WHERE e.id = ?`,
         [entryId]
       )) || [];
     const r = rows[0];
     if (!r) return null;
+    const base = askedOf(r);
+    return base === null ? null : Math.max(0, r2(base - (Number(r.closed_short_qty) || 0)));
+  }
+  // What a row asked for, before anything was closed short.
+  const askedOf = (r: any): number | null => {
     const own = r.requisitioned_qty === null || r.requisitioned_qty === undefined ? null : Number(r.requisitioned_qty);
     if (own !== null && Number.isFinite(own) && own > 0) return own;
     const fromBudget = num(r.req_qty);
     return fromBudget !== null && fromBudget > 0 ? fromBudget : null;
-  }
+  };
 
   // Works the row's totals and status out from its dispatches again.
   //   received          the whole Qty has arrived (no Qty known: everything sent has arrived)
@@ -255,7 +261,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
 
   // One MPR row as the Dispatch page shows it.
   const ROW_SQL = `
-    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.budget_id, e.created_by,
+    SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.budget_id, e.created_by, e.for_project_id,
       e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at, e.md_queued_by, e.md_confirmed_at,
       qu.name AS queued_by_name, cu.name AS confirmed_by_name,
       p.project_name, m.mpr_no, j.job_no, b.budget_name, u.name AS user_name,
@@ -672,7 +678,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by)) || !entry.md_queued_at || entry.md_confirmed_at) continue;
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by, entry.for_project_id)) || !entry.md_queued_at || entry.md_confirmed_at) continue;
         const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
         if (Number(sent[0]?.n || 0) > 0) continue;
         const r: any = await queryDB("UPDATE entries SET md_confirmed_at = NOW(), md_confirmed_by = ? WHERE id = ? AND md_queued_at IS NOT NULL AND md_confirmed_at IS NULL", [me, id]);
@@ -757,7 +763,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const byQueuer = new Map<number, string[]>();
       for (const id of ids) {
         const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
-        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by))) {
+        if (!entry || !(await onTeam(queryDB, req.user, entry.project_id, entry.created_by, entry.for_project_id))) {
           notYours++;
           continue;
         }
@@ -973,6 +979,201 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       ]
     };
   }
+
+  // =========================================================================
+  // Undelivered MPR & Close short (PEPM Reports layer "close_short",
+  // explicit-only). A row whose material won't (all) arrive inside its
+  // Budget: the rest is set aside — no longer owed, Purchase can't dispatch
+  // it, its Budget allocation stays with the row (nothing else can take it)
+  // until someone decides where it goes. Nothing is deleted; Undo puts it
+  // back while the Budget's last delivery date hasn't passed.
+  // =========================================================================
+  const closeGate = [authenticateToken, requireModule("reports"), requireModuleLayer("reports", "close_short")];
+  // Per row: asked, received, on the way (sent, not received), set aside,
+  // and what can still be set aside (asked - set aside - received - on the way).
+  const UNDELIVERED_SQL = `
+    SELECT e.id, e.item_name, e.delivery_date, e.requisitioned_qty, e.created_by, e.budget_id, e.project_id,
+           COALESCE(e.closed_short_qty, 0) AS closed_short_qty, e.closed_short_at, e.closed_short_reason,
+           csu.name AS closed_short_by_name, bi.req_qty, bi.unit, j.job_no, m.mpr_no, p.project_name, u.name AS owner_name,
+           b.budget_name, b.delivery_date_to,
+           COALESCE((SELECT SUM(d.received_qty) FROM mpr_dispatches d WHERE d.entry_id = e.id AND d.status = 'received'), 0) AS received_qty,
+           COALESCE((SELECT SUM(d.qty) FROM mpr_dispatches d WHERE d.entry_id = e.id AND d.status = 'sent'), 0) AS on_way_qty,
+           (SELECT ROUND(COALESCE(e.computed_amount, 0) / NULLIF(e.requisitioned_qty, 0), 4)) AS unit_amount
+    FROM entries e
+    LEFT JOIN budget_items bi ON bi.id = e.budget_item_id
+    LEFT JOIN jobs j ON j.id = e.job_id
+    LEFT JOIN mpr_numbers m ON m.id = e.mpr_id
+    LEFT JOIN projects p ON p.id = e.project_id
+    LEFT JOIN users u ON u.id = e.created_by
+    LEFT JOIN users csu ON csu.id = e.closed_short_by
+    LEFT JOIN budgets b ON b.id = e.budget_id
+    WHERE e.deleted_at IS NULL`;
+  const undeliveredOut = (r: any, today: string) => {
+    const asked = askedOf(r) ?? 0;
+    const setAside = Number(r.closed_short_qty) || 0;
+    const received = Number(r.received_qty) || 0;
+    const onWay = Number(r.on_way_qty) || 0;
+    const owed = Math.max(0, r2(asked - setAside - received));
+    const due = toDateOnlyString(r.delivery_date);
+    const unitAmount = Number(r.unit_amount) || 0;
+    return {
+      id: Number(r.id),
+      jobNo: r.job_no,
+      mprNo: r.mpr_no,
+      item: r.item_name,
+      unit: r.unit || "",
+      projectId: Number(r.project_id),
+      projectName: r.project_name,
+      owner: r.owner_name || "",
+      budgetId: r.budget_id ? Number(r.budget_id) : null,
+      budgetName: r.budget_name || "",
+      budgetLastDate: toDateOnlyString(r.delivery_date_to),
+      deliveryDate: due,
+      passed: !!due && due < today,
+      asked,
+      received,
+      onWay,
+      setAside,
+      owed,
+      canSetAside: Math.max(0, r2(asked - setAside - received - onWay)),
+      owedValue: r2(owed * unitAmount),
+      setAsideValue: r2(setAside * unitAmount),
+      setAsideAt: r.closed_short_at ? new Date(r.closed_short_at).toISOString() : null,
+      setAsideBy: r.closed_short_by_name || "",
+      setAsideReason: r.closed_short_reason || ""
+    };
+  };
+
+  // Budgets with MPR rows, newest first — the page's Budget picker.
+  app.get(
+    "/api/mpr/undelivered/budgets",
+    ...closeGate,
+    handler(async (_req, res) => {
+      const rows: any[] =
+        (await queryDB(
+          `SELECT b.id, b.budget_name, b.delivery_date_from, b.delivery_date_to, COUNT(e.id) AS rows_n
+           FROM budgets b JOIN entries e ON e.budget_id = b.id AND e.deleted_at IS NULL
+           GROUP BY b.id ORDER BY COALESCE(b.delivery_date_to, b.created_at) DESC, b.id DESC`
+        )) || [];
+      res.json(rows.map((b) => ({ id: Number(b.id), name: b.budget_name, from: toDateOnlyString(b.delivery_date_from), to: toDateOnlyString(b.delivery_date_to), rows: Number(b.rows_n) })));
+    })
+  );
+
+  // GET /api/mpr/undelivered?budget_id=&project_id=&show=passed|all
+  //   { rows: still owed, setAside: rows with a part set aside, totals }
+  app.get(
+    "/api/mpr/undelivered",
+    ...closeGate,
+    handler(async (req, res) => {
+      const today = todayInDhaka();
+      const budgetId = Number(req.query.budget_id) || null;
+      const projectId = Number(req.query.project_id) || null;
+      const params: any[] = [];
+      let where = "";
+      if (budgetId) {
+        where += " AND e.budget_id = ?";
+        params.push(budgetId);
+      }
+      if (projectId) {
+        where += " AND e.project_id = ?";
+        params.push(projectId);
+      }
+      const all = ((await queryDB(`${UNDELIVERED_SQL}${where} ORDER BY e.delivery_date ASC, e.id ASC LIMIT 5000`, params)) || []).map((r: any) => undeliveredOut(r, today));
+      const owedRows = all.filter((r: any) => r.owed > EPS && (req.query.show === "all" || r.passed || (r.budgetLastDate && r.deliveryDate && r.deliveryDate > r.budgetLastDate)));
+      const setAside = all.filter((r: any) => r.setAside > EPS);
+      res.json({
+        rows: owedRows,
+        setAside,
+        totals: {
+          rows: all.length,
+          owedRows: all.filter((r: any) => r.owed > EPS).length,
+          owedValue: r2(all.reduce((n: number, r: any) => n + r.owedValue, 0)),
+          setAsideRows: setAside.length,
+          setAsideValue: r2(setAside.reduce((n: number, r: any) => n + r.setAsideValue, 0))
+        }
+      });
+    })
+  );
+
+  // POST /api/mpr/close-short { items: [{ entryId, qty }], reason }
+  app.post(
+    "/api/mpr/close-short",
+    ...closeGate,
+    handler(async (req, res) => {
+      const me = Number(req.user.id);
+      const reason = str(req.body?.reason, 500);
+      if (reason.length < 3) throw bad("Write why the rest is set aside.");
+      const items: { entryId: number; qty: number }[] = (Array.isArray(req.body?.items) ? req.body.items : [])
+        .map((x: any) => ({ entryId: Number(x?.entryId), qty: num(x?.qty) ?? 0 }))
+        .filter((x: any) => x.entryId > 0)
+        .slice(0, 500);
+      if (!items.length) throw bad("Pick at least one MPR row.");
+      const today = todayInDhaka();
+      const problems: string[] = [];
+      let done = 0;
+      for (const it of items) {
+        const r: any = ((await queryDB(`${UNDELIVERED_SQL} AND e.id = ?`, [it.entryId])) || [])[0];
+        if (!r) {
+          problems.push(`Row #${it.entryId} not found.`);
+          continue;
+        }
+        const row = undeliveredOut(r, today);
+        if (!(it.qty > 0)) {
+          problems.push(`${row.mprNo}: enter how much to set aside.`);
+          continue;
+        }
+        if (it.qty > row.canSetAside + EPS) {
+          problems.push(
+            `${row.mprNo}: at most ${row.canSetAside} can be set aside${row.onWay > 0 ? ` (${row.onWay} is on the way — cancel that dispatch first to set it aside too)` : ""}.`
+          );
+          continue;
+        }
+        const qty = r2(it.qty);
+        await queryDB(
+          "UPDATE entries SET closed_short_qty = COALESCE(closed_short_qty, 0) + ?, closed_short_at = NOW(), closed_short_by = ?, closed_short_reason = ? WHERE id = ?",
+          [qty, me, reason, it.entryId]
+        );
+        await refreshEntry(it.entryId);
+        await log(it.entryId, null, "close_short", qty, `Set aside — ${reason}`, me);
+        await queryDB("INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, 'close_short', ?, ?)", [
+          it.entryId,
+          me,
+          String(row.setAside),
+          `${qty}${row.unit ? ` ${row.unit}` : ""} set aside — ${reason}`.slice(0, 1000)
+        ]).catch(() => undefined);
+        done++;
+      }
+      if (!done && problems.length) throw bad(problems.join(" "));
+      res.json({ done, problems });
+    })
+  );
+
+  // POST /api/mpr/close-short/undo { entryId } — the set-aside Qty is owed
+  // again; only while the Budget's last delivery date hasn't passed.
+  app.post(
+    "/api/mpr/close-short/undo",
+    ...closeGate,
+    handler(async (req, res) => {
+      const me = Number(req.user.id);
+      const entryId = Number(req.body?.entryId);
+      const r: any = ((await queryDB(`${UNDELIVERED_SQL} AND e.id = ?`, [entryId])) || [])[0];
+      if (!r) throw bad("MPR row not found.", 404);
+      const row = undeliveredOut(r, todayInDhaka());
+      if (!(row.setAside > 0)) throw bad("Nothing is set aside on this row.");
+      if (row.budgetLastDate && row.budgetLastDate < todayInDhaka())
+        throw bad(`This Budget's last delivery date (${row.budgetLastDate}) has passed — the set-aside Qty can't be owed in it again.`);
+      await queryDB("UPDATE entries SET closed_short_qty = 0, closed_short_at = NULL, closed_short_by = NULL, closed_short_reason = NULL WHERE id = ?", [entryId]);
+      await refreshEntry(entryId);
+      await log(entryId, null, "close_short_undo", row.setAside, "Set-aside Qty owed again", me);
+      await queryDB("INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, 'close_short_undo', ?, ?)", [
+        entryId,
+        me,
+        String(row.setAside),
+        `${row.setAside}${row.unit ? ` ${row.unit}` : ""} owed again`
+      ]).catch(() => undefined);
+      res.json({ success: true });
+    })
+  );
 
   return { refreshEntry, canReceive, myProjectIds };
 }

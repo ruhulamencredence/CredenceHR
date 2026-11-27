@@ -288,7 +288,7 @@ export async function collectExitDues(queryDB: (sql: string, params?: any[]) => 
     const total = money((billItems || []).filter((i: any) => Number(i.bill_id) === Number(b.id)).reduce((t: number, i: any) => t + Number(i.amount || 0), 0));
     out.push({ key: `bill:${b.id}`, kind: "bill", label: `Conveyance bill ${String(b.bill_date || "").slice(0, 10)}`, detail: "Not paid out yet", amount: total || null, blocking: false, added: false });
   }
-  for (const v of (rides || []).filter((x: any) => Number(x.employee_user_id) === userId && ["pending", "approved", "assigned", "ongoing"].includes(x.status)))
+  for (const v of (rides || []).filter((x: any) => Number(x.employee_user_id) === userId && ["pending", "approved", "assigned", "ongoing", "dropped"].includes(x.status)))
     out.push({ key: `vehicle:${v.id}`, kind: "vehicle", label: `Vehicle requisition — ${String(v.ride_date || "").slice(0, 10)}`, detail: v.purpose ? `${v.status}: ${v.purpose}` : v.status, amount: null, blocking: false, added: false });
   return out;
 }

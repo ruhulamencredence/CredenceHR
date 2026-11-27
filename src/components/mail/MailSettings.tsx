@@ -10,7 +10,7 @@
 import React, { useRef, useState } from 'react';
 import { Settings, Plus, Trash2, Star, ImagePlus, Loader2, X, PenLine } from 'lucide-react';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { MAIL_TIME_ZONES, MailSettings as Settings_, MailSignature, SignatureFields, credenceSignatureHtml, fileToDataUrl, mailFetch } from '../../lib/mailApi';
+import { MAIL_TIME_ZONES, MailSettings as Settings_, MailSignature, SignatureFields, credenceSignatureHtml, fileToDataUrl, mailFetch, signatureContent } from '../../lib/mailApi';
 import { sanitizeMailHtml } from './MailBody';
 import { MailPopup, Tabs, Toggle, inputCls, labelCls, primaryBtn, ghostBtn } from './MailPopup';
 
@@ -134,7 +134,7 @@ const SignatureEditor: React.FC<{ token: string; sig: MailSignature; onChange: (
       {design === 'credence' && (
         <div>
           <div className={labelCls}>Preview</div>
-          <div className="rounded-2xl bg-white border border-slate-200 p-3 overflow-x-auto" dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(sig.content, true).html }} />
+          <div className="rounded-2xl bg-white border border-slate-200 p-3 overflow-x-auto" dangerouslySetInnerHTML={{ __html: sanitizeMailHtml(signatureContent(sig), true).html }} />
         </div>
       )}
       <div className="flex justify-end">

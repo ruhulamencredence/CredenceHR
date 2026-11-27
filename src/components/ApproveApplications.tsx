@@ -5,9 +5,10 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { RequestDetailsInline } from './RequestDetails';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet, UserPlus, Search, SlidersHorizontal, Undo2, Check } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -27,7 +28,9 @@ import { ApproverSignatureCard } from './ApproverSignatureCard';
 
 import { SearchSelect } from './Combobox';
 import { formatDuration } from '../lib/rideDuration';
-import { DriverOption, driverOptionLabel, sortDrivers } from '../lib/driverPicker';
+import { ChangeTripPopup, tripTitle, clock } from './RideTrip';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { rideTimeOf, vehicleChoices, type SlotVehicle } from '../lib/vehicleSlots';
 interface ApproveApplicationsProps {
   token: string;
   onBack: () => void;
@@ -50,6 +53,13 @@ interface MyApprovalItem extends ClaimReviewFields {
   // Nobody active is on its current Layer any more — a Superadmin decides.
   layer_stuck?: boolean;
   created_at: string;
+  // The requester's Employee ID / Designation / Department (search).
+  requested_by_code?: string | null;
+  requested_by_designation?: string | null;
+  requested_by_department?: string | null;
+  // Every earlier Layer's decision before it reached this account (the
+  // card's "Before it reached you" box) — GET /api/my-approvals.
+  trail?: TrailStep[];
   // Only present on a 'bill_claim' item — every Check In/Out (check-in/out)
   // this Bill Claim's Amount was built from, each with its own
   // location, so the approver can see exactly where it happened before
@@ -76,6 +86,10 @@ interface MyApprovalItem extends ClaimReviewFields {
     ride_date: string;
     start_time: string;
     estimated_duration_hours: number;
+    // Round trip / Drop & pick up / One way — the approver may change it.
+    trip_type?: 'round' | 'drop_pickup' | 'one_way';
+    pickup_mode?: 'time' | 'call' | null;
+    pickup_at?: string | null;
   } | null;
   asset_requisition_details?: {
     asset_category: string;
@@ -138,11 +152,7 @@ const hrChangeRows = (d: NonNullable<MyApprovalItem['hr_action_details']>) =>
     return { label, from: f(d.from[k]), to: f(d.to[k]) };
   });
 
-interface AvailableVehicle {
-  id: number;
-  vehicle_no: string;
-  model: string;
-}
+type AvailableVehicle = SlotVehicle;
 
 
 // Two letters for the requester's round tile on a phone card.
@@ -151,6 +161,134 @@ const initialsOf = (name: string) => {
   if (!parts.length) return '?';
   return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
+
+interface TrailStep {
+  step: number | null;
+  who: string | null;
+  role: string | null;
+  action: 'approved' | 'rejected' | 'returned';
+  remarks: string | null;
+  at: string | null;
+  changes: string[];
+}
+
+// "15 Nov 2026, 4:05 PM" from a DB time ("YYYY-MM-DD HH:MM:SS") or ISO.
+const whenOf = (v: string | null | undefined) => {
+  if (!v) return '';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return String(v);
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+};
+// Whole days since it was submitted (0 = today).
+const ageDays = (v: string | null | undefined) => {
+  const d = new Date(String(v || '').replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return 0;
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.max(0, Math.round((start(new Date()) - start(d)) / 864e5));
+};
+const ageChip = (days: number) =>
+  days >= 3
+    ? 'bg-rose-50 text-rose-700 border-rose-200'
+    : days >= 1
+      ? 'bg-amber-50 text-amber-700 border-amber-200'
+      : 'bg-emerald-50 text-emerald-700 border-emerald-200';
+const ageText = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`);
+
+// "Before it reached you": every earlier Layer — who, what, when, remarks and
+// what they changed. Long ones stay short: only the last two steps are open
+// (plus any that changed something or was a Return); the rest fold into one
+// line, and a long remark shows two lines with "more".
+const TrailBox: React.FC<{ trail: TrailStep[]; nextStep: number | null; className?: string }> = ({ trail, nextStep, className = '' }) => {
+  const [all, setAll] = useState(false);
+  const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  if (!trail.length) return null;
+  const keep = (t: TrailStep, i: number) => all || i >= trail.length - 2 || t.changes.length > 0 || t.action === 'returned';
+  const hidden = trail.filter((t, i) => !keep(t, i)).length;
+  const actionStyle: Record<string, string> = { approved: 'text-emerald-700', returned: 'text-amber-700', rejected: 'text-rose-700' };
+  const actionLabel: Record<string, string> = { approved: 'Approved', returned: 'Returned', rejected: 'Rejected' };
+  return (
+    <div className={`rounded-xl border border-indigo-100 bg-indigo-50/40 px-3 py-2.5 text-xs text-slate-700 ${className}`}>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-800 mb-1.5">Before it reached you</div>
+      {hidden > 0 && (
+        <button type="button" onClick={(e) => { e.stopPropagation(); setAll(true); }} className="w-full text-left py-1.5 border-t border-dashed border-indigo-100 text-indigo-700 font-semibold hover:underline">
+          {hidden} earlier step{hidden === 1 ? '' : 's'} — show
+        </button>
+      )}
+      {trail.map((t, i) =>
+        !keep(t, i) ? null : (
+          <div key={i} className="flex gap-2.5 py-1.5 border-t border-dashed border-indigo-100">
+            <span
+              className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${
+                t.action === 'approved' ? 'bg-emerald-100 text-emerald-700' : t.action === 'returned' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+              }`}
+            >
+              {t.action === 'approved' ? <Check className="w-3 h-3" /> : t.action === 'returned' ? <Undo2 className="w-3 h-3" /> : <X className="w-3 h-3" />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="leading-snug">
+                <b className="text-slate-900">{t.step ? `Layer ${t.step} · ` : ''}{t.who || 'Someone'}</b>
+                {t.role && <span className="text-slate-500"> ({t.role})</span>}
+                {' · '}
+                <span className={`font-bold ${actionStyle[t.action] || ''}`}>{actionLabel[t.action] || t.action}</span>
+                {t.at && <span className="text-slate-400"> · {whenOf(t.at)}</span>}
+              </div>
+              {t.remarks && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenNotes((cur) => {
+                      const n = new Set(cur);
+                      if (n.has(i)) n.delete(i);
+                      else n.add(i);
+                      return n;
+                    });
+                  }}
+                  className={`mt-0.5 block text-left text-slate-600 break-words ${openNotes.has(i) ? '' : 'line-clamp-2'}`}
+                  title={openNotes.has(i) ? 'Show less' : 'Show all'}
+                >
+                  “{t.remarks}”
+                </button>
+              )}
+              {t.changes.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {t.changes.map((c, j) => (
+                    <span key={j} className="px-2 py-0.5 rounded-md bg-orange-50 border border-orange-200 text-orange-800 font-semibold">
+                      Changed · {c}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      )}
+      <div className="flex gap-2.5 pt-1.5 border-t border-dashed border-indigo-100 items-center">
+        <span className="shrink-0 w-5 h-5 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-[10px] font-extrabold">{nextStep ?? trail.length + 1}</span>
+        <span className="font-bold text-orange-700">Now waiting on you</span>
+      </div>
+    </div>
+  );
+};
+
+// One filter chip (type / waiting time) with its count.
+const FilterChip: React.FC<{ label: string; n: number; on: boolean; dot?: string; onClick: () => void }> = ({ label, n, on, dot, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={on}
+    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors ${
+      on ? 'bg-[var(--g-accent,#ff6700)] border-transparent text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+    }`}
+  >
+    {dot && <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />}
+    {label}
+    <span className={`px-1.5 rounded-full text-[11px] ${on ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'}`}>{n}</span>
+  </button>
+);
+
+// Requests of the same kind share one filter chip (the three Leave sources).
+const typeKeyOf = (t: string) => (t === 'leave_application' || t === 'leave_direct' || t === 'leave_reliever' ? 'leave' : t);
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'bill_claim'
@@ -208,6 +346,18 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const isNativeApp = Capacitor.isNativePlatform();
   const authHeaders = { Authorization: `Bearer ${token}` };
   const [items, setItems] = useState<MyApprovalItem[]>([]);
+  // Filters (Pending list): search, kind, how long it has waited, when it
+  // was submitted, who sent it, and the order. They only narrow what is
+  // shown — Select all / Approve selected act on what is shown.
+  const [fq, setFq] = useState('');
+  const [fType, setFType] = useState('all');
+  const [fAge, setFAge] = useState<'all' | 'today' | 'mid' | 'old'>('all');
+  const [fWhen, setFWhen] = useState<'any' | 'today' | '7' | '30' | 'custom'>('any');
+  const [fFrom, setFFrom] = useState('');
+  const [fTo, setFTo] = useState('');
+  const [fWho, setFWho] = useState('');
+  const [fSort, setFSort] = useState<'oldest' | 'newest'>('oldest');
+  const [filterSheet, setFilterSheet] = useState(false);
   // Pending queue, or this account's own approve / reject history.
   const [view, setView] = useState<'pending' | 'history'>('pending');
   const [loading, setLoading] = useState(true);
@@ -284,6 +434,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
 
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => load(true));
+  // Change a ride's trip from its approval card (RideTrip.tsx).
+  const [tripFor, setTripFor] = useState<import('./RideTrip').TripRide | null>(null);
   const load = async (silent?: unknown) => {
     if (silent !== true) setLoading(true);
     try {
@@ -312,6 +464,20 @@ useLiveRefresh(() => load(true));
     if (item.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
       return;
+    }
+    // A ride request is never rejected without a reason (the server refuses too).
+    if (item.source_type === 'vehicle_requisition' && action === 'rejected' && !(remarksDraft[key] || '').trim()) {
+      setMessage({ type: 'error', text: 'Write why this ride is rejected in Remarks — the rider sees it.' });
+      return;
+    }
+    // The hand-over Layers (Asset Fulfiller / Vehicle Maintainer): a Reject
+    // needs the reason too (e.g. "not in stock"), and is asked once more.
+    if (action === 'rejected' && (item.asset_fulfiller_bypass || item.vehicle_maintainer_bypass)) {
+      if (!(remarksDraft[key] || '').trim()) {
+        setMessage({ type: 'error', text: 'Write why you are rejecting it — the employee sees it.' });
+        return;
+      }
+      if (!(await confirmDialog(`Reject this ${item.asset_fulfiller_bypass ? 'asset requisition' : 'ride request'}? The employee is told why.`, { tone: 'danger' }))) return;
     }
     setActingKey(key);
     setMessage(null);
@@ -364,13 +530,140 @@ useLiveRefresh(() => load(true));
     }
   };
 
+  // The hand-over Layers (Asset Fulfiller / Vehicle Maintainer) have their own
+  // main button (Fulfill & Hand Over / Assign & Confirm); this row lets the
+  // same approver turn the request down instead, with the reason.
+  const handOverReject = (item: MyApprovalItem) => {
+    const key = keyFor(item);
+    return (
+      <div className="self-stretch flex flex-col sm:flex-row sm:items-center gap-2 order-last pt-1">
+        <input
+          type="text"
+          aria-label="Reason for rejecting"
+          placeholder={item.asset_fulfiller_bypass ? 'Reason to reject (e.g. not in stock) — the employee sees it' : 'Reason to reject (e.g. no vehicle free) — the employee sees it'}
+          value={remarksDraft[key] || ''}
+          onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+          className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+        />
+        <button
+          type="button"
+          disabled={actingKey === key}
+          onClick={() => handleAct(item, 'rejected')}
+          className="flex items-center justify-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
+        >
+          <XCircle className="w-3.5 h-3.5" /> Reject
+        </button>
+      </div>
+    );
+  };
+
+  // ---- Filters ------------------------------------------------------------
+  const ymdLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const shown = useMemo(() => {
+    const q = fq.trim().toLowerCase();
+    const today = new Date();
+    const since =
+      fWhen === 'today' ? ymdLocal(today) : fWhen === '7' ? ymdLocal(new Date(Date.now() - 6 * 864e5)) : fWhen === '30' ? ymdLocal(new Date(Date.now() - 29 * 864e5)) : fWhen === 'custom' ? fFrom : '';
+    const until = fWhen === 'custom' ? fTo : '';
+    const out = items.filter((i) => {
+      if (fType !== 'all' && typeKeyOf(i.source_type) !== fType) return false;
+      const days = ageDays(i.created_at);
+      if (fAge === 'today' && days !== 0) return false;
+      if (fAge === 'mid' && (days < 1 || days > 2)) return false;
+      if (fAge === 'old' && days < 3) return false;
+      const day = (() => {
+        const d = new Date(String(i.created_at || '').replace(' ', 'T'));
+        return Number.isNaN(d.getTime()) ? '' : ymdLocal(d);
+      })();
+      if (since && day && day < since) return false;
+      if (until && day && day > until) return false;
+      if (fWho && String(i.requested_by) !== fWho) return false;
+      if (q) {
+        const hay = [i.requested_by_name, i.requested_by_code, i.requested_by_designation, i.requested_by_department, i.source_label, sourceTitle(i.source_type)]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const t = (i: MyApprovalItem) => new Date(String(i.created_at || '').replace(' ', 'T')).getTime() || 0;
+    out.sort((a, b) => (fSort === 'oldest' ? t(a) - t(b) : t(b) - t(a)));
+    return out;
+  }, [items, fq, fType, fAge, fWhen, fFrom, fTo, fWho, fSort]);
+  const typeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) m.set(typeKeyOf(i.source_type), (m.get(typeKeyOf(i.source_type)) || 0) + 1);
+    return Array.from(m.entries());
+  }, [items]);
+  const ageCounts = useMemo(() => {
+    const c = { today: 0, mid: 0, old: 0 };
+    for (const i of items) {
+      const d = ageDays(i.created_at);
+      if (d === 0) c.today++;
+      else if (d <= 2) c.mid++;
+      else c.old++;
+    }
+    return c;
+  }, [items]);
+  const requesters = useMemo(() => {
+    const m = new Map<string, MyApprovalItem>();
+    for (const i of items) if (i.requested_by && !m.has(String(i.requested_by))) m.set(String(i.requested_by), i);
+    return Array.from(m.entries()).sort((a, b) => String(a[1].requested_by_name || '').localeCompare(String(b[1].requested_by_name || '')));
+  }, [items]);
+  const extraFilters = (fWhen !== 'any' ? 1 : 0) + (fWho ? 1 : 0) + (fSort !== 'oldest' ? 1 : 0);
+  const anyFilter = !!fq.trim() || fType !== 'all' || fAge !== 'all' || extraFilters > 0;
+  const clearFilters = () => {
+    setFq('');
+    setFType('all');
+    setFAge('all');
+    setFWhen('any');
+    setFFrom('');
+    setFTo('');
+    setFWho('');
+    setFSort('oldest');
+  };
+  const typeLabelOf = (k: string) => (k === 'leave' ? 'Leave' : sourceTitle(k as MyApprovalItem['source_type']));
+  const whenSelect = (
+    <select value={fWhen} onChange={(e) => setFWhen(e.target.value as any)} aria-label="Submitted" className="h-9 text-xs font-medium px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+      <option value="any">Submitted: Any date</option>
+      <option value="today">Submitted: Today</option>
+      <option value="7">Submitted: Last 7 days</option>
+      <option value="30">Submitted: Last 30 days</option>
+      <option value="custom">Submitted: Pick dates…</option>
+    </select>
+  );
+  const customDates = fWhen === 'custom' && (
+    <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+      <input type="date" aria-label="Submitted from" value={fFrom} onChange={(e) => setFFrom(e.target.value)} className="h-9 px-2 rounded-xl border border-slate-200 bg-white text-slate-700" />
+      to
+      <input type="date" aria-label="Submitted to" value={fTo} onChange={(e) => setFTo(e.target.value)} className="h-9 px-2 rounded-xl border border-slate-200 bg-white text-slate-700" />
+    </span>
+  );
+  const whoSelect = (
+    <SearchSelect value={fWho} onChange={(e) => setFWho(e.target.value)} className="h-9 text-xs px-3 rounded-xl border border-slate-200 bg-white text-slate-700 min-w-[180px]">
+      <option value="">— From: Anyone —</option>
+      {requesters.map(([id, i]) => (
+        <option key={id} value={id}>
+          {[i.requested_by_name || `User #${id}`, i.requested_by_code, i.requested_by_designation, i.requested_by_department].filter(Boolean).join(' · ')}
+        </option>
+      ))}
+    </SearchSelect>
+  );
+  const sortSelect = (
+    <select value={fSort} onChange={(e) => setFSort(e.target.value as any)} aria-label="Sort" className="h-9 text-xs font-medium px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+      <option value="oldest">Sort: Oldest first</option>
+      <option value="newest">Sort: Newest first</option>
+    </select>
+  );
+
   // ---- Select & approve several at once ----------------------------------
   // Only requests whose Approve is a plain yes: not the ones that need a form
   // first (assign a vehicle, fulfil an asset, disburse with a voucher).
   const bulkable = (item: MyApprovalItem) => !item.vehicle_maintainer_bypass && !item.asset_fulfiller_bypass && !item.conveyance_disburser_bypass;
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const pickable = items.filter(bulkable);
+  const pickable = shown.filter(bulkable);
   const pickedItems = pickable.filter((i) => picked.has(keyFor(i)));
   const allPicked = pickable.length > 0 && pickedItems.length === pickable.length;
   const togglePick = (item: MyApprovalItem) =>
@@ -510,6 +803,7 @@ useLiveRefresh(() => load(true));
     // Phone: no page colour of its own (the header's glow shows through)
     // and the title sits in the header (usePhoneHeaderTitle).
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
+      {tripFor && <ChangeTripPopup r={tripFor} onClose={() => setTripFor(null)} onDone={() => { setTripFor(null); void load(true); }} />}
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <div className="hidden md:block">
@@ -590,6 +884,88 @@ useLiveRefresh(() => load(true));
             </div>
           )}
 
+          {!loading && items.length > 0 && (
+            <div className={`flex flex-col gap-2.5 ${isPhone ? 'pt-3' : 'px-6 py-3.5 border-b border-slate-100'}`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`relative ${isPhone ? 'flex-1 min-w-0' : 'flex-1 min-w-[240px]'}`}>
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={fq}
+                    onChange={(e) => setFq(e.target.value)}
+                    placeholder="Search name, Employee ID, department…"
+                    aria-label="Search requests"
+                    className="w-full h-9 pl-8 pr-3 text-xs rounded-xl border border-slate-200 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </span>
+                {isPhone ? (
+                  <button
+                    type="button"
+                    onClick={() => setFilterSheet(true)}
+                    className="shrink-0 h-9 inline-flex items-center gap-1.5 px-3 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" /> Filters{extraFilters ? ` · ${extraFilters}` : ''}
+                  </button>
+                ) : (
+                  <>
+                    {whenSelect}
+                    {customDates}
+                    {whoSelect}
+                    {sortSelect}
+                  </>
+                )}
+              </div>
+              <div className={`flex gap-1.5 ${isPhone ? 'overflow-x-auto pb-0.5 -mx-1 px-1' : 'flex-wrap'}`}>
+                <FilterChip label="All" n={items.length} on={fType === 'all'} onClick={() => setFType('all')} />
+                {typeCounts.map(([k, n]) => (
+                  <FilterChip key={k} label={typeLabelOf(k)} n={n} on={fType === k} onClick={() => setFType(fType === k ? 'all' : k)} />
+                ))}
+              </div>
+              <div className={`flex gap-1.5 items-center ${isPhone ? 'overflow-x-auto pb-0.5 -mx-1 px-1' : 'flex-wrap'}`}>
+                <span className="shrink-0 text-[11px] font-semibold text-slate-500 mr-0.5">Waiting:</span>
+                <FilterChip label="Today" n={ageCounts.today} dot="bg-emerald-500" on={fAge === 'today'} onClick={() => setFAge(fAge === 'today' ? 'all' : 'today')} />
+                <FilterChip label="1–2 days" n={ageCounts.mid} dot="bg-amber-500" on={fAge === 'mid'} onClick={() => setFAge(fAge === 'mid' ? 'all' : 'mid')} />
+                <FilterChip label="3+ days" n={ageCounts.old} dot="bg-rose-500" on={fAge === 'old'} onClick={() => setFAge(fAge === 'old' ? 'all' : 'old')} />
+                {anyFilter && (
+                  <button type="button" onClick={clearFilters} className="shrink-0 ml-1 text-xs font-semibold text-blue-600 hover:underline">
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {filterSheet &&
+            createPortal(
+              <div className="liquid-glass-backdrop fixed inset-0 z-[1300] flex items-end sm:items-center justify-center p-3" onClick={() => setFilterSheet(false)}>
+                <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+                  <div role="dialog" aria-modal="true" aria-label="Filters" className="liquid-glass liquid-glass-in rounded-[32px] p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-bold text-slate-900">Filters</h3>
+                      <button type="button" onClick={() => setFilterSheet(false)} aria-label="Close" className="liquid-glass-chip w-9 h-9 rounded-full flex items-center justify-center text-slate-600">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="liquid-glass-inset rounded-2xl p-3 space-y-2.5 [&_select]:w-full">
+                      {whenSelect}
+                      {customDates}
+                      <div className="[&>*]:w-full">{whoSelect}</div>
+                      {sortSelect}
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={clearFilters} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                        Clear
+                      </button>
+                      <button type="button" onClick={() => setFilterSheet(false)} className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold">
+                        Show {shown.length}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
           {!loading && pickable.length > 0 && (
             <div className={`flex items-center justify-between gap-3 flex-wrap ${isPhone ? 'pt-3 pb-1' : 'px-6 py-3 border-b border-slate-100'}`}>
               <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
@@ -645,9 +1021,17 @@ useLiveRefresh(() => load(true));
               <Inbox className="w-6 h-6 text-slate-300" />
               <p className="text-sm">Nothing waiting on you right now.</p>
             </div>
+          ) : shown.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 text-center py-12 px-5 text-slate-400">
+              <Search className="w-6 h-6 text-slate-300" />
+              <p className="text-sm">No request matches these filters.</p>
+              <button type="button" onClick={clearFilters} className="text-xs font-semibold text-blue-600 hover:underline">
+                Clear filters
+              </button>
+            </div>
           ) : (
-            <div className={isPhone ? 'space-y-2.5 pt-1' : 'divide-y divide-slate-100'}>
-              {items.map((item) => {
+            <div className={isPhone ? 'space-y-3.5 pt-2' : 'p-5 space-y-4 bg-slate-50/60'}>
+              {shown.map((item, idx) => {
                 const key = keyFor(item);
                 // Editable on EVERY Layer now (Supervisor auto-layer included),
                 // not just the last one — see the state comment above.
@@ -675,11 +1059,22 @@ useLiveRefresh(() => load(true));
                         ? `rounded-[28px] border border-white/70 p-3 bg-gradient-to-br shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] [&_input]:bg-white/70 ${
                             item.no_approver || item.layer_stuck ? 'from-rose-100/70 via-white/50 to-pink-50/40' : 'from-amber-100/70 via-white/50 to-orange-50/40'
                           }`
-                        : 'px-6 py-4'
+                        : 'px-6 pb-4 rounded-2xl border border-slate-200 bg-white shadow-[0_6px_18px_-10px_rgba(15,23,42,0.25)] overflow-hidden'
                     } ${isAssetRequisition ? 'cursor-pointer hover:bg-slate-50/70 transition-colors' : ''}`}
                     onClick={isAssetRequisition ? () => setViewingAssetRequisition(item) : undefined}
                   >
-                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'flex-wrap'}`}>
+                    {/* When it was sent and how long it has waited, the Layer on the right. */}
+                    <div className={`flex items-center gap-2 flex-wrap text-xs font-semibold ${isPhone ? 'pb-2.5' : '-mx-6 mb-3.5 px-6 py-2.5 border-b border-slate-100 bg-slate-50/70'}`}>
+                      <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1 rounded-full bg-slate-900 text-white text-[11px]">{idx + 1}</span>
+                      <span className="text-slate-700">Submitted {whenOf(item.created_at)}</span>
+                      <span className={`px-2 py-0.5 rounded-full border text-[11px] ${ageChip(ageDays(item.created_at))}`}>{ageText(ageDays(item.created_at))}</span>
+                      {item.total_steps ? (
+                        <span className="ml-auto px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px]">
+                          Layer {item.current_step} of {item.total_steps}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className={`flex items-start gap-3 ${isPhone ? '' : 'flex-wrap lg:flex-nowrap'}`}>
                       {bulkable(item) && (
                         <input
                           type="checkbox"
@@ -701,7 +1096,7 @@ useLiveRefresh(() => load(true));
                           </div>
                         </div>
                       )}
-                      <div className="min-w-0 max-w-full">
+                      <div className="min-w-0 max-w-full lg:flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-slate-800">
                             {item.vehicle_maintainer_bypass
@@ -734,6 +1129,23 @@ useLiveRefresh(() => load(true));
                                 {item.vehicle_requisition_details.purpose}
                               </div>
                             )}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-slate-400 font-semibold">Trip: </span>
+                              {tripTitle(item.vehicle_requisition_details.trip_type)}
+                              {item.vehicle_requisition_details.trip_type === 'drop_pickup' &&
+                                ` · pick-up ${item.vehicle_requisition_details.pickup_mode === 'call' ? 'when called' : clock(item.vehicle_requisition_details.pickup_at)}`}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const d = item.vehicle_requisition_details!;
+                                  setTripFor({ id: item.source_id, status: 'pending', ride_date: d.ride_date, trip_type: d.trip_type || 'round', pickup_mode: d.pickup_mode || null, pickup_at: d.pickup_at || null });
+                                }}
+                                className="font-semibold text-[color:var(--g-accent-700)] underline underline-offset-2"
+                              >
+                                Change
+                              </button>
+                            </div>
                           </div>
                         )}
                         <p className="text-[11px] text-slate-400 mt-1">
@@ -821,7 +1233,12 @@ useLiveRefresh(() => load(true));
                             ))}
                           </div>
                         )}
+                        {isPhone && item.trail && item.trail.length > 0 && <TrailBox trail={item.trail} nextStep={item.current_step} className="mt-3" />}
                       </div>
+                      {/* Computer: in the card's empty right-hand column. */}
+                      {!isPhone && item.trail && item.trail.length > 0 && (
+                        <TrailBox trail={item.trail} nextStep={item.current_step} className="w-full lg:w-[min(46%,560px)] lg:shrink-0 lg:ml-auto" />
+                      )}
                     </div>
 
                     {editable && (
@@ -850,7 +1267,8 @@ useLiveRefresh(() => load(true));
                     )}
 
                     {item.asset_fulfiller_bypass ? (
-                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-3 flex flex-col items-start gap-2" onClick={(e) => e.stopPropagation()}>
+                        {handOverReject(item)}
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
                           <Package className="w-3 h-3 shrink-0 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
                         </p>
@@ -863,7 +1281,8 @@ useLiveRefresh(() => load(true));
                         </button>
                       </div>
                     ) : item.vehicle_maintainer_bypass ? (
-                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="mt-3 flex flex-col items-start gap-2" onClick={(e) => e.stopPropagation()}>
+                        {handOverReject(item)}
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
                           <Car className="w-3 h-3 shrink-0 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
                         </p>
@@ -874,9 +1293,10 @@ useLiveRefresh(() => load(true));
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a vehicle…</option>
-                            {availableVehicles.map((v) => (
-                              <option key={v.id} value={v.id}>
-                                {v.model} ({v.vehicle_no})
+                            {/* Free for this ride's time first; a car booked then can't be picked. */}
+                            {vehicleChoices(availableVehicles, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map(({ v, label, busy }) => (
+                              <option key={v.id} value={v.id} disabled={busy}>
+                                {label}
                               </option>
                             ))}
                           </SearchSelect>
@@ -886,9 +1306,9 @@ useLiveRefresh(() => load(true));
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a driver…</option>
-                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id).map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {driverOptionLabel(d, assignForm[key]?.vehicle_id)}
+                            {sortDrivers(driverCandidates, assignForm[key]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map((d) => (
+                              <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}>
+                                {driverOptionLabel(d, assignForm[key]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}
                               </option>
                             ))}
                           </SearchSelect>
@@ -929,7 +1349,7 @@ useLiveRefresh(() => load(true));
                         <input
                           type="text"
                           aria-label="Remarks"
-                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
+                          placeholder={item.source_type === 'bill_claim' ? 'Remarks (needed to Return or Reject)' : item.source_type === 'vehicle_requisition' ? 'Remarks (a reason is needed to Reject)' : 'Remarks (optional)'}
                           value={remarksDraft[key] || ''}
                           onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                           className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

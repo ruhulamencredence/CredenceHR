@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo on the opening screen = the web page's first frame: 31.1% of the
+     screen width, 95-140 (index.html #mpr-boot-spinner .boot-icon). One step
+     per 20dp of width. Android 12+ uses values*-v31 (see there). -->
+<resources>
+    <dimen name="splash_logo_size">104dp</dimen>
+</resources>

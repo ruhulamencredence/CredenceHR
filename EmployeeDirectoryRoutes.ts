@@ -26,6 +26,7 @@
 
 import type { Express } from "express";
 import { companyStore } from "./companyContext";
+import { teamSupervisorByEmployee } from "./DepartmentTeams";
 
 interface EmployeeDirectoryRouteDeps {
   authenticateToken: any;
@@ -64,9 +65,11 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
       }
       const load = () => queryDB(
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
-                e.email, e.phone, e.telephone, e.branch, e.division, e.unit,
+                e.email, e.phone, e.telephone, COALESCE(NULLIF(TRIM(e.branch), ''), br.branch_name) AS branch, e.division, e.unit,
                 e.is_active, e.user_id, e.company_id,
-                sup.name AS supervisor_name
+                sup.name AS supervisor_name,
+                -- Admin Panel -> Designations: the designation's level (1 = most senior).
+                (SELECT d.level FROM designations d WHERE d.id = e.designation_id) AS designation_level
          FROM all_employees e
          LEFT JOIN (
            -- Most recent is_direct=1 row per employee — same "current
@@ -83,9 +86,37 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
            ) latest ON latest.employee_id = es1.employee_id AND latest.max_id = es1.id
          ) cur ON cur.employee_id = e.id
          LEFT JOIN all_employees sup ON sup.id = cur.supervisor_id
-         ORDER BY e.name ASC`
+         -- The Branch / Project by name when only its id was saved, so the
+         -- Directory can be searched by it.
+         LEFT JOIN branches br ON br.id = e.branch_id
+         -- Senior designations first (Designations -> level), people with no level last, then by name.
+         ORDER BY (CASE WHEN (SELECT d.level FROM designations d WHERE d.id = e.designation_id) IS NULL THEN 1 ELSE 0 END), (SELECT d.level FROM designations d WHERE d.id = e.designation_id), e.name ASC`
       );
-      const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, load) : await load();
+      // "Reports to" the way a request actually goes: the Direct Supervisor
+      // (Employees -> Supervisor) if set, else the Supervisor of the person's
+      // team (Departments -> Teams), else the Head of their Department. It
+      // used to show only the first, so someone given a Supervisor through a
+      // team read "Not set".
+      const loadAll = async () => {
+        const [list, teamSup, heads, logins] = await Promise.all([
+          load(),
+          teamSupervisorByEmployee(queryDB),
+          queryDB("SELECT id, head_user_id FROM departments WHERE is_active = 1").catch(() => []),
+          queryDB("SELECT u.id, COALESCE(e.name, u.name) AS name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id").catch(() => [])
+        ]);
+        const headOf = new Map<number, number>(((heads || []) as any[]).filter((h) => h.head_user_id).map((h) => [Number(h.id), Number(h.head_user_id)]));
+        const nameOfUser = new Map<number, string>(((logins || []) as any[]).map((u) => [Number(u.id), String(u.name || "")]));
+        for (const r of list as any[]) {
+          if (r.supervisor_name) continue;
+          const self = Number(r.user_id) || 0;
+          const team = teamSup.get(Number(r.id));
+          const head = r.department_id ? headOf.get(Number(r.department_id)) : undefined;
+          const pick = team && team !== self ? team : head && head !== self ? head : null;
+          if (pick) r.supervisor_name = nameOfUser.get(pick) || null;
+        }
+        return list;
+      };
+      const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, loadAll) : await loadAll();
       const companies: any[] = (await queryDB("SELECT id, name, short_code FROM companies").catch(() => [])) || [];
       const companyOf = new Map(companies.map((c: any) => [Number(c.id), c]));
       const body = JSON.stringify(
@@ -94,6 +125,7 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
           employee_id: r.employee_id,
           name: r.name,
           designation: r.designation,
+          designation_level: r.designation_level == null ? null : Number(r.designation_level),
           department: r.department,
           department_id: r.department_id,
           email: r.email,

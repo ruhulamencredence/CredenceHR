@@ -1,0 +1,94 @@
+# Test log — 17 November 2026
+
+## Credence Mail → My folders (own folders and sub-folders, real IMAP folders)
+
+People could not make folders (only the fixed Inbox / Sent / … and rule labels). Now, as part of Credence Mail
+(whoever has Mail has folders — no switch of their own, as the owner asked): "+ New folder", sub-folders, rename,
+delete, "Move to folder" (toolbar / reader / drag), rules that file into a folder — all as real folders on the mail
+server, so Outlook and the phone's mail app show the same folders.
+
+Test setup (this environment only): Dovecot IMAP on 127.0.0.1:143 (`apt-get install dovecot-imapd`, plain login,
+maildir; user `qa.mail@credence.test` / `MailPass123`) and a small SMTP stub on :2525 so a mailbox can be connected.
+Every step is checked on the IMAP server itself (`imapflow`), the way Outlook / a phone sees it.
+
+- `scripts/mail-folders-api.mjs`: **36/36** — mailbox connected, 3 mails synced; no Mail → `GET /folders` 403 and
+  can't create; Mail on → folders on (`canFolders`, 200) with no extra switch; someone else's mailbox → 404; Superadmin
+  `canFolders`; "Projects" and "Projects/Gulshan Tower" made on the server and subscribed;
+  same name twice / "a/b" / "Sent" at the top → 400; 2 mails moved → server 2 in the folder, 1 in INBOX; the folder
+  lists 2, counts 2 / 2 unread; read in the folder → `\Seen` on the server; a folder made straight on the server
+  ("Outlook") appears and its mail syncs; rename Projects → Sites: server `Sites/Gulshan Tower`, same folder id, its
+  mail still listed; a rule "from steel.test → Vendors" moves a new mail to Vendors on the server; back to Inbox;
+  delete Sites + sub-folder → folders gone on the server, all mail back in INBOX (none deleted); Delete from a folder.
+- `scripts/mail-folders-prefix.mjs`: **6/6** — the same on a cPanel-style server (Dovecot namespace `INBOX.` with
+  `.`): paths `INBOX.Projects` / `INBOX.Projects.Gulshan Tower`, "a.b" refused, tree from the server, move, rename keeps
+  the prefix, delete.
+- `scripts/mail-folders-ui.cjs`: **15/15** (computer) — "Folders" + "New folder"; New folder → on the server; "⋯" →
+  New sub-folder with "Inside" already set; tree; tick + "Move to folder" → on the server; drag a mail onto the folder →
+  on the server; open the folder (title = path, its 2 mails, Inbox mail not there); reader "Move to folder"; Rename;
+  Delete (red confirm "no mail is deleted") → folders gone, mail back in INBOX, screen back on Inbox; no page errors.
+- `scripts/mail-folders-outside.mjs`: **5/5** — sub-folders made outside CredenceHR (straight on the IMAP server, as
+  Outlook / cPanel webmail do), two levels deep: all appear, nested the same way (Clients > ABC Ltd > Invoices); their
+  mail comes in when the folder is synced; renamed and deleted there → followed here.
+- `scripts/mail-folders-sent-tree.mjs`: **11/11** — the owner's real Roundcube layout on a cPanel-style server: Sent ▸
+  "Daily & Market Labor Actual Report" ▸ CDW, RPRT, Zone-1/3/4/5 and Sent ▸ Monthly Reports ▸ 7 folders. Sent is a heading
+  (opens Sent, can't be renamed / deleted — 400), both report folders inside it, the name with "&" kept, every sub-folder
+  in its place; Junk / Trash / Drafts with nothing inside not repeated; Roundcube's Archive shows as a folder and its mail
+  comes in; Monthly Reports ▸ Zone-1's mail comes in (the list shows "To: …" like Sent); a new Zone-6 made from here lands
+  at `INBOX.Sent.Monthly Reports.Zone-6`. Before this fix those folders would have come in loose (not under Sent) and
+  Archive not at all.
+- `scripts/mail-folders-older-bg.cjs`: **8/8** — the three limits removed. Older mail: a folder with 250 mails brings the
+  latest 200 first, "Older mail from the server" the other 50 (0 left; again → nothing more), the very first mail is there;
+  Inbox the same (200 → 210). Background: with the mail page open, a folder nobody opened came in by itself, and a mail
+  filed straight into a folder on the server (an Outlook rule) came in by itself after 302 s — nobody opened the folder.
+  On screen: long names wrap ("Daily & Market Labor Actual Report" in full), the button sits at the end of the list.
+
+Fixed while testing: the folder's "⋯" menu was trapped inside the glass sidebar (couldn't be clicked) → drawn in a
+portal like the other popups.
+
+## Light Glass on a phone: the slide-in menu no longer washed out
+
+Light Glass + the orange theme: the phone menu was 35–55 % white, so the orange header and cards behind it showed
+through and the text looked faded. Now (`src/index.css`, `html[data-lglass] .gsidebar.fixed`, phone menu only — the
+computer sidebar is as before) it is nearly solid frosted white (94 % → 92 %), with a short accent-coloured band at the
+top so the white Credence logo stays visible, a thin edge and a soft shadow. The owner found that too solid ("the glass
+feel is gone"), so the final one sits in between: 80 % → 70 % white with a stronger blur (48 px, saturation 170 %), so the
+page's colours glow softly through while the text stays crisp, plus a glass sheen across the top corner.
+
+- `scripts/lightglass-phone-menu.cjs` (Pixel 7, Light Glass, orange): screenshot before / after — menu text dark on
+  white, the page behind no longer showing through, logo on the accent band.
+
+## Designations: one list for all companies, a permanent code for each
+
+Designation was free text on each employee (spellings drifted: "Senior Executive", "Sr. Executive", "senior executive ").
+Now Admin Panel → Employee Management → **Designations** (module `designations`): each has a code DSG-001… that never
+changes and is never reused; look-alikes merged; rename everywhere; level; inactive; the employee form picks from it.
+
+- `scripts/designations-api.mjs`: **30/30** — the list made from the employees (codes all different); "senior  executive "
+  counted as Senior Executive and its text tidied; counts across both companies (a sister concern added for the test);
+  Senior / Sr. Executive shown as look-alikes; "Used in OT rates"; add → next code; the same name (case / spaces / dots)
+  → 409 "already exists (DSG-007)"; a look-alike ("Sr. Project Coordinator" vs "Senior Project Coordinator") → asked,
+  "Add anyway" works; rename Executive → Officer keeps DSG-001, employees in both companies and the OT rate follow;
+  rename onto an existing name → 409; merge Sr. Executive into Senior Executive → 5 people, OT rate and leave workflow
+  follow, DSG-006 retired pointing to DSG-005; the next new code is new (never a retired one); a later "Sr. Executive" or
+  "DSG-006" in an import lands on Senior Executive (no new designation); delete refused while people have it, allowed when
+  nobody does; Inactive left out of the form picker; no module → 403, read layer only → can see, can't add (403); the
+  form picker's names readable by any Admin Panel account.
+- `scripts/designations-ui.cjs`: **13/13** — the page ("one list for all companies"), codes in the rows, the look-alike
+  box, Merge popup (the one most people have picked) → all three on one name, Rename popup ("Code … stays the same", how
+  many employees) → code kept and employees follow, adding a look-alike asks with "Add anyway", employee form: typing finds
+  the designation, a new name is noted "added to Designations when you save", no page errors.
+
+
+## Reliever picker under the keyboard (Leave application, phone)
+
+The list of a type-to-search picker (`SearchSelect` / `Combobox`, src/components/Combobox.tsx) worked out its room from
+the screen height only. In the app the on-screen keyboard doesn't shrink `window.innerHeight`, so the list opened
+downwards under the keyboard, and it was placed only once — when the keyboard then slid up and the popup scrolled the
+field to the middle, the list stayed where it had been (or jumped off the field). Now it measures the space above the
+keyboard (`--kb` from lib/keyboardInsetVar.ts), opens upwards when there's more room there, shrinks its height to the
+room left, and places itself again when the keyboard opens/closes and shortly after focus. Every picker in the app gets
+this, not only Reliever.
+
+- `scripts/reliever-keyboard.cjs`: **7/7** (Pixel 7, keyboard 330 px simulated) — Leave → Apply Leave → Reliever, typing:
+  the list ends above the keyboard, doesn't cover the field, stays on screen; with the field just above the keyboard
+  the list opens above it. The same script against the old Combobox: **FAIL** "list ends above the keyboard".

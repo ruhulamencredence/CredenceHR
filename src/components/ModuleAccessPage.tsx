@@ -162,7 +162,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_payslip', label: 'My Payslip', desc: 'See and download their approved payslips.', section: 'payroll', endpoint: 'payslip-access' },
   { key: 'can_view_loan_request', label: 'Loan / Advance Request', desc: 'Apply for a loan or salary advance.', section: 'payroll', endpoint: 'loan-request-access' },
 
-  { key: 'can_use_mail', label: 'Credence Mail', desc: 'Connect their company mailbox and read / send mail.', section: 'mail', endpoint: 'mail-access' },
+  { key: 'can_use_mail', label: 'Credence Mail', desc: 'Connect their company mailbox and read / send mail, with their own folders.', section: 'mail', endpoint: 'mail-access' },
   { key: 'can_view_mail_directory', label: 'Email Directory', desc: 'Find any employee’s email address.', section: 'mail', endpoint: 'mail-directory-access', parent: 'can_use_mail' },
   { key: 'can_use_mail_groups', label: 'My groups', desc: 'Their own named lists of people for To / Cc / Bcc.', section: 'mail', endpoint: 'mail-groups-access', parent: 'can_use_mail' },
 
@@ -176,7 +176,7 @@ const INLINE_FLAGS: FlagKey[] = ['can_view_group_dashboard', 'can_manage_leave']
 
 const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
-  admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
+  admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', designations: 'hr', task_management: 'hr', target_reports: 'hr',
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', bill_claim: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
@@ -200,6 +200,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   leave_applications: 'Who applied for leave, by month.',
   duty_roster: 'Shifts and who works when.',
   break_time: 'Who is on a break, daily totals, over-limit.',
+  designations: 'One list of designations for all companies, each with a permanent code.',
   user_feedback: 'Ratings, problems and ideas people send about the app.',
   bill_claim: 'Review bill claims and conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',

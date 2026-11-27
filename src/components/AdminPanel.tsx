@@ -1,3 +1,5 @@
+import { MprEditLog } from './MprEditLog';
+import { useElementHeight } from '../lib/useElementHeight';
 import { AttendanceEditPopup } from './AttendanceEditPopup';
 import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
@@ -7,7 +9,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform, saveWorkbookCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
+import { Building2, GitMerge, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft, Archive, ArchiveRestore, Link2 } from 'lucide-react';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -39,6 +41,9 @@ import { retryImport } from '../lib/chunkReload';
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 import { SearchSelect } from './Combobox';
+import { ProjectEntrySharing, ENTRY_SCOPE_LABEL, type EntryScope } from './ProjectEntrySharing';
+import { ProjectAccessPopup } from './ProjectAccessPopup';
+import { ProjectMatchPopup, type UnknownProject } from './ProjectMatchPopup';
 import { DepartmentTeamsEditor, type DepartmentTeamsEditorHandle } from './DepartmentTeamsEditor';
 import { Combobox } from './Combobox';
 import { personLabel } from '../lib/personLabel';
@@ -89,14 +94,17 @@ const TaskManagement = lazyPanel(() => import('./TaskManagement').then((m) => ({
 const TargetReports = lazyPanel(() => import('./TargetReports').then((m) => ({ default: m.TargetReports })));
 const MailAdministration = lazyPanel(() => import('./mail/MailAdministration').then((m) => ({ default: m.MailAdministration })));
 const DutyRoster = lazyPanel(() => import('./DutyRoster').then((m) => ({ default: m.DutyRoster })));
+const DesignationsPanel = lazyPanel(() => import('./DesignationsPanel').then((m) => ({ default: m.DesignationsPanel })));
 const BreakTimeAdmin = lazyPanel(() => import('./BreakTimeAdmin').then((m) => ({ default: m.BreakTimeAdmin })));
 const MobileBillAdmin = lazyPanel(() => import('./MobileBillAdmin').then((m) => ({ default: m.MobileBillAdmin })));
 const ModuleAccessPage = lazyPanel(() => import('./ModuleAccessPage').then((m) => ({ default: m.ModuleAccessPage })));
 const FeedbackAdmin = lazyPanel(() => import('./feedback/FeedbackAdmin').then((m) => ({ default: m.FeedbackAdmin })));
 const BudgetSubmissionReport = lazyPanel(() => import('./BudgetSubmissionReport').then((m) => ({ default: m.BudgetSubmissionReport })));
 const MprPoImport = lazyPanel(() => import('./MprPoImport').then((m) => ({ default: m.MprPoImport })));
+const MprUndelivered = lazyPanel(() => import('./MprUndelivered').then((m) => ({ default: m.MprUndelivered })));
 const MprDispatchMaterial = lazyPanel(() => import('./MprDispatchMaterial').then((m) => ({ default: m.MprDispatchMaterial })));
 const AccessTemplatesModal = lazyPanel(() => import('./AccessTemplatesModal').then((m) => ({ default: m.AccessTemplatesModal })));
+const AccountMergePopup = lazyPanel(() => import('./AccountMergePopup').then((m) => ({ default: m.AccountMergePopup })));
 const PasswordRequestsPopup = lazyPanel(() => import('./PasswordRequestsPopup').then((m) => ({ default: m.PasswordRequestsPopup })));
 const ProfilePhotoRequestsPopup = lazyPanel(() => import('./ProfilePhotoRequestsPopup').then((m) => ({ default: m.ProfilePhotoRequestsPopup })));
 const JobEditDetailsPopup = lazyPanel(() => import('./JobEditDetailsPopup').then((m) => ({ default: m.JobEditDetailsPopup })));
@@ -458,13 +466,16 @@ const ReportRow = React.memo(function ReportRow({
 // cache (keyed by rounded coordinate) already dedupes accounts sharing a
 // login spot, like an office Wi-Fi gate.
 // User Management quick filter chips.
-const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean }[] = [
+const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean; deptRole?: boolean }[] = [
   { key: 'admins', label: 'Admins', match: (u) => u.role === 'admin' },
   { key: 'no_modules', label: 'No modules', match: (u) => u.role !== 'superadmin' && (u.module_permissions || []).length === 0 },
   { key: 'attendance', label: 'Attendance on', match: (u) => u.role !== 'superadmin' && !!u.can_use_attendance },
   { key: 'tracking', label: 'Tracking on', match: (u) => u.role !== 'superadmin' && !!u.can_use_tracking },
   { key: 'leave_summary', label: 'Leave Summary on', match: (u) => u.role !== 'superadmin' && !!u.can_view_leave_summary },
   { key: 'job_edit', label: 'Job Edit on', match: (u) => u.role !== 'superadmin' && !!u.can_job_edit },
+  // Departments data: the server sends these only to an account that may read Departments.
+  { key: 'dept_head', label: 'Department Head', deptRole: true, match: (u) => (u.dept_head_of || []).length > 0 },
+  { key: 'dept_supervisor', label: 'Department Supervisor', deptRole: true, match: (u) => (u.dept_supervisor_of || []).length > 0 },
   { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null },
   // Mobile App (APK) off — turn it on for them from the bar above (AppAccessBanner).
   { key: 'app_off', label: 'Mobile App off', match: (u) => u.role !== 'superadmin' && u.app_on === false }
@@ -540,7 +551,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
+  // Users / Monthly Leave Application: the sticky search bar's height, so
+  // the table's column titles stick right under it (lib/useElementHeight.ts).
+  const [usersBarRef, usersBarH] = useElementHeight();
+  const [leaveBarRef, leaveBarH] = useElementHeight();
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'designations' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'bill_claim' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'management_dashboard' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -731,6 +746,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [projects, setProjects] = useState<Project[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  // Departments list: search (name, Head, team, supervisor) and filters.
+  const [deptQ, setDeptQ] = useState('');
+  const [deptStatus, setDeptStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [deptSetup, setDeptSetup] = useState<'all' | 'no_head' | 'no_teams' | 'no_supervisor'>('all');
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   // Teams of the Department being edited (DepartmentTeamsEditor), saved with it.
   const deptTeamsRef = useRef<DepartmentTeamsEditorHandle | null>(null);
@@ -776,6 +795,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Users -> Password requests (Forgot password, layer "password_requests");
   // a "Password reset request" alert opens it too.
   const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // Users -> Merge accounts (layer "merge_accounts"): a hand-made login + the import's login for one person.
+  const [showMergeAccounts, setShowMergeAccounts] = useState(false);
   // Users -> Photo approvals (Superadmin only): new profile photos waiting;
   // a "New Profile Photo to Approve" alert opens it too.
   const [showPhotoRequests, setShowPhotoRequests] = useState(false);
@@ -941,7 +962,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   useEffect(() => {
-    if (activeTab === 'editlog') fetchMprEditLog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -1571,8 +1591,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Form states for adding/editing
   const [newProjectName, setNewProjectName] = useState('');
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  // Entry sharing of the Project being added / edited (ProjectEntrySharing.tsx).
+  const [projectEntryScope, setProjectEntryScope] = useState<EntryScope>('team');
+  // Budget import: project names to match first (ProjectMatchPopup.tsx).
+  const [projectMatch, setProjectMatch] = useState<{ budgetId: number; body: any; unknown: UnknownProject[] } | null>(null);
+  const [projectMatchBusy, setProjectMatchBusy] = useState(false);
+  const [projectSharingReload, setProjectSharingReload] = useState(0);
   const [projectListSearch, setProjectListSearch] = useState('');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  // Projects -> Edit: the Branch this Project belongs to and its type
+  // (Head Office / Project Side). Only sent when changed (docs/branch-project-rules.md).
+  const [projectBranchType, setProjectBranchType] = useState<'head_office' | 'project_site'>('project_site');
+  const [projectBranchLink, setProjectBranchLink] = useState<string>('none');
+  const [projectBranchFilter, setProjectBranchFilter] = useState<'all' | 'head_office' | 'project_site' | 'none' | 'archived'>('all');
+  // Branches list: which slice to show, the "Link by name" preview and the "Merge" popup.
+  const [branchListFilter, setBranchListFilter] = useState<'active' | 'head_office' | 'project_site' | 'no_project' | 'archived'>('active');
+  const [linkByName, setLinkByName] = useState<null | { loading: boolean; pairs: any[]; skipped: any[]; picked: Set<number>; busy: boolean; error?: string }>(null);
+  // "Set Division from Branch" (BranchTools.ts): preview, then apply.
+  const [divisionSync, setDivisionSync] = useState<null | { loading: boolean; busy: boolean; data?: any; error?: string }>(null);
+  // Projects -> Merge projects (layer "merge_projects"): a duplicate Project's data moves onto the real one.
+  const [mergeProject, setMergeProject] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string }>(null);
+  const [mergeProjectLog, setMergeProjectLog] = useState<null | any[]>(null);
+  const [mergeBranch, setMergeBranch] = useState<null | { from: any; intoId: string; preview: any | null; busy: boolean; error?: string; needsConfirm?: boolean }>(null);
   // Site location pin for the project being added/edited (free OpenStreetMap/
   // Leaflet picker — see LocationMapPicker). Null lat/lng = no pin set yet.
   const [projectLocation, setProjectLocation] = useState<{ lat: number | null; lng: number | null; label: string | null; radius: number | null }>({
@@ -1679,6 +1719,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Add-user form state
   const [newUserName, setNewUserName] = useState('');
+  // Add New User: a login is an Employee's (picked here) or, for someone who
+  // isn't one, comes with a reason. New joiners: HR Operations -> Onboarding.
+  const [newUserFor, setNewUserFor] = useState<'employee' | 'other'>('employee');
+  const [newUserEmployeeId, setNewUserEmployeeId] = useState('');
+  const [newUserReason, setNewUserReason] = useState('');
+  const [employeesNoLogin, setEmployeesNoLogin] = useState<{ id: number; name: string; employee_id: string | null; designation: string | null; department: string | null; email: string | null }[] | null>(null);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
@@ -1732,8 +1778,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'people' | 'budgets' | 'permissions' | 'departments';
   const loadedShared = useRef<Set<SharedKey>>(new Set());
   const SHARED_URL: Record<SharedKey, string> = {
-    projects: '/api/projects',
-    branches: '/api/branches',
+    projects: '/api/projects?include_archived=1',
+    branches: '/api/branches?include_archived=1',
     mprNumbers: '/api/mpr-numbers',
     entries: '/api/entries?scope=all',
     users: '/api/users',
@@ -1788,7 +1834,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'management_dashboard', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies'
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'user_feedback', 'devices', 'active_users', 'companies', 'designations'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
   // The full accounts list (every access switch — the biggest list after PEPM entries) is
@@ -2100,6 +2146,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const url = editingProject ? `/api/projects/${editingProject.id}` : '/api/projects';
       const method = editingProject ? 'PUT' : 'POST';
 
+      // The Branch part goes along only when it was changed, and only for an
+      // account that has the Branches section (the server refuses otherwise).
+      const branchBody: Record<string, string> = {};
+      if (editingProject && canSee('branches')) {
+        const wasLink = editingProject.linked_branch_id ? String(editingProject.linked_branch_id) : 'none';
+        const wasType = editingProject.linked_branch_type || 'project_site';
+        const linkChanged = projectBranchLink !== wasLink;
+        const typeChanged = projectBranchLink !== 'none' && projectBranchType !== wasType;
+        if (linkChanged) branchBody.branch_link = projectBranchLink;
+        if (linkChanged || typeChanged) {
+          if (projectBranchLink !== 'none') branchBody.branch_type = projectBranchType;
+        }
+        // A type change moves people to the other Weekend / Holiday calendar: say how many.
+        const target = projectBranchLink === 'none' ? null : branches.find((b) => String(b.id) === projectBranchLink) || (editingProject.linked_branch_id ? { id: editingProject.linked_branch_id, branch_name: editingProject.linked_branch_name, branch_type: wasType } : null);
+        if (target && branchBody.branch_type && target.branch_type !== projectBranchType) {
+          let people = 0;
+          try {
+            const r = await fetch(apiUrl(`/api/projects/${editingProject.id}/branch-impact?branch_id=${target.id}`), { headers: { Authorization: `Bearer ${token}` } });
+            if (r.ok) people = Number((await r.json()).employees || 0);
+          } catch {
+            // count unavailable — the question is still asked
+          }
+          const label = (t: string) => (t === 'project_site' ? 'Project Side' : 'Head Office');
+          const ok = await confirmDialog(
+            `Change Branch "${target.branch_name}" from ${label(String(target.branch_type))} to ${label(projectBranchType)}? ${people} employee${people === 1 ? '' : 's'} at this Branch will follow the ${label(projectBranchType)} Weekend / Holiday calendar from now on. Payroll already generated is not recalculated.`,
+            { title: 'Change Branch type', confirmLabel: 'Change type' }
+          );
+          if (!ok) return;
+        }
+      }
+
       const res = await fetch(apiUrl(url), {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -2108,14 +2185,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           location_lat: projectLocation.lat,
           location_lng: projectLocation.lng,
           location_label: projectLocation.label,
-          location_radius: projectLocation.radius
+          location_radius: projectLocation.radius,
+          entry_scope: projectEntryScope,
+          ...branchBody
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save project');
 
+      // Just switched to "By home project": stay on it, so the Admin sees any
+      // old entries whose For still has to be picked.
+      if (editingProject && projectEntryScope === 'home' && editingProject.entry_scope !== 'home') {
+        setEditingProject({ ...editingProject, project_name: newProjectName.trim(), entry_scope: 'home' });
+        setProjectSharingReload((n) => n + 1);
+        fetchAllData();
+        setMessage({ type: 'success', text: `Project saved. ${Number(data.for_filled || 0)} old entr${Number(data.for_filled) === 1 ? 'y' : 'ies'} got their "For" from the person who made them.` });
+        return;
+      }
       setNewProjectName('');
       setEditingProject(null);
+      setProjectEntryScope('team');
       setProjectLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
       setMessage({ type: 'success', text: 'Project saved successfully.' });
@@ -2134,6 +2223,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (res.ok) {
         fetchAllData();
         setMessage({ type: 'success', text: 'Project deleted.' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: data.error || 'Could not delete the Project.' });
       }
     } catch (err) {
       console.error(err);
@@ -2172,14 +2264,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setEditingBranch(null);
       setBranchLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
-      setMessage({ type: 'success', text: 'Branch saved successfully.' });
+      // A renamed branch: say what else took the new name (server's `renamed`).
+      const rn = data.renamed || {};
+      const also = [
+        rn.employees ? `${rn.employees} employee${rn.employees === 1 ? '' : 's'}` : '',
+        rn.team_rules ? `${rn.team_rules} team new-joiner rule${rn.team_rules === 1 ? '' : 's'}` : '',
+        rn.office_machines ? `${rn.office_machines} office machine${rn.office_machines === 1 ? '' : 's'}` : '',
+        rn.sims ? `${rn.sims} SIM${rn.sims === 1 ? '' : 's'}` : ''
+      ].filter(Boolean);
+      setMessage({ type: 'success', text: also.length ? `Branch saved. The new name is also on ${also.join(', ')}.` : 'Branch saved successfully.' });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     }
   };
 
   const handleDeleteBranch = async (id: number) => {
-    if (!(await confirmDialog('Are you sure you want to delete this branch?'))) return;
+    const b = (branches as any[]).find((x) => x.id === id);
+    if (
+      !(await confirmDialog(
+        `Delete the branch "${b?.branch_name || ''}"? Its employees keep "${b?.branch_name || 'it'}" written as their branch, but are no longer linked to it (attendance project, reports by branch). To give it a new name instead, edit it.`,
+        { confirmLabel: 'Delete', tone: 'danger' }
+      ))
+    )
+      return;
     try {
       const res = await fetch(apiUrl(`/api/branches/${id}`), {
         method: 'DELETE',
@@ -2188,9 +2295,188 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (res.ok) {
         fetchAllData();
         setMessage({ type: 'success', text: 'Branch deleted.' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: data.error || 'Could not delete the Branch.' });
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // --- Archive, Link by name, Merge (BranchTools.ts) ---
+  const archiveCall = async (kind: 'branches' | 'projects', id: number, archived: boolean) => {
+    const res = await fetch(apiUrl(`/api/${kind}/${id}/archive`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ archived })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not change this.');
+    fetchAllData();
+    setMessage({ type: 'success', text: archived ? 'Archived. It is hidden from lists and pickers; nothing was deleted.' : 'Restored.' });
+  };
+  const handleArchive = async (kind: 'branches' | 'projects', item: any) => {
+    const archiving = !isArchived(item);
+    const name = kind === 'branches' ? item.branch_name : item.project_name;
+    if (archiving) {
+      const ok = await confirmDialog(
+        kind === 'branches'
+          ? `Archive the Branch "${name}"? It is hidden from lists and pickers. Nothing is deleted, and it can be restored.`
+          : `Archive the Project "${name}"? It is hidden from lists, pickers and check-in. Its PEPM entries and attendance stay, and it can be restored.`,
+        { title: 'Archive', confirmLabel: 'Archive' }
+      );
+      if (!ok) return;
+    }
+    try {
+      await archiveCall(kind, item.id, archiving);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const openLinkByName = async () => {
+    setLinkByName({ loading: true, pairs: [], skipped: [], picked: new Set(), busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-preview'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the matches.');
+      setLinkByName({ loading: false, pairs: data.pairs || [], skipped: data.skipped || [], picked: new Set<number>((data.pairs || []).map((p: any) => p.branch_id)), busy: false });
+    } catch (err: any) {
+      setLinkByName({ loading: false, pairs: [], skipped: [], picked: new Set(), busy: false, error: err.message });
+    }
+  };
+  const confirmLinkByName = async () => {
+    if (!linkByName) return;
+    const pairs = linkByName.pairs.filter((p) => linkByName.picked.has(p.branch_id)).map((p) => ({ branch_id: p.branch_id, project_id: p.project_id }));
+    if (!pairs.length) return;
+    setLinkByName({ ...linkByName, busy: true });
+    try {
+      const res = await fetch(apiUrl('/api/branches/link-by-name'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ pairs })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not link.');
+      setLinkByName(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `${data.linked} Branch${data.linked === 1 ? '' : 'es'} linked to the Project of the same name.${data.skipped?.length ? ` ${data.skipped.length} skipped.` : ''}` });
+    } catch (err: any) {
+      setLinkByName({ ...linkByName, busy: false, error: err.message });
+    }
+  };
+
+  const openDivisionSync = async () => {
+    setDivisionSync({ loading: true, busy: false });
+    try {
+      const res = await fetch(apiUrl('/api/branches/division-preview'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setDivisionSync({ loading: false, busy: false, data });
+    } catch (err: any) {
+      setDivisionSync({ loading: false, busy: false, error: err.message });
+    }
+  };
+  const confirmDivisionSync = async () => {
+    if (!divisionSync?.data) return;
+    setDivisionSync({ ...divisionSync, busy: true });
+    try {
+      const res = await fetch(apiUrl('/api/branches/division-sync'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not change the Divisions.');
+      setDivisionSync(null);
+      setMessage({ type: 'success', text: `Division set from the Branch for ${data.changed} employee${data.changed === 1 ? '' : 's'}. Each change is in their history.` });
+    } catch (err: any) {
+      setDivisionSync({ ...divisionSync, busy: false, error: err.message });
+    }
+  };
+
+  const loadProjectMergePreview = async (from: any, intoId: string) => {
+    if (!intoId) {
+      setMergeProject({ from, intoId: '', preview: null, busy: false });
+      return;
+    }
+    setMergeProject({ from, intoId, preview: null, busy: true });
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${from.id}/merge-preview?into=${intoId}`), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setMergeProject({ from, intoId, preview: data, busy: false });
+    } catch (err: any) {
+      setMergeProject({ from, intoId, preview: null, busy: false, error: err.message });
+    }
+  };
+  const confirmProjectMerge = async () => {
+    if (!mergeProject) return;
+    const into = projects.find((p) => String(p.id) === mergeProject.intoId);
+    if (!(await confirmDialog(`Merge "${mergeProject.from.project_name}" into "${into?.project_name || 'the chosen Project'}"? Everything of "${mergeProject.from.project_name}" moves over and it is archived. This can't be undone.`, { tone: 'danger', confirmLabel: 'Merge' }))) return;
+    setMergeProject({ ...mergeProject, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${mergeProject.from.id}/merge`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ into_id: Number(mergeProject.intoId) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not merge.');
+      const total = Object.values(data.moved || {}).reduce((a: number, b: any) => a + Number(b), 0);
+      const left = Object.values(data.left || {}).reduce((a: number, b: any) => a + Number(b), 0);
+      setMergeProject(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `Merged: ${total} item${total === 1 ? '' : 's'} moved to "${into?.project_name}". "${mergeProject.from.project_name}" is archived (not deleted).${left ? ` ${left} attendance record${left === 1 ? '' : 's'} stayed on it (the person already had one that day on the kept Project).` : ''}` });
+    } catch (err: any) {
+      setMergeProject({ ...mergeProject, busy: false, error: err.message });
+    }
+  };
+  const openProjectMergeLog = async () => {
+    setMergeProjectLog([]);
+    try {
+      const res = await fetch(apiUrl('/api/projects/merge/log'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load.');
+      setMergeProjectLog(data);
+    } catch (err: any) {
+      setMergeProjectLog(null);
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const loadMergePreview = async (from: any, intoId: string) => {
+    if (!intoId) {
+      setMergeBranch({ from, intoId: '', preview: null, busy: false });
+      return;
+    }
+    setMergeBranch({ from, intoId, preview: null, busy: true });
+    try {
+      const res = await fetch(apiUrl(`/api/branches/${from.id}/merge-preview?into=${intoId}`), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not read the details.');
+      setMergeBranch({ from, intoId, preview: data, busy: false });
+    } catch (err: any) {
+      setMergeBranch({ from, intoId, preview: null, busy: false, error: err.message });
+    }
+  };
+  const confirmMerge = async (acknowledge: boolean) => {
+    if (!mergeBranch) return;
+    setMergeBranch({ ...mergeBranch, busy: true, error: undefined });
+    try {
+      const res = await fetch(apiUrl(`/api/branches/${mergeBranch.from.id}/merge`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ into_id: Number(mergeBranch.intoId), acknowledge_calendar_change: acknowledge })
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.needs_calendar_confirmation) {
+        setMergeBranch({ ...mergeBranch, busy: false, needsConfirm: true, error: data.error });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Could not merge.');
+      setMergeBranch(null);
+      fetchAllData();
+      setMessage({ type: 'success', text: `${data.moved} ${data.moved === 1 ? 'person' : 'people'} moved. "${mergeBranch.from.branch_name}" is archived (not deleted).` });
+    } catch (err: any) {
+      setMergeBranch({ ...mergeBranch, busy: false, error: err.message });
     }
   };
 
@@ -2504,25 +2790,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       longTask.step(28, 'Uploading…');
       longTask.creep(65);
+      const body = {
+        rows,
+        file_base64: fileBase64,
+        file_name: file.name,
+        file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      };
       const res = await xhrJson(`/api/budgets/${budgetId}/import`, {
         method: 'POST',
         token,
-        body: {
-          rows,
-          file_base64: fileBase64,
-          file_name: file.name,
-          file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        },
+        body,
         onUpload: (f) => {
           longTask.step(28 + f * 37, f < 1 ? `Uploading… ${Math.round(f * 100)}%` : undefined);
           if (f >= 1) longTask.creep(96, `Saving ${rows.length.toLocaleString()} rows on the server…`, rows.length * 4);
         }
       });
       const data = res.data;
+      // Project names not in Projects: nothing saved yet — the Admin matches
+      // them (ProjectMatchPopup.tsx) and the import runs again.
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ budgetId, body, unknown: data.needs_project_match });
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Import failed');
       await longTask.finish();
       taskDone = true;
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      if (!taskDone) longTask.close();
+      setImportingBudgetId(null);
+      pendingImportBudgetId.current = null;
+    }
+  };
 
+  // The same import again, with the Admin's project for each unknown name.
+  const finishProjectMatch = async (map: Record<string, number | 'new'>) => {
+    if (!projectMatch) return;
+    setProjectMatchBusy(true);
+    try {
+      const res = await xhrJson(`/api/budgets/${projectMatch.budgetId}/import`, { method: 'POST', token, body: { ...projectMatch.body, project_map: map } });
+      const data = res.data;
+      if (res.status === 409 && Array.isArray(data?.needs_project_match)) {
+        setProjectMatch({ ...projectMatch, unknown: data.needs_project_match });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Import failed');
+      setProjectMatch(null);
+      afterBudgetImport(data);
+    } catch (err: any) {
+      setProjectMatch(null);
+      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
+    } finally {
+      setProjectMatchBusy(false);
+    }
+  };
+
+  const afterBudgetImport = (data: any) => {
+    {
       setMessage({
         type: 'success',
         text: `Imported ${data.items_inserted} new row(s)${
@@ -2534,12 +2860,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // "<Budget> - MPR Updated up to <date>": check and publish it now.
       if (data.notice_draft && canSee('notices')) setBudgetNotice(data.notice_draft);
       fetchAllData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
-    } finally {
-      if (!taskDone) longTask.close();
-      setImportingBudgetId(null);
-      pendingImportBudgetId.current = null;
     }
   };
 
@@ -2811,7 +3131,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // --- User Management Handlers ---
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
+    if (newUserFor === 'employee' ? !newUserEmployeeId || !newUserPassword.trim() : !newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) return;
 
     setCreatingUser(true);
     setMessage(null);
@@ -2823,12 +3143,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           name: newUserName.trim(),
           email: newUserEmail.trim(),
           password: newUserPassword,
-          role: newUserRole
+          role: newUserRole,
+          ...(newUserFor === 'employee' ? { employee_id: Number(newUserEmployeeId) } : { non_employee_reason: newUserReason.trim() })
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user');
 
+      setNewUserEmployeeId('');
+      setNewUserReason('');
+      setEmployeesNoLogin(null);
       setNewUserName('');
       setNewUserEmail('');
       setNewUserPassword('');
@@ -3073,6 +3397,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Monthly Attendance Report: tap a day to give / fix In / Out (AttendanceEditPopup).
   const canEditAttendance = attendanceReportsLayer('attendance_edit');
   const [editAttendance, setEditAttendance] = useState<{ userId: number; userName: string; date: string } | null>(null);
+  // Admin Panel -> Designations: the same rule as usersLayer (saved layers, else every non-explicit one).
+  const designationsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.designations;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // MPR Edit Log: read (history, approvals) and the explicit-only mpr_followup.
+  const editlogLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.editlog;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // Employees module layers: "Set Division from Branch" changes people, so it needs Edit/Add.
+  const employeesLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.employees;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  // Projects module layers: "merge_projects" is explicit-only.
+  const projectsLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.projects;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const usersLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.users;
@@ -3091,7 +3439,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       fetchAllData();
       setMessage({ type: 'success', text: 'User deleted.' });
     } catch (err: any) {
-      alert(err.message);
+      // A login with records (attendance, claims…) is refused: say why and what to do instead.
+      setMessage({ type: 'error', text: err.message });
     }
   };
 
@@ -3197,12 +3546,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
-  // The "Project Access" modal's checklist, filtered by the search box.
-  const filteredManageProjects = React.useMemo(() => {
-    const q = managePermSearch.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter((p) => p.project_name.toLowerCase().includes(q));
-  }, [projects, managePermSearch]);
 
   const handleSavePermissions = async () => {
     if (!managingUser) return;
@@ -3372,7 +3715,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // Dispatch Material (Purchase) — its own tick too.
       dispatch: reportLayer('dispatch_material'),
       // P.O Import — its own tick too (MprPoImport.tsx).
-      poImport: reportLayer('po_import')
+      poImport: reportLayer('po_import'),
+      // Undelivered MPR & Close short — its own tick too (MprUndelivered.tsx).
+      closeShort: reportLayer('close_short')
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
@@ -3384,17 +3729,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the full list) instead of always mounting every single row at once.
   const LIST_PAGE_SIZE = 30;
 
+  const isArchived = (x: any) => !!Number(x?.is_archived);
+  const activeProjects = React.useMemo(() => projects.filter((p) => !isArchived(p)), [projects]);
+  const projectBranchCounts = React.useMemo(
+    () => ({
+      all: activeProjects.length,
+      head_office: activeProjects.filter((p) => p.linked_branch_type === 'head_office').length,
+      project_site: activeProjects.filter((p) => p.linked_branch_type === 'project_site').length,
+      none: activeProjects.filter((p) => !p.linked_branch_id).length,
+      archived: projects.filter((p) => isArchived(p)).length
+    }),
+    [projects, activeProjects]
+  );
   const visibleProjects = React.useMemo(() => {
     const q = projectListSearch.trim().toLowerCase();
-    const filtered = q ? projects.filter((p) => p.project_name.toLowerCase().includes(q)) : projects;
+    const byBranch =
+      projectBranchFilter === 'archived'
+        ? projects.filter((p) => isArchived(p))
+        : projectBranchFilter === 'all'
+          ? activeProjects
+          : activeProjects.filter((p) => (projectBranchFilter === 'none' ? !p.linked_branch_id : p.linked_branch_type === projectBranchFilter));
+    const filtered = q ? byBranch.filter((p) => p.project_name.toLowerCase().includes(q)) : byBranch;
     return showAllProjects || q ? filtered : filtered.slice(0, LIST_PAGE_SIZE);
-  }, [projects, projectListSearch, showAllProjects]);
+  }, [projects, activeProjects, projectListSearch, showAllProjects, projectBranchFilter]);
 
+  const activeBranches = React.useMemo(() => (branches as any[]).filter((b) => !isArchived(b)), [branches]);
+  const branchCounts = React.useMemo(
+    () => ({
+      active: activeBranches.length,
+      head_office: activeBranches.filter((b) => b.branch_type === 'head_office').length,
+      project_site: activeBranches.filter((b) => b.branch_type !== 'head_office').length,
+      no_project: activeBranches.filter((b) => !b.project_id).length,
+      archived: (branches as any[]).filter((b) => isArchived(b)).length
+    }),
+    [branches, activeBranches]
+  );
   const visibleBranches = React.useMemo(() => {
     const q = branchListSearch.trim().toLowerCase();
-    const filtered = q ? branches.filter((b) => b.branch_name.toLowerCase().includes(q)) : branches;
+    const bySlice =
+      branchListFilter === 'archived'
+        ? (branches as any[]).filter((b) => isArchived(b))
+        : branchListFilter === 'active'
+          ? activeBranches
+          : activeBranches.filter((b) =>
+              branchListFilter === 'no_project' ? !b.project_id : branchListFilter === 'head_office' ? b.branch_type === 'head_office' : b.branch_type !== 'head_office'
+            );
+    const filtered = q ? bySlice.filter((b) => b.branch_name.toLowerCase().includes(q)) : bySlice;
     return showAllBranches || q ? filtered : filtered.slice(0, LIST_PAGE_SIZE);
-  }, [branches, branchListSearch, showAllBranches]);
+  }, [branches, activeBranches, branchListSearch, showAllBranches, branchListFilter]);
 
   const visibleMprNumbers = React.useMemo(() => {
     const q = mprListSearch.trim().toLowerCase();
@@ -3418,14 +3800,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // blank when there's no match, which is accurate (that import data doesn't exist).
   // Reports tab: the MPR Entries report or the per-Project Budget
   // Submission Status (BudgetSubmissionReport).
-  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import'>('entries');
+  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch' | 'po_import' | 'undelivered'>('entries');
   // The reports this account may open, in page order; a view it can't open
   // falls back to the first one it can.
   const reportViews = ([
     ['entries', 'MPR Entries Report', reportCan.read],
     ['submission', 'Budget Submission Status', reportCan.submission],
     ['dispatch', 'Dispatch Material', reportCan.dispatch],
-    ['po_import', 'P.O Import', reportCan.poImport]
+    ['po_import', 'P.O Import', reportCan.poImport],
+    ['undelivered', 'Undelivered MPR', reportCan.closeShort]
   ] as const).filter(([, , ok]) => ok);
   const reportView = reportViews.some(([k]) => k === reportViewPicked) ? reportViewPicked : reportViews[0]?.[0] || 'entries';
 
@@ -3641,6 +4024,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
+      {activeTab === 'reports' && reportView === 'undelivered' && reportCan.closeShort && <MprUndelivered token={token} projects={projects} />}
       {activeTab === 'reports' && reportView === 'po_import' && reportCan.poImport && <MprPoImport token={token} onImported={() => void loadShared(['entries'])} />}
 
       {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
@@ -4798,8 +5182,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           viewing report, the same "Monthly Attendance Report" pattern applied
           to Leave Applications instead of attendance. */}
       {activeTab === 'leave_applications' && (
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <CalendarClock className="w-5 h-5 text-blue-600" />
@@ -4810,6 +5194,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {leaveApplicationsReportDepartments.length > 0 && ' Only Departments you have access to are listed below.'}
               </p>
             </div>
+          </div>
+          {/* Search + Department stay at the top while the list scrolls (a
+              computer); the table's column titles stick right under them. */}
+          <div ref={leaveBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             <div className="flex flex-wrap gap-3 items-center">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -4844,9 +5232,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               {/* Desktop — unchanged full table. */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="hidden md:block overflow-x-clip">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <thead className="sticky z-10 bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + leaveBarH }}>
                     <tr>
                       <th className="px-4 py-3">Employee</th>
                       <th className="px-4 py-3">Department</th>
@@ -5075,6 +5463,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
       {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
       {activeTab === 'break_time' && canSee('break_time') && <BreakTimeAdmin token={token} />}
+      {activeTab === 'designations' && canSee('designations') && (
+        <DesignationsPanel token={token} canEdit={designationsLayer('edit_add')} canDelete={designationsLayer('delete_trash')} />
+      )}
       {activeTab === 'user_feedback' && canSee('user_feedback') && <FeedbackAdmin token={token} isSuperAdmin={user.role === 'superadmin'} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
@@ -5274,13 +5665,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           happened, so an Admin can see at a glance which day which Job/MPR rows were
           touched (and by whom) without opening each entry's own history one at a time. */}
       {activeTab === 'editlog' && (
-        <>
+        // MprEditLog.tsx: Pending approvals (the Job Edit section below), Edit
+        // history, and — with the mpr_followup layer — Needs update and People.
+        <MprEditLog
+          token={token}
+          projects={projects}
+          pendingCount={pendingJobEditRequests.length}
+          canFollowup={editlogLayer('mpr_followup')}
+          pendingSection={<>
         {/* Job Edit Approvals — pending first, so an Admin with "editlog" access sees
             what needs action before scrolling into the (much longer) permanent log
             below. Only an Admin/User account with the "editlog" module actually gets
             data back from GET /api/job-edits — this section simply doesn't render
             anything for anyone else since this whole tab is already gated the same way. */}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+        <div>
           <div className="p-6 border-b border-slate-200">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
               <Clock3 className="w-4 h-4 text-amber-600" /> Job Edit Approvals
@@ -5370,6 +5768,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         {r.action === 'add_item' ? 'Add MPR' : r.action === 'add_job' ? 'New Job' : 'Delete MPR'}
                       </span>
                     </div>
+                    {(r.project_name || (r.payload as any)?.project_name) && (
+                      <p className="text-xs font-semibold text-slate-600 mt-0.5 break-words">Project: {r.project_name || (r.payload as any)?.project_name}</p>
+                    )}
                     <p className="text-sm text-slate-800 mt-1 break-words">{describeJobEditRequest(r)}</p>
                     {jobEditRequestReason(r) && (
                       <p className="text-xs text-slate-500 mt-1 italic break-words">Reason: {jobEditRequestReason(r)}</p>
@@ -5444,114 +5845,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             onAct={(action) => void actOnJobEditRequest(jobEditDetails.id, action)}
           />
         )}
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <History className="w-4 h-4 text-blue-600" /> MPR Edit Log
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Every change made to a submitted MPR row (mostly Delivery Date updates, since other fields lock after
-                submission), grouped by the day it was edited.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={editLogSearch}
-                  onChange={(e) => setEditLogSearch(e.target.value)}
-                  placeholder="Search Job No, MPR No, User..."
-                  className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleExportEditLogExcel}
-                disabled={mprEditLogByDay().length === 0}
-                title="Download this log as an Excel file"
-                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-              >
-                <FileDown className="w-3.5 h-3.5" /> Export Excel
-              </button>
-            </div>
-          </div>
-
-          {loadingMprEditLog ? (
-            <p className="text-xs text-slate-400 text-center py-12">Loading edit log...</p>
-          ) : mprEditLogByDay().length === 0 ? (
-            <p className="text-xs text-slate-400 text-center py-12">No MPR edits recorded yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-200">
-              {mprEditLogByDay().map(([day, records]) => (
-                <div key={day}>
-                  <div className="px-6 py-2.5 bg-slate-50 flex items-center gap-2 sticky top-0">
-                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                    <span className="text-xs font-bold text-slate-700">{day}</span>
-                    <span className="text-[10px] text-slate-400">
-                      ({records.length} edit{records.length === 1 ? '' : 's'})
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-white text-slate-500 text-[11px] uppercase tracking-wider">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Time</th>
-                          <th className="px-4 py-2 text-left">Job No</th>
-                          <th className="px-4 py-2 text-left">MPR No</th>
-                          <th className="px-4 py-2 text-left">Item Name</th>
-                          <th className="px-4 py-2 text-left">Job Owner</th>
-                          <th className="px-4 py-2 text-left">Field Changed</th>
-                          <th className="px-4 py-2 text-left">From</th>
-                          <th className="px-4 py-2 text-left">To</th>
-                          <th className="px-4 py-2 text-left">Edited By</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-sm">
-                        {records.map((h) => (
-                          <tr key={h.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">
-                              {new Date(h.edited_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-blue-600 text-xs">{h.job_no || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
-                                {h.mpr_no || '—'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs">{h.item_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-600 text-xs">{h.entry_owner_name || '—'}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
-                                {FIELD_LABELS[h.field_name] || h.field_name}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-500 text-xs max-w-[160px] truncate" title={h.old_value || ''}>
-                              {h.old_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-800 text-xs max-w-[160px] truncate font-medium" title={h.new_value || ''}>
-                              {h.new_value || '—'}
-                            </td>
-                            <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 text-xs">{h.editor_name || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        </>
+</>}
+        />
       )}
 
       {/* TAB 2: PROJECTS */}
       {activeTab === 'projects' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
-            <PhoneSheet label="Add Project" title={editingProject ? 'Edit Project' : 'Add New Project'} editing={editingProject !== null} onCancelEdit={() => { setEditingProject(null); setNewProjectName(''); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={projects.length}>
+            <PhoneSheet label="Add Project" title={editingProject ? 'Edit Project' : 'Add New Project'} editing={editingProject !== null} onCancelEdit={() => { setEditingProject(null); setNewProjectName(''); setProjectEntryScope('team'); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }} doneKey={projects.length}>
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-4">
                 {editingProject ? 'Edit Project' : 'Add New Project'}
@@ -5612,6 +5914,67 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">Optional — mark this project's site on a free map.</p>
                 </div>
+                {editingProject && canSee('branches') && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch</label>
+                      <SearchSelect
+                        value={projectBranchLink}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setProjectBranchLink(v);
+                          // Picking an existing Branch shows its own type.
+                          const b = branches.find((x) => String(x.id) === v);
+                          if (b) setProjectBranchType(b.branch_type === 'head_office' ? 'head_office' : 'project_site');
+                        }}
+                        className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        <option value="none">{editingProject.linked_branch_id ? 'Not linked (release this Branch)' : '— No Branch —'}</option>
+                        {!editingProject.linked_branch_id && <option value="auto">New Branch with this Project's name (or the one already called that)</option>}
+                        {branches.map((b) => {
+                          const takenBy = b.project_id && b.project_id !== editingProject.id ? b.linked_project_name || 'another Project' : null;
+                          return (
+                            <option key={b.id} value={String(b.id)} disabled={!!takenBy}>
+                              {b.branch_name} · {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              {takenBy ? ` — linked to ${takenBy}` : b.project_id && b.project_id === editingProject.id ? ' — this Project' : ' — free'}
+                            </option>
+                          );
+                        })}
+                      </SearchSelect>
+                      <p className="text-[11px] text-slate-400 mt-1">The Branch this Project belongs to. A Branch can hold one Project; a Branch already linked elsewhere is greyed out.</p>
+                    </div>
+                    {projectBranchLink !== 'none' && (
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">Branch Type</label>
+                        <div className="flex gap-2">
+                          {(['head_office', 'project_site'] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setProjectBranchType(t)}
+                              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                                projectBranchType === t ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {t === 'head_office' ? 'Head Office' : 'Project Side'}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Which Weekend / Holiday calendar the people of this Branch follow (Admin Panel &rarr; Holidays). Changing it asks to confirm first.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+                <ProjectEntrySharing
+                  token={token}
+                  value={projectEntryScope}
+                  onChange={setProjectEntryScope}
+                  projectId={editingProject ? editingProject.id : null}
+                  savedScope={editingProject ? ((editingProject.entry_scope as EntryScope) || 'team') : null}
+                  reloadKey={projectSharingReload}
+                />
                 <div className="flex space-x-3">
                   <button
                     type="submit"
@@ -5622,7 +5985,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {editingProject && (
                     <button
                       type="button"
-                      onClick={() => { setEditingProject(null); setNewProjectName(''); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }}
+                      onClick={() => { setEditingProject(null); setNewProjectName(''); setProjectEntryScope('team'); setProjectLocation({ lat: null, lng: null, label: null, radius: null }); }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
                     >
                       Cancel
@@ -5642,9 +6005,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <h3 className="text-lg font-bold text-slate-900">Approved Projects List</h3>
                     <p className="text-xs text-slate-500">Users select projects strictly from this list</p>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
-                    {projects.length} Project{projects.length === 1 ? '' : 's'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {projectsLayer('merge_projects') && (
+                      <button
+                        type="button"
+                        onClick={openProjectMergeLog}
+                        className="text-xs px-2.5 py-1 rounded-full bg-white text-slate-600 font-medium border border-slate-200 hover:bg-slate-50 whitespace-nowrap"
+                        title="Projects merged so far"
+                      >
+                        Merge log
+                      </button>
+                    )}
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
+                      {activeProjects.length} Project{activeProjects.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -5655,6 +6030,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     placeholder="Search projects..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filter by Branch type">
+                  {([
+                    ['all', 'All'],
+                    ['head_office', 'Head Office'],
+                    ['project_site', 'Project Side'],
+                    ['none', 'No Branch'],
+                    ['archived', 'Archived']
+                  ] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={projectBranchFilter === k}
+                      onClick={() => setProjectBranchFilter(k)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        projectBranchFilter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} ({projectBranchCounts[k]})
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="divide-y divide-slate-200 max-h-[32rem] overflow-y-auto">
@@ -5680,6 +6077,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 title={`Branch: ${p.linked_branch_name}`}
                               >
                                 {p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              </span>
+                            )}
+                            {p.entry_scope && p.entry_scope !== 'team' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200" title="Entry sharing">
+                                {ENTRY_SCOPE_LABEL[p.entry_scope as EntryScope]}
                               </span>
                             )}
                           </span>
@@ -5709,6 +6111,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           onClick={() => {
                             setEditingProject(p);
                             setNewProjectName(p.project_name);
+                            setProjectEntryScope((p.entry_scope as EntryScope) || 'team');
+                            setProjectBranchLink(p.linked_branch_id ? String(p.linked_branch_id) : 'none');
+                            setProjectBranchType(p.linked_branch_type === 'head_office' ? 'head_office' : 'project_site');
                             setProjectLocation({
                               lat: p.location_lat != null ? Number(p.location_lat) : null,
                               lng: p.location_lng != null ? Number(p.location_lng) : null,
@@ -5720,6 +6125,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           title="Edit project"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!isArchived(p) && projectsLayer('merge_projects') && (
+                          <button
+                            onClick={() => setMergeProject({ from: p, intoId: '', preview: null, busy: false })}
+                            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Merge into another Project"
+                          >
+                            <GitMerge className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleArchive('projects', p)}
+                          className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                          title={isArchived(p) ? 'Restore project' : 'Archive project'}
+                        >
+                          {isArchived(p) ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => handleDeleteProject(p.id)}
@@ -5774,7 +6195,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                    Holiday Calendar Group
+                    Branch Type (Holiday Calendar)
                   </label>
                   <div className="flex gap-2">
                     <button
@@ -5797,7 +6218,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      Project Site
+                      Project Side
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -5807,7 +6228,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {canSee('projects') ? (
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
-                      Attendance Project
+                      Linked Project (optional)
                     </label>
                     <SearchSelect
                       value={branchProjectLink}
@@ -5833,13 +6254,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         const takenBy = p.linked_branch_id && p.linked_branch_id !== editingBranch?.id ? p.linked_branch_name : null;
                         return (
                           <option key={p.id} value={String(p.id)} disabled={!!takenBy}>
-                            {p.project_name}{takenBy ? ` — linked to ${takenBy}` : ''}
+                            {p.project_name}
+                            {takenBy ? ` — linked to ${takenBy}${p.linked_branch_type ? ` (${p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'})` : ''}` : p.linked_branch_id && p.linked_branch_id === editingBranch?.id ? ' — this Branch' : ' — free'}
                           </option>
                         );
                       })}
                     </SearchSelect>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      The Project used for attendance check-in (and PEPM). Its name and map location are kept the same as this Branch's.
+                      Leave it as it is for most Branches. A linked Project lets "Their Branch" check-in and Transfer find it, and its name and map location are kept the same as this Branch's.
                     </p>
                   </div>
                 ) : editingBranch?.linked_project_name ? (
@@ -5919,9 +6341,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <h3 className="text-lg font-bold text-slate-900">Branches List</h3>
                     <p className="text-xs text-slate-500">Company branches — Phase 1 (management only)</p>
                   </div>
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
-                    {branches.length} Branch{branches.length === 1 ? '' : 'es'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {canSee('projects') && (
+                      <button
+                        type="button"
+                        onClick={openLinkByName}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                        title="Link Branches to the Project with exactly the same name"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Link by name
+                      </button>
+                    )}
+                    {canSee('employees') && employeesLayer('edit_add') && (
+                      <button
+                        type="button"
+                        onClick={openDivisionSync}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold transition-colors"
+                        title="Set every employee's Division from their Branch (Head Office / Project Side)"
+                      >
+                        Set Division from Branch
+                      </button>
+                    )}
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
+                      {activeBranches.length} Branch{activeBranches.length === 1 ? '' : 'es'}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -5932,6 +6377,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     placeholder="Search branches..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Filter Branches">
+                  {([
+                    ['active', 'All'],
+                    ['head_office', 'Head Office'],
+                    ['project_site', 'Project Side'],
+                    ['no_project', 'No project'],
+                    ['archived', 'Archived']
+                  ] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={branchListFilter === k}
+                      onClick={() => setBranchListFilter(k)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        branchListFilter === k ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {label} ({branchCounts[k]})
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="divide-y divide-slate-200 max-h-[32rem] overflow-y-auto">
@@ -5954,7 +6421,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                   : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}
                             >
-                              {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                              {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
                             </span>
                           </span>
                           {b.linked_project_name && (
@@ -5996,6 +6463,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           title="Edit branch"
                         >
                           <Edit2 className="w-4 h-4" />
+                        </button>
+                        {!isArchived(b) && (
+                          <button
+                            onClick={() => setMergeBranch({ from: b, intoId: '', preview: null, busy: false })}
+                            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Merge into another Branch"
+                          >
+                            <GitMerge className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleArchive('branches', b)}
+                          className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                          title={isArchived(b) ? 'Restore branch' : 'Archive branch'}
+                        >
+                          {isArchived(b) ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
                         </button>
                         <button
                           onClick={() => handleDeleteBranch(b.id)}
@@ -6490,14 +6973,82 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               Create an account for a User or Admin. There is no public sign-up — accounts are only created here.
             </p>
             <form onSubmit={handleCreateUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+              <div className="sm:col-span-2 lg:col-span-5 space-y-2">
+                <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600">Login for</span>
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="radiogroup" aria-label="Login for">
+                  {(
+                    [
+                      ['employee', 'An employee'],
+                      ['other', 'Not an employee']
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={newUserFor === k}
+                      onClick={() => setNewUserFor(k)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-md ${newUserFor === k ? 'bg-white shadow-sm text-blue-700' : 'text-slate-600'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  A <b>new joiner</b> doesn&rsquo;t start here — open their onboarding in HR Operations → Onboarding → New Joiners; it makes the Employee and the login together.
+                </p>
+                {newUserFor === 'employee' ? (
+                  <div className="max-w-xl">
+                    <SearchSelect
+                      value={newUserEmployeeId}
+                      onFocus={() => {
+                        if (employeesNoLogin) return;
+                        fetch(apiUrl('/api/users/employees-without-login'), { headers: { Authorization: `Bearer ${token}` } })
+                          .then((r) => (r.ok ? r.json() : []))
+                          .then(setEmployeesNoLogin)
+                          .catch(() => setEmployeesNoLogin([]));
+                      }}
+                      onChange={(e) => {
+                        setNewUserEmployeeId(e.target.value);
+                        const emp = (employeesNoLogin || []).find((x) => String(x.id) === e.target.value);
+                        if (emp) {
+                          setNewUserName(emp.name);
+                          setNewUserEmail(emp.email || '');
+                        }
+                      }}
+                      aria-label="Employee"
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm"
+                    >
+                      <option value="">— Select an employee with no login —</option>
+                      {(employeesNoLogin || []).map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {[x.name, x.employee_id, x.designation, x.department].filter(Boolean).join(' · ')}
+                        </option>
+                      ))}
+                    </SearchSelect>
+                    <p className="text-[11px] text-slate-500 mt-1">They sign in with their Employee ID.</p>
+                  </div>
+                ) : (
+                  <div className="max-w-xl">
+                    <input
+                      value={newUserReason}
+                      onChange={(e) => setNewUserReason(e.target.value)}
+                      placeholder="Who is this? e.g. External auditor, IT vendor, system account"
+                      aria-label="Who is this login for"
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                    />
+                  </div>
+                )}
+              </div>
               <div className="lg:col-span-1">
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Full Name</label>
                 <input
                   type="text"
-                  required
+                  required={newUserFor === 'other'}
+                  readOnly={newUserFor === 'employee'}
                   value={newUserName}
                   onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="John Doe"
+                  placeholder={newUserFor === 'employee' ? 'From the employee' : 'John Doe'}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
                 />
               </div>
@@ -6505,7 +7056,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Email</label>
                 <input
                   type="email"
-                  required
+                  required={newUserFor === 'other'}
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="user@company.com"
@@ -6728,8 +7279,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             )}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-clip">
+          <div className="p-6 pb-3 flex flex-col gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-900">User Management</h3>
               <p className="text-xs text-slate-500">
@@ -6738,6 +7289,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
               </p>
             </div>
+          </div>
+          {/* Search, filters and buttons stay at the top while the list
+              scrolls (a computer); the column titles stick right under them. */}
+          <div ref={usersBarRef} className="md:sticky md:top-16 z-20 bg-white/95 backdrop-blur-sm px-6 pt-1 pb-4 border-b border-slate-200">
             {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
                 without touching the `users` state other tabs on this page depend on. */}
             {/* Phone: search on its own line, Role + Department side by side,
@@ -6810,13 +7365,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <KeyRound className="w-3.5 h-3.5" /> Password requests
                 </button>
               )}
+              {usersLayer('merge_accounts') && (
+                <button
+                  type="button"
+                  onClick={() => setShowMergeAccounts(true)}
+                  title="A login made by hand and the login the employee import made for the same person — merge them into one"
+                  className="flex-1 sm:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-full sm:rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <GitMerge className="w-3.5 h-3.5" /> Merge accounts
+                </button>
+              )}
               </div>
             </div>
           </div>
           {/* Quick filters — one tap narrows the list to accounts with a given
               switch on (counts are for the whole list, not the current search). */}
           <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-1.5">
-            {USER_ACCESS_FILTERS.map((f) => {
+            {USER_ACCESS_FILTERS.filter((f) => !f.deptRole || users.some((u) => u.dept_head_of !== undefined)).map((f) => {
               const count = users.filter(f.match).length;
               const active = userAccessFilter === f.key;
               return (
@@ -6870,7 +7435,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : (
             <>
               <table className="hidden md:table w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                <thead className="sticky z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + usersBarH }}>
                   <tr>
                     <th className="pl-5 pr-1 py-2.5 w-8">
                       {(() => {
@@ -6894,6 +7459,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       })()}
                     </th>
                     <th className="px-3 py-2.5 text-left">User</th>
+                    <th className="px-3 py-2.5 text-left">Department</th>
                     <th className="px-3 py-2.5 text-left w-28">Role</th>
                     <th className="px-3 py-2.5 text-left">Access</th>
                     {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
@@ -6924,6 +7490,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="text-xs text-slate-500 truncate">{u.username ? <><span className="font-mono">{u.username}</span>{u.email ? ` · ${u.email}` : ''}</> : u.email || '—'}</div>
                           </div>
                         </div>
+                      </td>
+                      {/* From the linked Employee record; none = not an employee. */}
+                      <td className="px-3 py-3 text-xs">
+                        {u.department ? <span className="text-slate-700">{u.department}</span> : <span className="text-slate-400">—</span>}
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
@@ -7014,6 +7584,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         </span>
                       </div>
                       <div className="text-xs text-slate-500 truncate">{u.username ? `${u.username}${u.email ? ` · ${u.email}` : ''}` : u.email || '—'}</div>
+                      {u.department && <div className="text-[11px] text-slate-600 truncate">{u.department}</div>}
                       <div className="mt-1.5">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
@@ -7160,16 +7731,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
           </PhoneSheet>
 
+          {(() => {
+            const q = deptQ.trim().toLowerCase();
+            const shownDepts = departments.filter((d) => {
+              if (deptStatus === 'active' && !d.is_active) return false;
+              if (deptStatus === 'inactive' && d.is_active) return false;
+              if (deptSetup === 'no_head' && d.head_user_id) return false;
+              if (deptSetup === 'no_teams' && d.teams && d.teams.length) return false;
+              if (deptSetup === 'no_supervisor' && !(d.teams || []).some((t) => !t.supervisor_name)) return false;
+              if (q) {
+                const hay = [d.name, d.head_name, ...(d.teams || []).flatMap((t) => [t.name, t.supervisor_name])].filter(Boolean).join(' ').toLowerCase();
+                if (!hay.includes(q)) return false;
+              }
+              return true;
+            });
+            const filtered = !!q || deptStatus !== 'all' || deptSetup !== 'all';
+            return (
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900">{departments.length} Department{departments.length === 1 ? '' : 's'}</h3>
+            <div className="p-4 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+              <h3 className="text-sm font-bold text-slate-900 mr-auto">
+                {filtered ? `${shownDepts.length} of ${departments.length}` : departments.length} Department{departments.length === 1 ? '' : 's'}
+              </h3>
+              <span className="relative w-full sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={deptQ}
+                  onChange={(e) => setDeptQ(e.target.value)}
+                  placeholder="Search department, Head, team…"
+                  aria-label="Search departments"
+                  className="w-full h-9 pl-8 pr-3 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </span>
+              <select value={deptStatus} onChange={(e) => setDeptStatus(e.target.value as any)} aria-label="Status" className="h-9 text-xs px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+                <option value="all">Active &amp; inactive</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <select value={deptSetup} onChange={(e) => setDeptSetup(e.target.value as any)} aria-label="Setup" className="h-9 text-xs px-3 rounded-xl border border-slate-200 bg-white text-slate-700">
+                <option value="all">Any setup</option>
+                <option value="no_head">No Head</option>
+                <option value="no_teams">No teams</option>
+                <option value="no_supervisor">A team without Supervisor</option>
+              </select>
+              {filtered && (
+                <button type="button" onClick={() => { setDeptQ(''); setDeptStatus('all'); setDeptSetup('all'); }} className="text-xs font-semibold text-blue-600 hover:underline">
+                  Clear
+                </button>
+              )}
             </div>
             {departments.length === 0 ? (
               <p className="p-4 text-xs text-slate-400 text-center">No Departments yet — add one above.</p>
+            ) : shownDepts.length === 0 ? (
+              <p className="p-6 text-xs text-slate-400 text-center">No department matches.</p>
             ) : (
-              <div className="overflow-x-auto">
+              // The table scrolls inside its own box (the page and the Add form
+              // stay put) and its header stays on top while scrolling.
+              <div className="overflow-auto md:max-h-[calc(100dvh-240px)]">
                 <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                  <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider sticky top-0 z-10 shadow-[0_1px_0_rgba(15,23,42,0.08)]">
                     <tr>
                       <th className="px-4 py-2.5 text-left">Department</th>
                       <th className="px-4 py-2.5 text-left">Head</th>
@@ -7180,7 +7800,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
-                    {departments.map((d) => (
+                    {shownDepts.map((d) => (
                       <tr key={d.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{d.name}</td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-700">
@@ -7240,6 +7860,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             )}
           </div>
+            );
+          })()}
         </div>
       )}
 
@@ -7755,87 +8377,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* Manage Projects modal — Admin sets which Projects a User can access */}
+      {/* Manage Projects modal — Admin sets which Projects a User can access
+          (and with it, which PEPM teams they are on — ProjectAccessPopup.tsx). */}
       {managingUser && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setManagingUser(null)}
-        >
-          <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Project Access</h3>
-                <p className="text-xs text-slate-500">{managingUser.name} • {managingUser.email}</p>
-              </div>
-              <button
-                onClick={() => setManagingUser(null)}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {projects.length > 0 && (
-              <div className="px-5 pt-4">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Search className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="text"
-                    value={managePermSearch}
-                    onChange={(e) => setManagePermSearch(e.target.value)}
-                    placeholder="Search Project Name..."
-                    autoComplete="off"
-                    className="block w-full pl-10 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="p-5 overflow-y-auto flex-1 space-y-2">
-              {projects.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-6">No projects exist yet. Add one from the Projects tab first.</p>
-              ) : filteredManageProjects.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-6">No Project matches "{managePermSearch}".</p>
-              ) : (
-                filteredManageProjects.map((p) => (
-                  <label
-                    key={p.id}
-                    className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedProjectIds.has(p.id)}
-                      onChange={() => toggleSelectedProject(p.id)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
-                    />
-                    <span className="text-sm font-medium text-slate-900">{p.project_name}</span>
-                  </label>
-                ))
-              )}
-            </div>
-
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
-              <button
-                onClick={() => setManagingUser(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSavePermissions}
-                disabled={savingPermissions}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
-              >
-                {savingPermissions ? 'Saving...' : 'Save Access'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ProjectAccessPopup
+          user={managingUser}
+          projects={projects}
+          users={users}
+          permissions={permissions}
+          selected={selectedProjectIds}
+          onToggle={toggleSelectedProject}
+          search={managePermSearch}
+          onSearch={setManagePermSearch}
+          saving={savingPermissions}
+          onSave={handleSavePermissions}
+          onClose={() => setManagingUser(null)}
+        />
       )}
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
@@ -7847,6 +8404,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           templates={accessTemplates}
           onChanged={loadAccessTemplates}
           onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
+
+      {projectMatch && (
+        <ProjectMatchPopup
+          unknown={projectMatch.unknown}
+          projects={projects}
+          busy={projectMatchBusy}
+          onCancel={() => {
+            setProjectMatch(null);
+            setMessage({ type: 'error', text: 'Import cancelled — nothing was saved.' });
+          }}
+          onConfirm={finishProjectMatch}
         />
       )}
 
@@ -7864,6 +8434,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {showPhotoRequests && isSuperAdmin && (
         <ProfilePhotoRequestsPopup token={token} onClose={() => setShowPhotoRequests(false)} onChanged={setPhotoRequestCount} />
+      )}
+      {showMergeAccounts && usersLayer('merge_accounts') && (
+        <AccountMergePopup token={token} onClose={() => setShowMergeAccounts(false)} onChanged={() => fetchAllData()} />
       )}
       {showPasswordRequests && usersLayer('password_requests') && (
         <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />
@@ -8203,6 +8776,305 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
+      {divisionSync && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-xl max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Set Division from Branch</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Division becomes the type of the employee's Branch: Head Office or Project Side. Employees with no Branch keep their Division. Each change is written to the person's history.
+            </p>
+            {divisionSync.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Reading the employees…</p>
+            ) : divisionSync.error ? (
+              <p className="text-sm text-rose-600 mt-4">{divisionSync.error}</p>
+            ) : divisionSync.data ? (
+              <>
+                <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-4 text-[13px] text-slate-800 space-y-0.5">
+                  <div><b>{divisionSync.data.will_change}</b> will change · {divisionSync.data.already_right} already right</div>
+                  <div className="text-slate-500">{divisionSync.data.no_branch} employees have no Branch and are left as they are.</div>
+                </div>
+                {divisionSync.data.summary.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    {divisionSync.data.summary.slice(0, 12).map((r: any) => (
+                      <div key={r.change} className="flex justify-between text-[12px] text-slate-700 px-1">
+                        <span>{r.change}</span>
+                        <span className="font-semibold">{r.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {divisionSync.data.sample.length > 0 && (
+                  <details className="mt-3 text-[12px] text-slate-600">
+                    <summary className="cursor-pointer font-semibold">First {divisionSync.data.sample.length} people</summary>
+                    <ul className="mt-1.5 space-y-1">
+                      {divisionSync.data.sample.map((p: any, i: number) => (
+                        <li key={i}>
+                          <span className="font-semibold">{p.name}</span> ({p.employee_id}) · {p.branch}: {p.from || '(empty)'} → {p.to}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            ) : null}
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" className="liquid-glass-chip px-4 py-2 rounded-full text-sm font-semibold text-slate-700" onClick={() => setDivisionSync(null)} disabled={divisionSync.busy}>
+                {divisionSync.data && divisionSync.data.will_change > 0 ? 'Cancel' : 'Close'}
+              </button>
+              {divisionSync.data && divisionSync.data.will_change > 0 && (
+                <button type="button" className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold" onClick={confirmDivisionSync} disabled={divisionSync.busy}>
+                  {divisionSync.busy ? 'Changing…' : `Change ${divisionSync.data.will_change} Division${divisionSync.data.will_change === 1 ? '' : 's'}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {linkByName && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-xl max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Link Branches to Projects by name</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              These Branches have exactly the same name as a Project that has no Branch yet. Linking keeps every name and map pin as it is. Branches with no matching Project stay as they are.
+            </p>
+            {linkByName.loading ? (
+              <p className="text-sm text-slate-500 mt-4">Looking for matches…</p>
+            ) : linkByName.error ? (
+              <p className="text-sm text-rose-600 mt-4">{linkByName.error}</p>
+            ) : linkByName.pairs.length === 0 ? (
+              <p className="text-sm text-slate-500 mt-4">No Branch has the same name as a free Project.</p>
+            ) : (
+              <>
+                <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>{linkByName.picked.size} of {linkByName.pairs.length} ticked</span>
+                  <button
+                    type="button"
+                    className="font-semibold text-slate-700 hover:text-slate-900"
+                    onClick={() => setLinkByName({ ...linkByName, picked: linkByName.picked.size === linkByName.pairs.length ? new Set() : new Set(linkByName.pairs.map((p) => p.branch_id)) })}
+                  >
+                    {linkByName.picked.size === linkByName.pairs.length ? 'Untick all' : 'Tick all'}
+                  </button>
+                </div>
+                <div className="mt-2 space-y-1.5">
+                  {linkByName.pairs.map((p) => (
+                    <label key={p.branch_id} className="liquid-glass-inset rounded-2xl px-3.5 py-2.5 flex items-center gap-3 cursor-pointer text-[13px] text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={linkByName.picked.has(p.branch_id)}
+                        onChange={() => {
+                          const next = new Set(linkByName.picked);
+                          if (next.has(p.branch_id)) next.delete(p.branch_id);
+                          else next.add(p.branch_id);
+                          setLinkByName({ ...linkByName, picked: next });
+                        }}
+                      />
+                      <span className="font-semibold">{p.branch_name}</span>
+                      <span className="text-slate-400">→</span>
+                      <span>Project: {p.project_name}</span>
+                      <span className="ml-auto text-[11px] text-slate-500 text-right">
+                        {p.staff} staff{p.their_branch_users > 0 ? ` · ${p.their_branch_users} on "Their Branch"` : ''}
+                        {p.name_differs ? ' · capital letters differ' : ''}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                  After linking, people on "Their Branch" check-in can check in at the Project, and a Transfer into the Branch gives the Project (PEPM and Remote Attendance).
+                </p>
+              </>
+            )}
+            {linkByName.skipped.length > 0 && (
+              <details className="mt-3 text-[12px] text-slate-600">
+                <summary className="cursor-pointer font-semibold">{linkByName.skipped.length} not offered</summary>
+                <ul className="mt-1.5 space-y-1">
+                  {linkByName.skipped.map((k: any) => (
+                    <li key={k.branch_id}>
+                      <span className="font-semibold">{k.branch_name}</span>: {k.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setLinkByName(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={linkByName.busy || linkByName.picked.size === 0}
+                onClick={confirmLinkByName}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {linkByName.busy ? 'Linking…' : `Link ${linkByName.picked.size} Branch${linkByName.picked.size === 1 ? '' : 'es'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeProject && projectsLayer('merge_projects') && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Merge "{mergeProject.from.project_name}" into another Project</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Use this when two Projects are the same place. Its attendance, check-in lists, access, budgets and entries move to the Project you keep, and this one is archived, not deleted.
+            </p>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mt-4 mb-1">Keep this Project</label>
+            <SearchSelect
+              value={mergeProject.intoId}
+              onChange={(e) => loadProjectMergePreview(mergeProject.from, e.target.value)}
+              className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              <option value="">— Select Project —</option>
+              {activeProjects
+                .filter((p) => p.id !== mergeProject.from.id)
+                .map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.project_name}
+                    {p.linked_branch_type ? ` · ${p.linked_branch_type === 'head_office' ? 'Head Office' : 'Project Side'}` : ''}
+                  </option>
+                ))}
+            </SearchSelect>
+            {mergeProject.busy && !mergeProject.preview && <p className="text-sm text-slate-500 mt-3">Checking…</p>}
+            {mergeProject.preview && (
+              <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-3 text-[13px] text-slate-800 space-y-1">
+                {mergeProject.preview.rows.length === 0 ? (
+                  <div>Nothing points at "{mergeProject.preview.from.name}" — it will just be archived.</div>
+                ) : (
+                  <>
+                    <div className="font-semibold">Moves to "{mergeProject.preview.into.name}":</div>
+                    {mergeProject.preview.rows.map((r: any) => (
+                      <div key={r.label} className="flex justify-between gap-3">
+                        <span>{r.label}</span>
+                        <span className="font-semibold tabular-nums">{r.count}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {mergeProject.preview.rows.some((r: any) => r.collide > 0 && r.mode === 'unique-keep') && (
+                  <div className="text-amber-700 font-medium">
+                    {mergeProject.preview.rows.filter((r: any) => r.mode === 'unique-keep').reduce((n: number, r: any) => n + r.collide, 0)} attendance record(s) can't move: the person already has a record that day on the kept Project. They stay on the archived one.
+                  </div>
+                )}
+                {mergeProject.preview.rows.some((r: any) => r.collide > 0 && r.mode === 'unique-drop') && (
+                  <div className="text-slate-600">
+                    Where a person already has the kept Project in a list, the duplicate entry is dropped.
+                  </div>
+                )}
+                {mergeProject.preview.branch_moves && <div className="text-slate-600">The Branch "{mergeProject.preview.branch_moves}" stays linked, now to "{mergeProject.preview.into.name}".</div>}
+                {mergeProject.preview.budget_names > 0 && <div className="text-slate-600">{mergeProject.preview.budget_names} budget line(s) take the kept Project's name.</div>}
+                {mergeProject.preview.blocked.map((t: string) => (
+                  <div key={t} className="text-rose-600 font-medium">{t}</div>
+                ))}
+              </div>
+            )}
+            {mergeProject.error && <p className="text-sm text-rose-600 mt-3">{mergeProject.error}</p>}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setMergeProject(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={mergeProject.busy || !mergeProject.preview || mergeProject.preview.blocked.length > 0}
+                onClick={confirmProjectMerge}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ '--g-accent': '#dc2626' } as React.CSSProperties}
+              >
+                {mergeProject.busy ? 'Working…' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeProjectLog && projectsLayer('merge_projects') && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold text-slate-900">Projects merged so far</h3>
+              <button type="button" onClick={() => setMergeProjectLog(null)} className="liquid-glass-chip rounded-full w-9 h-9 flex items-center justify-center text-slate-700" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="liquid-glass-inset rounded-2xl mt-3 divide-y divide-slate-200/60">
+              {mergeProjectLog.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-slate-500">No merges yet.</p>
+              ) : (
+                mergeProjectLog.map((l: any) => (
+                  <div key={l.id} className="px-4 py-2.5 text-[13px] text-slate-800">
+                    <div className="font-semibold">{l.from_name} → {l.into_name}</div>
+                    <div className="text-slate-500 text-[12px]">
+                      {new Date(l.merged_at).toLocaleString()} · {l.merged_by_name || '—'} · {Object.values(l.moved?.moved || {}).reduce((a: number, b: any) => a + Number(b), 0)} moved
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {mergeBranch && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-lg max-h-[88vh] overflow-y-auto p-6 sm:p-7">
+            <h3 className="text-lg font-bold text-slate-900">Merge "{mergeBranch.from.branch_name}" into another Branch</h3>
+            <p className="text-[13px] text-slate-600 mt-1.5 leading-relaxed">
+              Use this for a duplicate or misspelled Branch. Its people move to the Branch you pick (each change goes into their history), and this Branch is archived, not deleted.
+            </p>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mt-4 mb-1">Move everyone to</label>
+            <SearchSelect
+              value={mergeBranch.intoId}
+              onChange={(e) => loadMergePreview(mergeBranch.from, e.target.value)}
+              className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+            >
+              <option value="">— Select Branch —</option>
+              {activeBranches
+                .filter((b) => b.id !== mergeBranch.from.id)
+                .map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.branch_name} · {b.branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                  </option>
+                ))}
+            </SearchSelect>
+            {mergeBranch.busy && !mergeBranch.preview && <p className="text-sm text-slate-500 mt-3">Checking…</p>}
+            {mergeBranch.preview && (
+              <div className="liquid-glass-inset rounded-2xl px-4 py-3 mt-3 text-[13px] text-slate-800 space-y-1">
+                <div>
+                  <span className="font-semibold">{mergeBranch.preview.employees}</span> {mergeBranch.preview.employees === 1 ? 'person' : 'people'} will move ({mergeBranch.preview.active_employees} active).
+                </div>
+                {(mergeBranch.preview.text_copies.team_rules > 0 || mergeBranch.preview.text_copies.office_machines > 0 || mergeBranch.preview.text_copies.sims > 0) && (
+                  <div className="text-slate-600">
+                    The name also changes on {mergeBranch.preview.text_copies.team_rules} Team rule(s), {mergeBranch.preview.text_copies.office_machines} office machine(s) and {mergeBranch.preview.text_copies.sims} SIM(s).
+                  </div>
+                )}
+                {mergeBranch.preview.type_differs && (
+                  <div className="text-amber-700 font-medium">
+                    "{mergeBranch.preview.from.name}" is {mergeBranch.preview.from.type === 'project_site' ? 'Project Side' : 'Head Office'} but "{mergeBranch.preview.into.name}" is {mergeBranch.preview.into.type === 'project_site' ? 'Project Side' : 'Head Office'}: the people moved follow the other Weekend / Holiday calendar.
+                  </div>
+                )}
+                {mergeBranch.preview.from.project_id && !mergeBranch.preview.into.project_id && (
+                  <div className="text-slate-600">The Project link moves to "{mergeBranch.preview.into.name}".</div>
+                )}
+                {mergeBranch.preview.blocked.map((t: string) => (
+                  <div key={t} className="text-rose-600 font-medium">{t}</div>
+                ))}
+              </div>
+            )}
+            {mergeBranch.error && <p className="text-sm text-rose-600 mt-3">{mergeBranch.error}</p>}
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button type="button" onClick={() => setMergeBranch(null)} className="liquid-glass-chip rounded-full px-5 py-2 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={mergeBranch.busy || !mergeBranch.preview || mergeBranch.preview.blocked.length > 0}
+                onClick={() => confirmMerge(!!mergeBranch.preview?.type_differs && !!mergeBranch.needsConfirm)}
+                className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ '--g-accent': '#dc2626' } as React.CSSProperties}
+              >
+                {mergeBranch.busy ? 'Working…' : mergeBranch.needsConfirm ? 'Yes, move them' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showBranchLocationPicker && (
         <LocationMapPicker
           title={editingBranch ? `Set Location — ${editingBranch.branch_name}` : 'Set Branch Location'}

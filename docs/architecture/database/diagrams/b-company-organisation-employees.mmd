@@ -4,9 +4,9 @@ erDiagram
     int user_id FK
     int department_id FK
     int branch_id FK
+    int designation_id FK
     varchar employee_id
     varchar zk_device_pin
-    varchar name
   }
   branches {
     int id PK
@@ -35,6 +35,16 @@ erDiagram
     varchar workspace_code
     varchar tagline
   }
+  department_team_auto {
+    int id PK
+    int team_id FK
+    int department_id FK
+    varchar branch
+  }
+  department_team_auto_done {
+    int rule_id PK
+    int employee_id PK,FK
+  }
   department_team_members {
     int id PK
     int team_id FK
@@ -56,6 +66,15 @@ erDiagram
     tinyint is_active
     int company_id
     int head_user_id
+  }
+  designations {
+    int id PK
+    varchar code
+    int code_no
+    varchar name
+    varchar name_key
+    int level
+    tinyint is_active
   }
   employee_advances {
     int id PK
@@ -188,6 +207,15 @@ erDiagram
     varchar method
     varchar reference
   }
+  project_merge_log {
+    int id PK
+    int from_project_id
+    varchar from_name
+    int into_project_id
+    varchar into_name
+    mediumtext moved_json
+    int merged_by
+  }
   projects {
     int id PK
     varchar project_name
@@ -209,8 +237,12 @@ erDiagram
   branches ||--o{ all_employees : "branch_id"
   departments ||--o{ all_employees : "department_id"
   users ||--o{ all_employees : "user_id"
+  designations ||..o{ all_employees : "designation_id"
   projects ||--o{ branches : "project_id"
   company_groups ||--o{ companies : "group_id"
+  department_teams ||--o{ department_team_auto : "team_id"
+  departments ||..o{ department_team_auto : "department_id"
+  all_employees ||..o{ department_team_auto_done : "employee_id"
   department_teams ||--o{ department_team_members : "team_id"
   all_employees ||..o{ department_team_members : "employee_id"
   departments ||--o{ department_teams : "department_id"

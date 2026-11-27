@@ -91,6 +91,8 @@ interface SheetRow {
   // Duty Roster shift for the day, if one is rostered.
   shift?: { name: string; code: string; start: string; end: string } | null;
   marked_by_other_team: string | null;
+  // On relief duty at this site today (Duty Roster -> Guard Posts): the post and shift.
+  relief?: string | null;
   // The person's own check-in that day (app GPS and / or office device),
   // when HR's "Use members' own check-in" setting is on.
   own_check_in?: OwnCheckIn | null;
@@ -553,6 +555,9 @@ export const SheetEditor: React.FC<{
                   {!r.shift && r.holiday?.title === 'Off day (roster)' && <div className="text-[10px] font-semibold text-slate-600">Off day (roster)</div>}
                   {r.app_leave && <div className="text-[10px] font-semibold text-sky-700">On approved leave ({r.app_leave})</div>}
                   {r.marked_by_other_team && <div className="text-[10px] font-semibold text-slate-600">Already marked by {r.marked_by_other_team}</div>}
+                  {r.relief && (
+                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 px-2 py-0.5 text-[10px] font-bold">Relief · {r.relief}</div>
+                  )}
                   {r.own_check_in && (() => {
                     const o = r.own_check_in;
                     const off = m.status === 'absent' || m.status === 'leave';

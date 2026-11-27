@@ -20,6 +20,7 @@
 // ADMIN_MODULE_KEYS, and resolveDepartmentSupervisor — used elsewhere by the
 // Approval Workflow, not just here) stays in server.ts.
 
+import { syncDivision } from "./BranchDivision";
 import type { Express } from "express";
 import { requestApprovalReconcile } from "./approvalReconcile";
 
@@ -52,14 +53,20 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   // tab) only — every signed-in account can list Branches (no per-user
   // permission table yet, unlike user_project_permissions), and nothing in
   // Remote Attendance/Timesheet reads from this table yet.
-  app.get("/api/branches", authenticateToken, async (req, res) => {
+  app.get("/api/branches", authenticateToken, async (req: any, res) => {
     try {
       const [branches, projects]: any[][] = await Promise.all([
         queryDB("SELECT * FROM branches ORDER BY branch_name ASC"),
         queryDB("SELECT * FROM projects")
       ]);
       const projectName = new Map(projects.map((p: any) => [Number(p.id), p.project_name]));
-      res.json(branches.map((b: any) => ({ ...b, linked_project_name: b.project_id ? projectName.get(Number(b.project_id)) ?? null : null })));
+      // A retired (archived) Branch is left out of pickers; the Admin Panel list asks for all.
+      const includeArchived = req.query?.include_archived === "1";
+      res.json(
+        branches
+          .filter((b: any) => includeArchived || !Number(b.is_archived))
+          .map((b: any) => ({ ...b, linked_project_name: b.project_id ? projectName.get(Number(b.project_id)) ?? null : null }))
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -265,13 +272,39 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       if ("error" in plan) return res.status(plan.status).json({ error: plan.error });
       const loc = plan.location;
 
+      const oldName = String(rows[0].branch_name || "").trim();
+      if (oldName.toLowerCase() !== name.toLowerCase()) {
+        const clash: any[] = await queryDB("SELECT id FROM branches WHERE LOWER(TRIM(branch_name)) = LOWER(?) AND id <> ?", [name, id]);
+        if (clash.length) return res.status(400).json({ error: `Another branch is already called "${name}".` });
+      }
       await queryDB(
         "UPDATE branches SET branch_name = ?, branch_type = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
         [name, branchType, loc.lat, loc.lng, loc.label, loc.radius, id]
       );
+      // Division follows the Branch's type (BranchDivision.ts).
+      await syncDivision(queryDB, { branchIds: [Number(id)] }).catch(() => {});
       const projectId = await applyProjectLink(req, Number(id), name, plan);
-      res.json({ success: true, project_id: projectId });
+      // A new name reaches every copy of the old one kept as text: the
+      // employees' own Branch (all_employees.branch — reports and search
+      // read it; the link itself is branch_id and never changes), the
+      // Departments -> Team "new joiners" rules (they match by name, so a
+      // rule on the old name would stop adding new joiners), an office
+      // attendance machine's location and an unassigned SIM's Duty Location
+      // (a SIM's past holders keep the name it had then).
+      let renamed: Record<string, number> = {};
+      if (oldName && oldName !== name) {
+        const run = async (key: string, sql: string, params: any[]) => {
+          const r: any = await queryDB(sql, params).catch(() => null);
+          renamed[key] = Number(r?.affectedRows || 0);
+        };
+        await run("employees", "UPDATE all_employees SET branch = ? WHERE branch_id = ? OR (branch_id IS NULL AND LOWER(TRIM(branch)) = LOWER(?))", [name, id, oldName]);
+        await run("team_rules", "UPDATE department_team_auto SET branch = ? WHERE LOWER(TRIM(branch)) = LOWER(?)", [name, oldName]);
+        await run("office_machines", "UPDATE zk_devices SET branch = ? WHERE LOWER(TRIM(branch)) = LOWER(?)", [name, oldName]);
+        await run("sims", "UPDATE mobile_sims SET duty_location = ? WHERE LOWER(TRIM(duty_location)) = LOWER(?)", [name, oldName]);
+      }
+      res.json({ success: true, project_id: projectId, renamed });
     } catch (err: any) {
+      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ error: "Another branch already has this name." });
       res.status(500).json({ error: err.message });
     }
   });
@@ -279,6 +312,30 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   app.delete("/api/branches/:id", authenticateToken, requireAdmin, requireModule("branches"), async (req, res) => {
     try {
       const { id } = req.params;
+      // Everything that points at this Branch. A Branch that anything uses is not
+      // deleted: people would silently lose it (and fall back to the Head Office
+      // calendar), and the name kept as text elsewhere would point at nothing.
+      // Archive it (once its people are moved with Merge) instead.
+      const rows: any[] = await queryDB("SELECT * FROM branches WHERE id = ?", [id]);
+      const name = String(rows[0]?.branch_name || "");
+      const count = async (sql: string, p: any[]) => Number((((await queryDB(sql, p).catch(() => [{ n: 0 }])) as any[])[0] || {}).n || 0);
+      // [one, many, how many]
+      const uses: [string, string, number][] = [
+        ["employee", "employees", await count("SELECT COUNT(*) AS n FROM all_employees WHERE branch_id = ? OR (branch_id IS NULL AND LOWER(TRIM(branch)) = LOWER(TRIM(?)))", [id, name])],
+        ["new-joiner application", "new-joiner applications", await count("SELECT COUNT(*) AS n FROM onboarding_applications WHERE branch_id = ?", [id])],
+        ["Team new-joiner rule", "Team new-joiner rules", await count("SELECT COUNT(*) AS n FROM department_team_auto WHERE LOWER(TRIM(branch)) = LOWER(TRIM(?))", [name])],
+        ["office attendance machine", "office attendance machines", await count("SELECT COUNT(*) AS n FROM zk_devices WHERE LOWER(TRIM(branch)) = LOWER(TRIM(?)) AND ip_address <> 'import'", [name])],
+        ["SIM with this Duty Location", "SIMs with this Duty Location", await count("SELECT COUNT(*) AS n FROM mobile_sims WHERE LOWER(TRIM(duty_location)) = LOWER(TRIM(?))", [name])]
+      ];
+      const used = uses.filter(([, , n]) => n > 0);
+      if (used.length) {
+        const text = used.map(([one, many, n]) => `${n} ${n === 1 ? one : many}`).join(", ");
+        return res.status(409).json({
+          error: `This Branch can't be deleted: it is still used (${text}). Move the people to another Branch (Merge) and archive this one instead.`,
+          used: Object.fromEntries(used.map(([, many, n]) => [many, n])),
+          employees: uses[0][2]
+        });
+      }
       await queryDB("DELETE FROM branches WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {

@@ -1,0 +1,40 @@
+// Service Book (HR's view): merged timeline with filters, "More activity" and "Login & Access" tabs.
+const { chromium } = require('/opt/node-tools/node_modules/playwright/index.js');
+const { execSync } = require('child_process');
+const sql = (q) => execSync(`mysql -h127.0.0.1 -ucred -pcredpass admin_ui -N -e ${JSON.stringify(q)}`).toString().trim();
+(async () => {
+  const a = await (await fetch('http://localhost:3200/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@credence.test', password: 'ProbePass123' }) })).json();
+  // An Employee whose login has Login & Access rows (the Transfer test's employee).
+  const emp = sql("SELECT employee_id FROM user_access_log WHERE employee_id IS NOT NULL AND source='transfer' ORDER BY id DESC LIMIT 1");
+  const name = sql(`SELECT name FROM all_employees WHERE id=${emp}`);
+  const b = await chromium.launch();
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 1100 } });
+  await ctx.addInitScript(([t, u]) => { localStorage.setItem('mpr_token', t); localStorage.setItem('mpr_user', JSON.stringify(u)); localStorage.setItem('hr_ops_tab', 'service_book'); for (let i = 0; i < 600; i++) localStorage.setItem(`credence_webpush_snooze_${i}`, String(Date.now() + 9e9)); }, [a.token, a.user]);
+  const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
+  let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+  await p.goto('http://localhost:3200/admin/hr-operations'); await p.waitForTimeout(6000);
+  await p.getByRole('button', { name: /Service Book \(360/ }).first().click(); await p.waitForTimeout(2500);
+  const pick = p.getByPlaceholder('Search employee by name or ID…');
+  await pick.click(); await pick.fill(name); await p.waitForTimeout(800);
+  await p.getByRole('button', { name: new RegExp(name) }).first().click();
+  await p.waitForTimeout(4000);
+  for (const f of ['All', 'Service', 'Onboarding', 'PEPM & Check-in', 'Login']) ok(await p.getByRole('group', { name: 'Show' }).getByRole('button', { name: f, exact: true }).isVisible(), `timeline filter "${f}"`);
+  ok(await p.getByText(/^PEPM project/).first().isVisible(), 'a PEPM event in the timeline');
+  await p.screenshot({ path: '/tmp/claude-0/sb/timeline.png' });
+  ok(await p.getByText(/^Takes effect/).filter({ visible: true }).count() > 0, 'service events show under All');
+  await p.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'PEPM & Check-in', exact: true }).click(); await p.waitForTimeout(400);
+  const svcLeft = await p.getByText(/^Takes effect/).filter({ visible: true }).count();
+  ok(svcLeft === 0 && await p.getByText(/^PEPM project/).first().isVisible(), 'filter keeps PEPM events and hides the service events (' + svcLeft + ' left)');
+  await p.screenshot({ path: '/tmp/claude-0/sb/filtered.png' });
+  await p.getByRole('button', { name: /More activity/ }).click(); await p.waitForTimeout(2500);
+  ok(await p.getByText('SIM & Mobile Bill', { exact: true }).isVisible() && await p.getByText('Tasks & Targets', { exact: true }).isVisible(), 'More activity boxes');
+  await p.screenshot({ path: '/tmp/claude-0/sb/more.png' });
+  await p.getByRole('button', { name: /Login & Access/ }).click(); await p.waitForTimeout(2500);
+  ok(await p.getByRole('columnheader', { name: 'Change' }).isVisible() && await p.getByText(/Transfer effective/).first().isVisible(), 'Login & Access table with the Transfer row');
+  await p.screenshot({ path: '/tmp/claude-0/sb/access.png' });
+  await p.setViewportSize({ width: 390, height: 844 }); await p.waitForTimeout(800);
+  ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'phone width: no sideways page scroll');
+  await p.screenshot({ path: '/tmp/claude-0/sb/access-phone.png' });
+  ok(errs.length === 0, 'no page errors ' + JSON.stringify(errs));
+  await b.close(); process.exit(fails ? 1 : 0);
+})();

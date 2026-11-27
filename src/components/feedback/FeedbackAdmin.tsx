@@ -299,7 +299,8 @@ export const FeedbackAdmin: React.FC<{ token: string; isSuperAdmin: boolean }> =
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 items-center">
+      {/* Desktop: filters and search stay under the header while the list scrolls. */}
+      <div className="flex flex-wrap gap-2 items-center md:sticky md:top-16 md:z-20 md:bg-white/95 md:backdrop-blur-sm md:rounded-2xl md:border md:border-slate-200 md:p-3">
         <select className={ctl} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Kind">
           <option value="">All kinds</option>
           <option value="bug">Problems</option>

@@ -13,17 +13,19 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
+  Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy, FolderInput
 } from 'lucide-react';
+import { FolderTree, FolderFormPopup, MoveToFolderPopup, folderIdOfLabel, folderPath, isFolderLabel, isUnderSent, MAIL_DRAG_TYPE } from './MailFolders';
 import { ModulePath } from '../ModulePath';
 import { usePhoneHeaderTitle } from '../../lib/headerPageTitle';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { connectChatSocket } from '../../lib/chatSocket';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
-import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { SHEET_TOP_PAD, useSheetKeyboardPad } from './MailPopup';
 import type { User } from '../../types';
 import {
-  MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
+  MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailFolder, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
   forgetMailGroups, setMailPhotoToken, setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
@@ -276,8 +278,8 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
     }
   };
   return (
-    <div ref={boxRef} className="relative w-full">
-      <div className="relative">
+    <div ref={boxRef} className={inline ? 'relative w-full flex flex-col min-h-0 flex-1' : 'relative w-full'}>
+      <div className="relative shrink-0">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           value={q}
@@ -307,8 +309,8 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
         )}
       </div>
       {open && (
-        <div className={inline ? 'mt-3' : 'absolute left-0 right-0 top-full mt-2 z-[60]'}>
-          <div className={inline ? '' : 'liquid-glass liquid-glass-in rounded-[24px] p-3 shadow-xl'}>
+        <div className={inline ? 'mt-3 flex flex-col min-h-0 flex-1' : 'absolute left-0 right-0 top-full mt-2 z-[60]'}>
+          <div className={inline ? 'flex flex-col min-h-0 flex-1' : 'liquid-glass liquid-glass-in rounded-[24px] p-3 shadow-xl'}>
             <div className="flex items-center justify-between gap-2 mb-2 px-1">
               <span className="text-[11px] text-slate-500">
                 {people === null
@@ -326,18 +328,20 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
             {people === null ? (
               <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
             ) : (
-              <div className="liquid-glass-inset rounded-[18px] divide-y divide-slate-200/60 max-h-[60vh] overflow-y-auto">
+              <div className={`liquid-glass-inset rounded-[18px] divide-y divide-slate-200/60 overflow-y-auto overscroll-contain ${inline ? 'flex-1 min-h-0' : 'max-h-[60vh]'}`}>
                 {found.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">No one matches.</div>}
                 {found.slice(0, DIRECTORY_SHOW).map((p) => (
                   <div key={p.email} className="flex items-center gap-3 px-3 py-2.5">
                     <MailAvatar name={p.name} email={p.email} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
-                        {p.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {p.employeeId}</span>}
-                      </div>
-                      {(p.designation || p.department) && (
-                        <div className="text-[11px] text-slate-500 truncate">{[p.designation, p.department].filter(Boolean).join(' · ')}</div>
+                      {/* The ID sits on the second line, so a name isn't cut short on a phone. */}
+                      <div className="text-sm font-medium text-slate-800 truncate">{p.name}</div>
+                      {(p.employeeId || p.designation || p.department) && (
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {p.employeeId && <span className="font-semibold text-slate-600">ID {p.employeeId}</span>}
+                          {p.employeeId && (p.designation || p.department) ? ' · ' : ''}
+                          {[p.designation, p.department].filter(Boolean).join(' · ')}
+                        </div>
                       )}
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="text-[11px] text-sky-700 truncate">{p.email}</span>
@@ -379,13 +383,14 @@ const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => voi
 
 // Phone: the Email Directory search in a sheet of its own.
 const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void; onClose: () => void }> = ({ token, onWrite, onClose }) => {
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad();
   useBackButtonClose(true, onClose);
   return (
-    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className="w-full max-w-xl max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
-          <div className="flex items-center justify-between gap-2 mb-4">
+    <div data-kb-self="" className={`fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4 ${SHEET_TOP_PAD}`} style={keyboardPad} onClick={onClose}>
+      {/* Full height on a phone, so the box stays put while typing and only the list scrolls. */}
+      <div className="w-full max-w-xl h-full sm:h-auto max-h-full sm:max-h-[85vh] flex" onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 flex flex-col min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 mb-4 shrink-0">
             <h3 className="text-base font-bold text-slate-900">Email Directory</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
           </div>
@@ -400,7 +405,7 @@ const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void
 const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: MailAccount[]; onChanged: () => void; onClose: () => void }> = ({ token, userName, accounts, onChanged, onClose }) => {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad();
   useBackButtonClose(true, onClose);
   const remove = async (a: MailAccount) => {
     if (!(await confirmDialog(`Remove ${a.emailAddress} from Credence Mail? Its mail stays on the mail server; only the copy here is deleted.`, { confirmLabel: 'Remove' }))) return;
@@ -420,9 +425,9 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
     }
   };
   return (
-    <div data-kb-self="" className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className="w-full max-w-md max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
+    <div data-kb-self="" className={`fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4 ${SHEET_TOP_PAD}`} style={keyboardPad} onClick={onClose}>
+      <div className="w-full max-w-md max-h-full sm:max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto" onFocusCapture={scrollFocusedFieldIntoView}>
           <div className="flex items-center justify-between gap-2 mb-4">
             <h3 className="text-base font-bold text-slate-900">{adding ? 'Connect another mailbox' : 'Mailboxes'}</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
@@ -510,10 +515,14 @@ const Row: React.FC<{
   onOpen: () => void;
   onCheck: () => void;
   onStar: () => void;
-}> = ({ m, folder, selected, checked, checking, compact, readOnly, onOpen, onCheck, onStar }) => {
-  const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled';
+  // My folders: a mail can be dragged onto a folder (computer).
+  onDragStart?: (e: React.DragEvent) => void;
+  // A folder inside Sent: who it went to, like Sent.
+  sentFolder?: boolean;
+}> = ({ m, folder, selected, checked, checking, compact, readOnly, onOpen, onCheck, onStar, onDragStart, sentFolder }) => {
+  const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled' || !!sentFolder;
   const who = outgoing ? `To: ${m.to.concat(m.cc).join(', ') || '(no one yet)'}` : m.from.name || m.from.email;
-  const ownLabels = m.labels.filter((l) => !SYSTEM_LABELS.has(l)).slice(0, 2);
+  const ownLabels = m.labels.filter((l) => !SYSTEM_LABELS.has(l) && !isFolderLabel(l)).slice(0, 2);
   const trailing = (
     <>
       {ownLabels.map((l) => <span key={l} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 shrink-0">{l}</span>)}
@@ -539,6 +548,8 @@ const Row: React.FC<{
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
+      draggable={!readOnly && !!onDragStart}
+      onDragStart={onDragStart}
       className={`group flex items-start gap-3 px-3 sm:px-4 ${compact ? 'py-1.5' : 'py-3'} cursor-pointer border-l-[3px] ${selected ? 'bg-sky-50/80 border-sky-500' : m.isRead ? 'border-transparent hover:bg-slate-50' : 'border-transparent bg-white hover:bg-slate-50'}`}
     >
       <button
@@ -636,6 +647,14 @@ export const CredenceMail: React.FC<{
   const [tool, setTool] = useState<Tool | null>(null);
   const [templates, setTemplates] = useState<MailTemplate[]>([]);
   const [ruleLabels, setRuleLabels] = useState<string[]>([]);
+  // My folders (status.canFolders): the folder list, the New / Rename popup, and "Move to folder".
+  const [folders, setFolders] = useState<MailFolder[]>([]);
+  const [foldersLoading, setFoldersLoading] = useState(false);
+  const [folderForm, setFolderForm] = useState<React.ComponentProps<typeof FolderFormPopup>['mode'] | null>(null);
+  const [moving, setMoving] = useState<{ ids: string[]; accountId: number; then?: () => void } | null>(null);
+  // "Older mail from the server" at the end of a list: how many are still there (per folder / mailbox), and busy.
+  const [olderLeft, setOlderLeft] = useState<Record<string, number>>({});
+  const [olderBusy, setOlderBusy] = useState(false);
   const listReq = useRef(0);
   // Read / unread changes on their way to the server: a list or count that
   // arrives meanwhile is not allowed to put them back (see setRead).
@@ -778,6 +797,26 @@ export const CredenceMail: React.FC<{
   useEffect(() => {
     void loadCounts();
   }, [loadCounts]);
+  const canFolders = !!status?.canFolders;
+  const loadFolders = useCallback(
+    async (refresh = false) => {
+      if (!canFolders || !accounts.length) return;
+      setFoldersLoading(true);
+      try {
+        const r = await mailFetch<{ folders: MailFolder[]; errors: { error: string }[] }>(token, `/folders${refresh ? '?refresh=1' : ''}`);
+        setFolders(r.folders);
+      } catch {
+        // The folder list is a nicety; the mailbox still works.
+      } finally {
+        setFoldersLoading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, canFolders, accounts.length]
+  );
+  useEffect(() => {
+    void loadFolders(true);
+  }, [loadFolders]);
   const loadRuleLabels = useCallback(() => {
     mailFetch<MailFilter[]>(token, '/filters')
       .then((fs) => setRuleLabels([...new Set(fs.flatMap((f) => f.actions?.applyLabels || []))].filter((l) => !SYSTEM_LABELS.has(l)).sort((a, b) => a.localeCompare(b))))
@@ -800,6 +839,7 @@ export const CredenceMail: React.FC<{
   refreshRef.current = () => {
     void loadList(true);
     void loadCounts();
+    void loadFolders();
   };
   useEffect(() => {
     // Live news goes to the owner's own screen, not to an admin's view.
@@ -929,6 +969,14 @@ export const CredenceMail: React.FC<{
   };
 
   const openFolder = (f: string) => {
+    // One of my folders: fetch what arrived there (from Outlook, a rule on the server…), then show it.
+    const fid = folderIdOfLabel(f);
+    const fo = fid ? folders.find((x) => x.id === fid) : null;
+    if (fo && !ro) {
+      void mailFetch(token, '/sync', { method: 'POST', body: { accountId: fo.accountId, folderId: fo.id } })
+        .then(() => refreshRef.current())
+        .catch(() => undefined);
+    }
     setFolder(f);
     setCategory('');
     setUnreadOnly(false);
@@ -975,7 +1023,8 @@ export const CredenceMail: React.FC<{
       subject: full.subject === '(no subject)' ? '' : full.subject,
       body: full.body,
       draftId: full.id,
-      draftAttachments: full.attachments
+      draftAttachments: full.attachments,
+      viaServer: !!full.viaServer
     });
   };
 
@@ -986,7 +1035,7 @@ export const CredenceMail: React.FC<{
     );
 
   const moveLabels = (m: MailMessage, to: 'Trash' | 'Spam' | 'Inbox' | 'Archive') => {
-    const keep = m.labels.filter((l) => !['Inbox', 'Spam', 'Trash', 'Archive'].includes(l));
+    const keep = m.labels.filter((l) => !['Inbox', 'Spam', 'Trash', 'Archive'].includes(l) && !isFolderLabel(l));
     return [...keep, to];
   };
 
@@ -1005,6 +1054,12 @@ export const CredenceMail: React.FC<{
         if (m.isRead) setSelectedId(null);
         else setThread((t) => t && t.map((x) => (x.id === m.id ? { ...x, isRead: true } : x)));
         await setRead([m], !m.isRead);
+        return;
+      }
+      if (action === 'folder') {
+        // The conversation's mails in this mailbox, like Delete does.
+        const ids = (thread || [m]).filter((x) => !x.labels.includes('Trash') && x.accountId === m.accountId).map((x) => x.id);
+        setMoving({ ids, accountId: m.accountId, then: () => setSelectedId(null) });
         return;
       }
       if (action === 'task' || action === 'event') {
@@ -1093,6 +1148,78 @@ export const CredenceMail: React.FC<{
       refreshRef.current();
     }
     void loadCounts();
+  };
+
+  // Into one of my folders (or back to Inbox) — on the mail server too.
+  const moveToFolder = async (ids: string[], to: string) => {
+    if (!ids.length) return;
+    const leaving = to !== folder && folder !== 'Starred' && folder !== 'Important' && folder !== 'All';
+    if (leaving) patchLocal(ids, {}, true);
+    if (selectedId && ids.includes(selectedId) && leaving) setSelectedId(null);
+    setChecked(new Set());
+    try {
+      const r = await mailFetch<{ done: number; skipped?: number }>(token, '/messages/batch', { method: 'POST', body: { ids, action: 'move', to } });
+      const where = to === 'Inbox' ? 'Inbox' : folderPath(folders, folderIdOfLabel(to) || 0);
+      say(`Moved ${r.done} to ${where}.${r.skipped ? ` ${r.skipped} from another mailbox stayed.` : ''}`);
+    } catch (e: any) {
+      say(e.message, 'error');
+    }
+    refreshRef.current();
+  };
+  const saveFolder = async (v: { accountId: number; parentId: number | null; name: string }) => {
+    if (folderForm?.kind === 'rename') {
+      await mailFetch(token, `/folders/${folderForm.folder.id}`, { method: 'PATCH', body: { name: v.name } });
+      say('Folder renamed.');
+    } else {
+      const r = await mailFetch<{ folder: MailFolder }>(token, '/folders', { method: 'POST', body: v });
+      say(`Folder “${v.name}” made.`);
+      // Made from "Move to folder": the mail goes straight in.
+      if (moving) {
+        const m = moving;
+        setMoving(null);
+        setFolderForm(null);
+        await loadFolders();
+        await moveToFolder(m.ids, `Folder:${r.folder.id}`);
+        m.then?.();
+        return;
+      }
+    }
+    setFolderForm(null);
+    await loadFolders();
+  };
+  const deleteFolder = async (f: MailFolder) => {
+    const inside = folders.filter((x) => x.parentId === f.id).length;
+    const ok = await confirmDialog(
+      `Delete the folder “${folderPath(folders, f.id)}”${inside ? ` and the ${inside} folder${inside === 1 ? '' : 's'} inside it` : ''}? Its mail goes back to Inbox — no mail is deleted. Outlook and your phone lose the folder too.`,
+      { tone: 'danger', confirmLabel: 'Delete folder', title: 'Delete folder' }
+    );
+    if (!ok) return;
+    try {
+      const r = await mailFetch<{ movedToInbox: number }>(token, `/folders/${f.id}`, { method: 'DELETE' });
+      say(`Folder deleted${r.movedToInbox ? ` — ${r.movedToInbox} mail back in Inbox` : ''}.`);
+      const cur = folderIdOfLabel(folder);
+      if (cur && (cur === f.id || folderPath(folders, cur).startsWith(`${folderPath(folders, f.id)} / `))) openFolder('Inbox');
+    } catch (e: any) {
+      say(e.message, 'error');
+    }
+    refreshRef.current();
+  };
+
+  const olderKey = `${folder}|${accountFilter}`;
+  const canOlder = ['Inbox', 'Sent', 'Spam'].includes(folder) || (isFolderLabel(folder) && !!folders.find((f) => f.id === folderIdOfLabel(folder))?.selectable);
+  const loadOlder = async () => {
+    setOlderBusy(true);
+    try {
+      const r = await mailFetch<{ added: number; left: number }>(token, '/older', { method: 'POST', body: { label: folder, ...(accountFilter ? { accountId: accountFilter } : {}) } });
+      setOlderLeft((o) => ({ ...o, [olderKey]: r.left }));
+      say(r.added ? `${r.added} older mail${r.added === 1 ? '' : 's'} brought in.${r.left ? ` ${r.left} more on the server.` : ''}` : 'That’s all the mail on the server.');
+      await loadList(true);
+      void loadFolders();
+    } catch (e: any) {
+      say(e.message, 'error');
+    } finally {
+      setOlderBusy(false);
+    }
   };
 
   const loadMore = async () => {
@@ -1260,6 +1387,20 @@ export const CredenceMail: React.FC<{
           ))}
         </>
       )}
+      {canFolders && (
+        <FolderTree
+          folders={folders}
+          accounts={accounts}
+          current={folder}
+          loading={foldersLoading}
+          readOnly={ro}
+          onOpen={openFolder}
+          onNew={(accountId, parentId) => setFolderForm({ kind: 'new', accountId: accountId || accounts[0]?.id, parentId })}
+          onRename={(f) => setFolderForm({ kind: 'rename', folder: f })}
+          onDelete={(f) => void deleteFolder(f)}
+          onDropMail={(f, ids) => void moveToFolder(ids, `Folder:${f.id}`)}
+        />
+      )}
     </nav>
   );
 
@@ -1300,7 +1441,8 @@ export const CredenceMail: React.FC<{
   );
 
   const allChecked = items.length > 0 && items.every((m) => checked.has(m.id));
-  const folderTitle = MAIL_FOLDERS.find((f) => f.label === folder)?.title || folder;
+  const inSentFolder = isFolderLabel(folder) && isUnderSent(folders, folderIdOfLabel(folder));
+  const folderTitle = MAIL_FOLDERS.find((f) => f.label === folder)?.title || (isFolderLabel(folder) ? folderPath(folders, folderIdOfLabel(folder) || 0) || 'Folder' : folder);
   const listPane = (
     <div className="flex flex-col min-h-0 h-full">
       <div className="px-3 pt-3 pb-2 space-y-2 border-b border-slate-200/70">
@@ -1341,7 +1483,22 @@ export const CredenceMail: React.FC<{
             <span className="text-xs text-slate-600 mr-1">{checked.size} selected</span>
             <button type="button" onClick={() => void bulk('read')} className="p-1.5 rounded-lg hover:bg-black/5" title="Mark as read"><MailOpen className="w-4 h-4 text-slate-600" /></button>
             <button type="button" onClick={() => void bulk('unread')} className="p-1.5 rounded-lg hover:bg-black/5" title="Mark as unread"><Mail className="w-4 h-4 text-slate-600" /></button>
-            {folder === 'Spam' || folder === 'Trash' || folder === 'Archive' ? (
+            {canFolders && !ro && folder !== 'Drafts' && folder !== 'Scheduled' && (
+              <button
+                type="button"
+                onClick={() => {
+                  // One mailbox at a time: a folder lives in one mailbox.
+                  const acc = checkedItems[0]?.accountId;
+                  setMoving({ ids: checkedItems.filter((m) => m.accountId === acc).map((m) => m.id), accountId: acc });
+                }}
+                className="p-1.5 rounded-lg hover:bg-black/5"
+                title="Move to folder"
+                aria-label="Move to folder"
+              >
+                <FolderInput className="w-4 h-4 text-slate-600" />
+              </button>
+            )}
+            {folder === 'Spam' || folder === 'Trash' || folder === 'Archive' || isFolderLabel(folder) ? (
               <button type="button" onClick={() => void bulk('inbox')} className="p-1.5 rounded-lg hover:bg-black/5" title="Move to Inbox"><Inbox className="w-4 h-4 text-slate-600" /></button>
             ) : folder !== 'Drafts' && folder !== 'Scheduled' && folder !== 'Sent' ? (
               <>
@@ -1405,6 +1562,17 @@ export const CredenceMail: React.FC<{
                   onOpen={() => (checked.size ? setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; }) : openRow(m))}
                   onCheck={() => setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })}
                   onStar={() => void act('star', m)}
+                  sentFolder={inSentFolder}
+                  onDragStart={
+                    canFolders && !ro
+                      ? (e) => {
+                          // The ticked mails when this one is ticked, else just this one.
+                          const ids = checked.has(m.id) ? checkedItems.filter((x) => x.accountId === m.accountId).map((x) => x.id) : [m.id];
+                          e.dataTransfer.setData(MAIL_DRAG_TYPE, JSON.stringify(ids));
+                          e.dataTransfer.effectAllowed = 'move';
+                        }
+                      : undefined
+                  }
                 />
               ))}
             </div>
@@ -1413,6 +1581,15 @@ export const CredenceMail: React.FC<{
                 <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="text-xs font-medium px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center gap-1.5">
                   {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Show more
                 </button>
+              </div>
+            )}
+            {/* The end of what came in: the mailbox starts with the latest mails of each folder; older ones on request. */}
+            {items.length >= list.total && canOlder && !q && olderLeft[olderKey] !== 0 && (
+              <div className="p-4 flex flex-col items-center gap-1">
+                <button type="button" onClick={() => void loadOlder()} disabled={olderBusy} className="text-xs font-medium px-4 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 inline-flex items-center gap-1.5">
+                  {olderBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />} Older mail from the server
+                </button>
+                {olderLeft[olderKey] > 0 && <span className="text-[11px] text-slate-400">{olderLeft[olderKey]} more there</span>}
               </div>
             )}
             <div className="h-24 md:h-4" />
@@ -1431,6 +1608,7 @@ export const CredenceMail: React.FC<{
       readOnly={ro}
       onBack={() => setSelectedId(null)}
       onAction={(a, m) => void act(a, m)}
+      canFolders={canFolders && !ro}
       picturesOk={picturesOk}
       onTrustSender={(email) => void trustSender(email)}
     />
@@ -1505,16 +1683,16 @@ export const CredenceMail: React.FC<{
                   {accounts.map((a) => <option key={a.id} value={a.id}>{a.emailAddress}</option>)}
                 </SearchSelect>
               )}
-              <div className="liquid-glass-inset rounded-[24px] p-2">{folderNav}</div>
-              {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>}
+              {!ro && status?.canDirectory && (
+                <button type="button" onClick={() => { setDrawer(false); setDirectorySheet(true); }} className="shrink-0 text-sm px-3 py-2.5 rounded-2xl bg-white/70 border border-slate-200/80 text-slate-700 inline-flex items-center gap-2">
+                  <Search className="w-4 h-4 text-slate-400" /> Search Email Directory
+                </button>
+              )}
+              <div className="liquid-glass-inset rounded-[24px] p-2 shrink-0">{folderNav}</div>
+              {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3 shrink-0">{toolsNav}</div>}
               {!ro && (
                 <button type="button" onClick={() => { setDrawer(false); setMailboxes(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
                   <Server className="w-4 h-4" /> Mailboxes
-                </button>
-              )}
-              {!ro && status?.canDirectory && (
-                <button type="button" onClick={() => { setDrawer(false); setDirectorySheet(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
-                  <Users className="w-4 h-4" /> Email Directory
                 </button>
               )}
               {onBack && (
@@ -1583,7 +1761,31 @@ export const CredenceMail: React.FC<{
         />
       )}
       {tool?.kind === 'rules' && (
-        <MailRulesPopup token={token} prefill={tool.prefill} onClose={() => setTool(null)} onChanged={loadRuleLabels} />
+        <MailRulesPopup token={token} prefill={tool.prefill} onClose={() => setTool(null)} onChanged={loadRuleLabels} folders={canFolders ? folders : undefined} />
+      )}
+      {moving && !folderForm && (
+        <MoveToFolderPopup
+          folders={folders}
+          accountId={moving.accountId}
+          count={moving.ids.length}
+          current={folder}
+          onClose={() => setMoving(null)}
+          onPick={(to) => {
+            const m = moving;
+            setMoving(null);
+            void moveToFolder(m.ids, to).then(() => m.then?.());
+          }}
+          onNewFolder={() => setFolderForm({ kind: 'new', accountId: moving.accountId, parentId: null })}
+        />
+      )}
+      {folderForm && (
+        <FolderFormPopup
+          folders={folders}
+          accounts={accounts}
+          mode={folderForm}
+          onClose={() => setFolderForm(null)}
+          onSave={saveFolder}
+        />
       )}
       {tool?.kind === 'templates' && <MailTemplatesPopup token={token} onClose={() => setTool(null)} onChanged={setTemplates} />}
       {tool?.kind === 'contacts' && (

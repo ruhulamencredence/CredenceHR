@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiUrl, dedupedFetchJson } from './api';
 import { getChatSocket } from './chatSocket';
+import { useVisibleInterval } from './useVisibleInterval';
 
 export function useChatUnread(token: string | null | undefined): number {
   const [count, setCount] = useState(0);
@@ -28,15 +29,15 @@ export function useChatUnread(token: string | null | undefined): number {
       return;
     }
     void refresh();
-    const t = setInterval(refresh, 30000);
     const socket = getChatSocket();
     socket?.on('receive_message', refresh);
     socket?.on('message_read', refresh);
     return () => {
-      clearInterval(t);
       socket?.off('receive_message', refresh);
       socket?.off('message_read', refresh);
     };
   }, [token, refresh]);
+  // Every 30 s, not while the app is in the background (useVisibleInterval).
+  useVisibleInterval(() => void refresh(), 30000);
   return count;
 }

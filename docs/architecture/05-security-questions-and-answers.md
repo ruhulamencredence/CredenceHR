@@ -58,6 +58,7 @@
 | Overtime কে অনুমোদন দেন, কেউ কি অন্যের বা নিজের OT বাড়িয়ে নিতে পারে? | কে দেবেন সেটা Payroll → OT Rules-এর setting (Team Supervisor / Roster manager / যেকোনো একজন / দুজনই পরপর); সার্ভার প্রতিটা entry-তে দেখে — supervisor শুধু নিজের team-এর, Roster manager শুধু নিজের Duty Roster department-এর। হিসাবের চেয়ে বেশি ঘণ্টা অনুমোদন হয় না; সিদ্ধান্ত হওয়া দিন আর বদলায় না; Run Payroll-এ হাতে বদলালে কারণ লিখতে হয় ও থেকে যায়। নিয়ম বদলাতে `ot_rules`, অনুমোদনে `ot_approve` / Team OT সুইচ — সব শুরুতে বন্ধ (`OvertimeRoutes.ts`)। | ✅ |
 | এক টিমের কর্মীর অনুরোধ কি অন্য টিমের Supervisor দেখতে বা approve করতে পারেন? | না। অনুরোধ শুধু কর্মীর নিজের টিমের Supervisor-এর কাছে যায় (Direct Supervisor থাকলে তাঁর), তারপর Head of Department, তারপর Template; অন্য টিমের Supervisor তালিকায় পান না আর API দিয়ে approve করলে 403। টিমে নেই এমন কর্মীর অনুরোধ Head-এর কাছে, তারপর workflow। টিম / Head ঠিক করতে Departments module-এর Edit অনুমতি লাগে (`DepartmentTeams.ts`)। | ✅ |
 | নতুন কর্মী কি নিজে থেকেই Mobile App পেয়ে যান? কে সবার জন্য চালু করতে পারেন? | Workspace-এর "New accounts get the Mobile App" চালু থাকলে (শুরুতে চালু, শুধু Superadmin বদলাতে পারেন) নতুন login app-এ ঢুকতে পারে — website-এ যা অনুমতি ঠিক তাই, বেশি নয়। একসাথে অনেকের চালু / বন্ধ করতে Module Access দেওয়ার অনুমতি লাগে; delegated Admin শুধু সাধারণ User-দের; প্রতিটা বদল access log-এ (`AppAccess.ts`)। | ✅ |
+| App-এর ভেতর থেকে update-এর অনুমতি (`REQUEST_INSTALL_PACKAGES`) দিয়ে কি app অন্য কিছু বা ভুয়া APK বসাতে পারে? | না। app শুধু নিজের server-এর https ঠিকানা থেকে APK নামায়, install-এর আগে দেখে সেটা CredenceHR-এরই আর ফোনের app-এর চেয়ে নতুন কিনা; Android আবার আগের app-এর সইয়ের সাথে মেলায়। প্রতিটা install-এ Android নিজে ব্যবহারকারীকে জিজ্ঞেস করে, আর "Install unknown apps" ব্যবহারকারী নিজে চালু করেন। টেস্ট: `docs/test-logs/2026-11-18/scripts/in-app-update-ui.cjs`। | ✅ |
 
 ## গ. ডাটা সুরক্ষা
 
@@ -92,6 +93,8 @@
 | কে কী করেছে তার প্রমাণ থাকে? | লগইন চেষ্টা, পাসওয়ার্ড রিসেট, অ্যাক্সেস বদল, payroll-এ প্রতিটি লেখা, কর্মীর তথ্য বদল (আগে/পরে), বেতনের ব্যাংক অ্যাকাউন্ট বদল (কর্মীকে alert সহ), ই-স্বাক্ষর ঘটনা, MPR সম্পাদনা, Mail অ্যাডমিন কাজ। `04-security.md` §৮। | ✅ |
 | অনুমোদনের মাঝখানে কেউ নিজের ইচ্ছামতো অন্য কাউকে approver বানাতে পারে? | শুধু সেই মুহূর্তে যে Layer-এর approver, এবং যাঁর Module Access-এ **Approvals — add an ad-hoc approver** (`users.can_add_adhoc_approver`, শুরুতে বন্ধ) চালু; Superadmin সবসময়। আবেদনকারী নিজে বা নিজেকে বাছা যায় না, একসাথে একজনই, কারণ লেখা বাধ্যতামূলক; server-এ যাচাই হয় (`POST /api/my-approvals/:id/adhoc`) এবং পুরো ঘটনা approval trail-এ থাকে। | ✅ |
 | কোনো মডিউলের অনুমতি থাকলেই কি Excel দিয়ে একসাথে অনেক ডাটা ঢোকানো যায়? | না। HR Data Import আলাদা মডিউল (`data_import`), আর প্রতিটি ধরন (Employee, Leave, Check In/Out, Conveyance, Remote/Office Attendance) আলাদা টিক — সব শুরুতে বন্ধ। মডিউল + সেই টিক দুটোই না থাকলে সার্ভার 403 দেয় (`DataImportRoutes.ts`)। Superadmin সবসময় পারেন। | ✅ |
+| কারো login-এ কে কবে কী অনুমতি দিল বা সরাল, দেখা যায়? | হ্যাঁ। HR Operations → Service Book → **Login & Access**: প্রতিটি বদল আগে → পরে, কে করল, কখন (`user_access_log`); তার আগের বদল Users → Activity-র পুরনো রেকর্ড থেকে। দেখতে আলাদা layer `p360_access` লাগে (শুরুতে কারও নেই); password-এর মান বা hash কখনো লেখা হয় না। ব্যর্থ অনুরোধ লেখা হয় না। | ✅ |
+| Head বা Supervisor কি নিজের অধীনের কর্মীদের তথ্য দেখতে পান, আর অন্যদের? | Dashboard-এর **My Team**-এ শুধু নিজের অধীনের সক্রিয় কর্মী: আজকের In / Out, Leave, এ মাসের উপস্থিতির সংখ্যা, ফোন ও email (বেতন বা ব্যক্তিগত তথ্য নয়), শুধু পড়া। কোনো সুইচ নেই (মালিকের সিদ্ধান্ত), কিন্তু প্রতিটি অনুরোধে সার্ভার database থেকে যাচাই করে কে কার অধীনে; অন্য কাউকে খুললে 403। পদ সরালে সাথে সাথে বন্ধ। `04-security.md`। | ✅ |
 | সব ডাটা-পড়ার লগ আছে? | না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)। | ⚠️ |
 | লগ কেন্দ্রীয়/অপরিবর্তনীয়? | আলাদা SIEM/অপরিবর্তনীয় লগ **নেই**। অ্যাপ লগ PM2-তে। | ❌ |
 | লগ কতদিন রাখা? | `login_attempts` ৩০ দিন; বাকিগুলো মোছার স্বয়ংক্রিয় ব্যবস্থা দেখিনি (জমে থাকে)। নীতি ঠিক করা দরকার। | ⚠️ |
@@ -144,6 +147,7 @@
 | নিরাপত্তা-ঘটনার প্রতিক্রিয়া পরিকল্পনা? | **লিখিত নেই।** প্রযুক্তিগত হাতিয়ার আছে (ব্লক, sign-out, ফোন সরানো, `JWT_SECRET` বদলে সবাইকে বের করা, লগ)। `04-security.md` §১২। | ❌ |
 | Privacy Policy? | অ্যাপের ভেতরে Privacy Policy পেজ আছে (`PrivacyPolicy.tsx`)। বিষয়বস্তু আইনজীবীকে দিয়ে মিলিয়ে নিন। | ⚠️ |
 | ডাটা সংরক্ষণ ও মোছার নীতি? | লিখিত নেই। সিস্টেম বেতন/সেবা-রেকর্ড মুছতে দেয় না; কাউকে "ভুলে যাওয়ার" অনুরোধ (GDPR-ধাঁচ) পূরণের স্বয়ংক্রিয় ব্যবস্থা নেই। | ❌ |
+| ভুল রেকর্ড মুছতে কি server-এ ঢুকতে হয়? কে মুছতে পারে? | না। System → Data cleanup — শুধু system owner (`is_platform_admin`)। কারণ ও `DELETE n` টাইপ বাধ্যতামূলক, প্রতিটা মোছা log-এ থাকে, ৩০ দিন Put back করা যায়; বেতন হয়ে যাওয়া মাস ও Disbursed Bill-এর রেকর্ড মোছা যায় না। `04-security.md` §১২। | ✅ |
 | সম্মতি (compliance) সার্টিফিকেট (ISO 27001, SOC 2)? | নেই। | ❌ |
 | কর্মীদের নিরাপত্তা প্রশিক্ষণ, ভেন্ডর নীতি, ভৌত নিরাপত্তা? | সংগঠনের বিষয়। | 🏢 |
 
@@ -184,6 +188,21 @@
 **প্রশ্ন: PEPM-এ একজন কি অন্যের তোলা MPR entry দেখতে বা বদলাতে পারে?**
 উত্তর: একই প্রজেক্টের team-এর হলে হ্যাঁ — যাদের একটা প্রজেক্টের permission দেওয়া, তারা সেই প্রজেক্টের সব entry দেখে ও আগের নিয়মে বদলায় (আগে এক প্রজেক্ট account ভাগ করে যেমন হতো), প্রতিটা সারিতে কে দিয়েছে লেখা থাকে। অন্য প্রজেক্টের entry Self Service-এ দেখা বা বদলানো যায় না; সেটা শুধু Admin Panel → PEPM Reports-এ, Reports module-এর Read / Edit / Delete layer থাকলে (Superadmin সবসময়)। শুধু Admin role যথেষ্ট নয়। প্রজেক্ট তুলে নিলে ঐ প্রজেক্টের entry-র অধিকারও যায়। সব যাচাই server-এ (`EntriesRoutes.ts`, `PepmTeam.ts`)।
 
+**প্রশ্ন: কোনো user বা employee মুছে দিলে কি তার হাজিরা, claim, বেতনের রেকর্ড মুছে যায়?**
+উত্তর: না। Employee-র বেতন ও চাকরির রেকর্ড (payroll, salary, advance, HR action, letter, transfer) থাকলে Employee মোছা যায় না (`EmployeeRecordsGuard.ts`)। Login-এর কাজের রেকর্ড (attendance, claim, leave, exit / final settlement, task, target, ডকুমেন্ট, chat ইত্যাদি) থাকলে login মোছা যায় না (`UserRecordsGuard.ts`) — দুটোতেই app বলে কী আছে আর Resigned / Block login করতে বলে, আর database নিজেও আটকায়। শুধু ভুল করে বানানো রেকর্ড-ছাড়া account মোছা যায়। টেস্ট: `docs/test-logs/2026-11-19/scripts/user-delete-guard-api.mjs` (৭টা)।
+
+**প্রশ্ন: বদলির পর কর্মী কি পুরনো প্রজেক্টের PEPM এন্ট্রি দেখতে বা সেখানে Check In করতে পারে?**
+উত্তর: Transfer-এ "Also changes"-এর টিক থাকলে effective date-এ পুরনো branch-এর প্রজেক্ট তাঁর PEPM অনুমতি থেকে সরে যায়, আর সেখানে Check In আগের দিনেই শেষ হয় — তাই পারেন না (নিজের দেওয়া এন্ট্রি আর By home project-এ For-এর নিয়ম আলাদা)। টিক তুলে দিলে বা branch কোনো প্রজেক্টের সাথে জোড়া না থাকলে HR-কে হাতে বদলাতে হয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/transfer-access-api.mjs` (১৮টা)।
+
+**প্রশ্ন: কর্মী রেকর্ড ছাড়া কি কেউ login বানাতে পারে?**
+উত্তর: Users → Add New User থেকে login হয় একজন কর্মীর (Employees-এ আছেন, login নেই; Login ID = Employee ID), নয়তো non-employee কারণ লিখে (auditor, vendor ইত্যাদি) — কারণ account-এ লেখা থাকে। নতুন joiner-এর login আসে Onboarding থেকে, কর্মী রেকর্ডের সাথে। কারণ ছাড়া কর্মীহীন login server ফিরিয়ে দেয়। টেস্ট: `docs/test-logs/2026-11-19/scripts/add-user-rule-api.mjs` (১০টা)।
+
+**প্রশ্ন: নতুন joiner-এর Appointment Letter (বেতনসহ) কে দেখতে পারে?**
+উত্তর: যে joiner-এর চিঠি তিনি নিজে (My Onboarding), আর HR Operations-এর onboarding অনুমতি থাকা HR — শুধু নিজের company-র joiner-দের। issue বা cancel করতে `onboarding_create` লাগে। অন্য joiner বা সাধারণ কর্মী পান না (403)। টেস্ট: `docs/test-logs/2026-11-19/scripts/joiner-letter-api.mjs` (২৪টা)।
+
+**প্রশ্ন: সবাইকে দেওয়া একটা প্রজেক্টে (যেমন Central Inventory) কি সবাই সবার entry দেখে?**
+উত্তর: প্রজেক্টের Entry sharing-এর ওপর নির্ভর করে (Admin Panel → Projects → Edit)। "Team" হলে হ্যাঁ (আগের মতো)। "Own entries only" হলে প্রত্যেকে শুধু নিজেরটা। "By home project" হলে প্রতিটা entry-তে লেখা থাকে কোন প্রজেক্টের জন্য (For), আর শুধু সেই প্রজেক্টের team ও যে দিয়েছে সে দেখে ও বদলায় — অন্য team তালিকায় পায় না, id দিয়ে খুললেও server 403 দেয়। For শুধু নিজের প্রজেক্টের একটা হতে পারে, server যাচাই করে। এক team-এর Final Submit শুধু তাদের অংশ আটকায়। Reports-এর অনুমতি থাকলে (আর Superadmin) সব দেখা যায়। টেস্ট: `docs/test-logs/2026-11-19/scripts/entry-sharing-api.mjs` (৩৮টা), `entry-sharing-ui.cjs` (২০টা)।
+
 **প্রশ্ন: কারো Budget (PEPM) switch বন্ধ থাকলে সে কি API দিয়ে Budget বা MPR No-র তালিকা পড়তে পারে?**
 উত্তর: না (৭ নভেম্বর ২০২৬ থেকে)। আগে menu লুকাত কিন্তু `/api/budgets`, budget item, MPR No, Job-এর তালিকা যেকোনো login করা account পেত — পুরো-অ্যাপ টেস্টে ধরা পড়ে। এখন `requireBudgetRead` শুধু Superadmin, Budget switch চালু, Job Edit, আর PEPM module (Imports, MPR Nos, Reports, Projects) থাকা Admin-কে দেয়; বাকিরা 403। Admin Dashboard-ও এখন শুধু দেওয়া module-এর tile দেখায় ও তার ডাটাই চায়।
 
@@ -214,14 +233,14 @@
 
 **প্রশ্ন: Management Dashboard দিলে কি সে বেতনের মোট খরচও দেখে?**
 
-উত্তর: না, যদি আলাদা করে "Money" layer টিক না দেওয়া হয়। Dashboard-এর প্রতিটা অংশ (People, Attendance, Money, Approvals, Projects & Targets, Recruitment, Fleet & assets) Module Access-এ আলাদা টিক; যেটা নেই server সেই সংখ্যা পাঠায়ই না, AI Assistant-ও বলে না। Money শুধু টিক দিলে।
+উত্তর: না, যদি আলাদা করে "Money" layer টিক না দেওয়া হয়। Dashboard-এর প্রতিটা অংশ (People, Attendance, Money, Approvals, Projects & Targets, Recruitment, Fleet & assets, Calendar) Module Access-এ আলাদা টিক; যেটা নেই server সেই সংখ্যা পাঠায়ই না, AI Assistant-ও বলে না। Money শুধু টিক দিলে।
 
 **প্রশ্ন: কর্মী কি নিজের Login ID (username) বদলে ফেলতে পারেন?**
 উত্তর: শুরুতে না — Profile-এ Change Username দেখায় না, আর server-ও (`PUT /api/profile/username`) ফিরিয়ে দেয়। Superadmin চাইলে Admin Panel → Users → Password requests-এ "Let people change their own username" চালু করতে পারেন; তখন বর্তমান password দিয়ে বদলানো যায়। বন্ধ থাকলে দরকারে HR Users থেকে বদলে দেয় (Users module-এর Edit/Add layer লাগে)।
 
 **প্রশ্ন: "Their Branch" দিলে কেউ কি অন্য Branch-এর project-এ হাজিরা দিতে পারবেন?** না। প্রতিটা check in / out আর Correct Attendance-এ server নিজেই কর্মীর Employee record-এর Branch থেকে Project বের করে (`checkInProjectsFor`, `AttendanceProjects.ts`), app-এর পাঠানো project মানে না। Branch-এ Project যুক্ত না থাকলে কোথাও হাজিরা হয় না। এই অপশন শুধু Users module-এর edit_add layer আছে এমন Admin চালু করতে পারেন; কর্মীর Branch বদলানো যায় Employees module থেকে, তাই দুটো আলাদা অনুমতির ভেতরে থাকে।
 
-**প্রশ্ন: Tracking Schedule দিলে কর্মীর ব্যক্তিগত সময়ের location কি কোথাও থেকে যায়?** না। সময়ের বাইরে ফোন কিছু পাঠালেও (যেমন পুরনো APK) server `location_pings`-এ কিছু লেখে না, শুধু জানায় "off schedule" আর পরের শুরু কখন (`EmployeeTrackingRoutes.ts`)। Live Follow আর "Live all"-ও সেই সময় কাউকে follow করে না (`LiveTrackingRoutes.ts`)। নিয়ম বসাতে বা বদলাতে আলাদা layer ("Tracking Schedule", explicit-only) লাগে, আর শুধু নিজের tracking scope-এর লোকদের জন্য; Superadmin-এর account-এ নিয়ম বসে না।
+**প্রশ্ন: Tracking Schedule দিলে কর্মীর ব্যক্তিগত সময়ের location কি কোথাও থেকে যায়?** না। সময়ের বাইরে ফোন কিছু পাঠালেও (যেমন পুরনো APK) server `location_pings`-এ কিছু লেখে না, শুধু জানায় "off schedule" আর পরের শুরু কখন (`EmployeeTrackingRoutes.ts`)। Live Follow আর "Live all"-ও সেই সময় কাউকে follow করে না (`LiveTrackingRoutes.ts`)। নিয়ম বসাতে বা বদলাতে আলাদা layer ("Tracking Schedule", explicit-only) লাগে, আর শুধু নিজের tracking scope-এর লোকদের জন্য। Superadmin-এর নিজের account-এও নিয়ম বসে (Superadmin-এরও সময়ের বাইরে location জমা হয় না), তবে সেটা দেখতে ও বদলাতে পারেন শুধু একজন Superadmin — Department-সীমার Tracking manager তালিকায় Superadmin-কে দেখেন না, বদলাতেও পারেন না।
 
 **প্রশ্ন: Employees-এর নতুন Export দিয়ে কি যে কেউ পুরো কর্মী-তালিকা নামাতে পারবেন?** না। Export আলাদা permission (Employees-এ "Export employees (Excel)", HR Operations-এ একই নামে) — দুটোই explicit-only, Superadmin বা যাঁকে টিক দেওয়া হয় শুধু তিনি; API নিজেও যাচাই করে (`EmployeeHeadcount.ts`)। যাঁর Department সীমা আছে তিনি শুধু সেই Department-এর কর্মী পান। ফাইলে password, login বা ব্যাংক হিসাব থাকে না।
 
@@ -230,3 +249,47 @@
 **প্রশ্ন: ZKTeco মেশিন থেকে হাজিরা মুছে গেলে কি ডাটা হারাবে?** না। প্রতি ৫ মিনিটে punch আমাদের ডাটাবেসে (`zk_attendance_logs`) চলে আসে আর সেখানেই থাকে; মেশিন থেকে মুছলে বা মেশিন নষ্ট হলেও আমাদের কপি থাকে, অ্যাপ নিজে মেশিনের log কখনো মোছে না (`zkSync.ts`)। অ্যাপ থেকে punch থাকা মেশিন মোছাও আটকানো (`OfficeAttendanceRoutes.ts`)। শুধু যে punch এখনো sync হয়নি (মেশিন বন্ধ / network নেই) আর তার আগেই মেশিন থেকে মুছে গেছে, সেটা পাওয়া যাবে না — তাই মেশিনের log পরিষ্কার করার আগে Office Attendance-এ "Sync Now" দিয়ে নিন।
 
 **প্রশ্ন: কেউ Excel দিয়ে হাজিরা ঢোকালে পরে কি জানা যাবে কে, কেন?** হ্যাঁ। Attendance import-এ কারণ না লিখলে server import নেয় না; প্রতিটা import `data_import_runs`-এ ফাইলের নাম, কে, কখন, কারণ আর প্রতিটা সারির ফলসহ থাকে, আর হাজিরার remarks-এ "Imported: <কারণ>" লেখা থাকে। HR Data Import → Import history-তে দেখা যায় (শুধু সেই import-এর অনুমতি যাঁর আছে)।
+
+**প্রশ্ন: অন্য project-এর relief guard কি যেকোনো সময় অন্য site-এ হাজিরা দিতে পারেন?** না। Duty Roster → Guard Posts-এ (Guard Posts layer আছে এমন কেউ) তাঁকে নির্দিষ্ট দিনের নির্দিষ্ট shift-এ relief বসালেই কেবল সেই post-এর Project খোলে, আর শুধু shift শুরুর ৩০ মিনিট আগে থেকে শেষের ৩০ মিনিট পর পর্যন্ত। সময়টা server প্রতিটা check-in-এ নিজে হিসাব করে (ফোনের ঘড়ি নয়); relief সরালে সাথে সাথে বন্ধ। location-এর সীমা (radius) আগের মতোই যাচাই হয় (`GuardRoutes.ts` activeReliefDuties, `AttendanceRoutes.ts` getAllowedProjectIds)।
+
+**প্রশ্ন: Merge accounts দিয়ে কেউ কি অন্যের account মুছে নিজের সাথে মিশিয়ে নিতে পারে?** শুধু যাঁকে Superadmin Users-এর "Merge accounts" layer আলাদা করে দিয়েছেন (শুরুতে কারো নেই) — না থাকলে বোতাম দেখায় না, API 403। তাও Superadmin-এর account, নিজের account আর কোনো employee-র সাথে যুক্ত login মুছে দেওয়া যায় না; শুধু employee-ছাড়া (হাতে খোলা) login অন্য login-এ মেশে। আগে "What moves"-এ দেখায় কী সরবে, লাল confirm চায়, আর প্রতিটা merge `user_merge_log`-এ নাম-সময়সহ লেখা থাকে। ফেরানো যায় না, তাই লাইভে আগে backup।
+
+**প্রশ্ন: অন্য department-এর কাউকে নিজের টিমে নিয়ে নিলে কি তিনি অন্য department-এর Head-এর অধীনে চলে যান?** না। টিমে নিলে শুধু প্রথম ধাপ (Supervisor) এই টিমের Supervisor হন; Head of Department-এর ধাপ সবসময় কর্মীর **নিজের** department-এর Head। টিমে কাউকে নেওয়া বা "new joiners" নিয়ম বসানো যায় শুধু Departments-এ edit অনুমতি থাকলে; সার্ভার যাচাই করে প্রতিটা মানুষ এই company-র চালু কর্মী। নিয়ম শুধু নিয়ম বসানোর পরে যোগ দেওয়াদের নেয়, আর হাতে বাদ দেওয়া কাউকে আবার ঢোকায় না।
+
+**প্রশ্ন: Credence Mail-এর folder মুছলে কি ভেতরের mail-ও মুছে যায়?** না। Folder (আর তার sub-folder) মোছার আগে ভেতরের সব mail মেইল সার্ভারে INBOX-এ সরানো হয়, তারপর folder মোছে; লাল confirm-এ সেটা লেখা থাকে। Folder বানানো, সরানো, মোছা যায় শুধু নিজের mailbox-এ আর যাঁর Credence Mail চালু (folder Mail-এরই অংশ, আলাদা সুইচ নেই); Mail Administration থেকে অন্যের mailbox খুললে কিছুই বদলানো যায় না।
+
+**প্রশ্ন: Designations-এ কেউ পদের নাম বদলালে কি অন্য company-র কর্মীরাও বদলে যায়?** হ্যাঁ — তালিকা সব company মিলে একটা (মালিকের সিদ্ধান্ত), তাই "Executive"-কে "Officer" করলে সব company-র Executive-রা Officer হন, OT rate / ছুটির workflow-ও। এটা পারেন শুধু যাঁর Designations module-এ Edit (edit_add) আছে; popup আগে দেখায় কতজন (সব company) আর কোন নিয়ম বদলাবে। পদের code (DSG-…) বদলায় না, তাই code দিয়ে চেনা report / অন্য software ভাঙে না; Service Book-এ পদোন্নতি হিসেবে কিছু লেখা হয় না, Transfer-এর ইতিহাস আগের নামেই থাকে।
+
+**প্রশ্ন: Drop & pick up report-এ কে কতবার গাড়ি ছেড়ে দিয়ে আবার ডেকেছেন — এটা কে দেখতে পারে?** শুধু Vehicle Management module-এর যে account-এ "Drop & pick up report" (`trip_report`) টিক দেওয়া (Superadmin সব পান); টিক ছাড়া Vehicle Management-এর লোকও tab দেখেন না, আর API 403 দেয়। Pick-ups tab-ও তেমনি নিজের টিক (`pickups`)। যাত্রী নিজের ride-এর সব (কখন dropped, কে গাড়ি দিল, release-এর কারণ) Ride Status-এ দেখেন।
+
+**প্রশ্ন: Close short করে কেউ কি MPR-এর Qty চুপচাপ মুছে দিতে পারে?** না। Close short শুধু PEPM Reports-এর `close_short` layer টিক দেওয়া account পারে (Superadmin ছাড়া কেউ নিজে থেকে পায় না), কারণ লিখতেই হয়, আর কে, কবে, কতটা, কেন — সারিতে, Dispatch timeline-এ আর MPR Edit Log-এ থাকে। চাওয়া Qty বা Budget-এর হিসাব বদলায় না, শুধু বাকি অংশ "Set aside"-এ আলাদা থাকে; Budget-এর শেষ তারিখ পর্যন্ত Undo করা যায়।
+
+**প্রশ্ন: সহকর্মী Credence Mail ব্যবহার না করলে তাঁকে পাঠানো mail কোথায় যায় — CredenceHR-এর বাইরে কি চলে যায়?** Default-এ (১৭ নভেম্বর থেকে) mail server (আমাদের নিজের cPanel SMTP) দিয়ে তাঁর নিজের অফিসের mailbox-এ যায় — অন্য কোনো server বা তৃতীয় পক্ষে নয়, আর শুধু Mail Administration-এর "Our domains"-এর ঠিকানায় এই নিয়ম খাটে। যিনি Credence Mail-এ mailbox যুক্ত করে রেখেছেন, Mail চালু ও block নয়, তাঁর কাছে mail আগের মতো শুধু CredenceHR-এর ভেতরে থাকে। Mail Administration-এ ("mail_settings" layer যাঁর আছে) "Keep it inside CredenceHR" বাছলে আগের নিয়মে সবার mail ভেতরে থাকে।
+
+**প্রশ্ন: Employee Tracking-এর "Nearest project" আর "Employees by place" report কে দেখতে পারেন?**
+
+উত্তর: যিনি Employee Tracking খুলতে পারেন (`tracking` module + Read layer) তিনিই — আলাদা অনুমতি নেই। তিনি শুধু তাঁর Tracking সীমার মানুষদের (বাছা Department / কর্মী) কাছের project আর নিজের branch থেকে দূরত্ব দেখেন; project-এর location-এর তালিকাও (`/api/tracking/sites`) একই অনুমতিতে বাঁধা।
+
+**প্রশ্ন: Remote Attendance-এ "Any project" দিলে একজন User কোন কোন project-এ check in করতে পারেন?**
+
+উত্তর: কোম্পানির যেকোনো project-এ — তবে শুধু সেই project-এর location-এর radius-এর ভেতরে দাঁড়িয়ে (server দূরত্ব মাপে)। নির্দিষ্ট project-এ সীমিত রাখতে Module Access-এ "Only these projects" (From / To তারিখসহ) বা "Their Branch" বাছুন।
+
+
+**প্রশ্ন: Bill Claim-এর নিয়ম "পড়েছি" না দিলে কেউ কি app এড়িয়ে সরাসরি API দিয়ে claim জমা দিতে পারেন?**
+না। `POST /api/bill-claims` ও নিজের claim edit-এ server দেখে কর্মী বর্তমান নিয়মের version নিশ্চিত করেছেন কিনা (`hasReadCurrentRules`); না করলে 403 `rules_unread`। নিয়ম বদলালে নতুন version হয়, তাই আবার পড়তে হয়। কে পড়েছেন সেই তালিকা ও reminder শুধু Superadmin বা Bill Claim module-ওয়ালারা দেখেন / পাঠান; কর্মী শুধু নিজের অবস্থা দেখেন।
+
+**প্রশ্ন: Bill Claim Policy দেখতে পারেন এমন সবাই কি "Who has read the rules" (কে নিয়ম পড়েছেন) তালিকাও দেখতে পারেন?**
+না, আলাদা অনুমতি লাগে: Bill Claim module-এর layer "Who has read the rules" (`rules_readers`)। যে account-এ Bill Claim-এর layer আলাদা করে save করা নেই, তাতে এটা চালু থাকে; layer save করা থাকলে টিক না দিলে তালিকা ও reminder দুটোই server-এ 403, বোতামও দেখায় না। Superadmin সবসময় পান।
+
+**প্রশ্ন: তৈরি থাকা "Accounts" বা "Audit" template দিলে কি তাঁরা বেতন বদলাতে পারবেন?**
+না। দুটোতেই Payroll-এর শুধু "View only" (`payroll_view`) — সব পাতা দেখা যায়, কিছু বদলানো যায় না (`requirePayroll`: বদলাতে `read` লাগে, যেটা এ দুই template-এ নেই)। Accounts পান "Accounts Pay" (টাকা দেওয়া), Audit পান "Audit (after payment)" ও Activity Log। HR template-এ উল্টো — বানানো ও চালানো আছে, কিন্তু HR Director review / Accounts Pay / Audit নেই। মনে রাখবেন: Module Access-এ Payroll হাতে চালু করলে "Payroll" আর "View only" দুটোই নিজে থেকে টিক হয় — Accounts / Audit-কে হাতে দিলে "Payroll" তুলে দিতে হয়; template ব্যবহার করলে এটা ঠিক থাকে।
+
+**প্রশ্ন: প্রজেক্টের Branch Type বদলানোর অনুমতি কার?**
+উত্তর: যাঁর Projects (Edit/Add) ও Branches দুটো সেকশনই আছে। Branches না থাকলে UI-তে ঘর দেখা যায় না, আর সরাসরি API-তে `branch_type` / `branch_link` পাঠালেও 403 আসে। ধরন বদলের আগে কত জন কর্মীর ক্যালেন্ডার বদলাবে তা দেখিয়ে নিশ্চিতকরণ চাওয়া হয়।
+
+**প্রশ্ন: ভুল করে প্রজেক্ট বা Branch মুছে ফেললে ইতিহাস হারায় কি?**
+উত্তর: না। যে প্রজেক্টে PEPM Entry, হাজিরা, সংশোধন, প্রজেক্ট-অনুমতি, Check In-তালিকা, Guard Post, Site Attendance Team বা Budget Lock কিছু একটা আছে সেটা মোছা যায় না (409), আর যে Branch-এ কর্মী, নতুন-যোগদান আবেদন, Team নিয়ম, অফিস মেশিন বা SIM যুক্ত আছে সেটাও না। অচল জিনিস "Archive" করে লুকানো যায় (ফেরানো যায়), আর ডুপ্লিকেট Branch "Merge" করলে কর্মীরা ইতিহাসসহ আসল Branch-এ যায়।
+
+**প্রশ্ন: চাকরি ছেড়ে দেওয়া বা Inactive করা কর্মীর login দিয়ে কি ঢোকা যায়?**
+উত্তর: না। কর্মীর রেকর্ড Inactive হলে বা Job Status Resigned / Terminated / Inactive / Hold / Regain হলে, কোন পথে সেটা করা হয়েছে তা বিচার না করে, তার login সাইন-ইনে 403 পায় ও খোলা সেশন সর্বোচ্চ ৩০ সেকেন্ডে বন্ধ হয়। আবার চালু করলে login ফিরে আসে। Superadmin ও Employee রেকর্ডহীন একাউন্ট এ নিয়মের বাইরে।
+

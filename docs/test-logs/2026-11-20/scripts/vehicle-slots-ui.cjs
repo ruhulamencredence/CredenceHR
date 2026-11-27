@@ -1,0 +1,82 @@
+// Screens: Approve Application's car picker marks a car booked at that time Busy (can't
+// be picked) and a car free then as Free; the driver picker the same; Vehicle
+// Management shows the Day board with the booked rides and the gap setting.
+const { chromium } = require('/opt/node-tools/node_modules/playwright/index.js');
+const { execSync } = require('child_process');
+const B = 'http://localhost:3200';
+const sql = (q) => execSync(`mysql -h127.0.0.1 -ucred -pcredpass admin_ui -N -e ${JSON.stringify(q)}`).toString().trim();
+const PASS = 'Slotui#2026pass';
+const api = async (t, m, p, b) => { const r = await fetch(B + p, { method: m, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + t }, body: b ? JSON.stringify(b) : undefined }); let j = null; try { j = await r.json(); } catch {} return { s: r.status, b: j }; };
+const login = async (i, p) => await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: i, password: p }) })).json();
+let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+const clickText = (p, t) => p.evaluate((t) => { const el = [...document.querySelectorAll('button, a, span, div')].find((e) => e.textContent.trim() === t && e.offsetParent !== null); if (el) (el.closest('button, a') || el).click(); return !!el; }, t);
+(async () => {
+  const SA = (await login('admin@credence.test', 'ProbePass123')).token;
+  const tag = Date.now().toString(36).slice(-5);
+  const dept = Number(sql('SELECT MIN(id) FROM departments'));
+  const person = async (name, desig) => {
+    const email = `${name.toLowerCase()}.${tag}@credence.test`;
+    const e = await api(SA, 'POST', '/api/employees', { name: `${name} ${tag}`, designation: desig, department_id: dept, joining_date: '2024-01-01', email, create_login: true, login_email: email, login_password: PASS });
+    const uid = Number(sql(`SELECT user_id FROM all_employees WHERE id=${e.b.id}`));
+    sql(`UPDATE users SET must_change_password=0 WHERE id=${uid}`);
+    return { uid, email, name: `${name} ${tag}` };
+  };
+  const R = await person('Uirider', 'Engineer'), A = await person('Uiapprover', 'Manager'), T = await person('Uitransport', 'Transport In-charge');
+  const D1 = await person('Uidrivera', 'Driver'), D2 = await person('Uidriverb', 'Driver');
+  await api(SA, 'PUT', `/api/users/${T.uid}/role`, { role: 'admin' });
+  await api(SA, 'PUT', `/api/users/${T.uid}/module-permissions`, { modules: ['vehicle_maintainer', 'vehicle_management'] });
+  const tok = async (x) => (await login(x.email, PASS)).token;
+  const [Rt, At, Tt] = [await tok(R), await tok(A), await tok(T)];
+  const V1 = (await api(SA, 'POST', '/api/vehicles', { vehicle_no: `UIA-${tag}`, model: 'Noah', vehicle_type: 'Microbus' })).b.id;
+  const V2 = (await api(SA, 'POST', '/api/vehicles', { vehicle_no: `UIB-${tag}`, model: 'Axio', vehicle_type: 'Car' })).b.id;
+  const oldDefault = sql("SELECT IFNULL(GROUP_CONCAT(id),'') FROM approval_templates WHERE request_type='vehicle' AND is_default=1");
+  sql("UPDATE approval_templates SET is_default=0 WHERE request_type='vehicle'");
+  const tpl = (await api(SA, 'POST', '/api/approval-templates', { name: `Slots UI ${tag}`, request_type: 'vehicle', is_default: true, is_active: true, steps: [{ approver_user_ids: [A.uid], approver_type: 'employee', label: 'Check' }, { approver_user_ids: [T.uid], approver_type: 'vehicle_maintainer', label: 'Transport' }] })).b.id;
+  const day = new Date(Date.now() + 6 * 3600e3 + 2 * 864e5).toISOString().slice(0, 10);
+  const q = async (t, id) => { const b = (await api(t, 'GET', '/api/my-approvals')).b; return (Array.isArray(b) ? b : b?.items || []).find((r) => r.source_type === 'vehicle_requisition' && Number(r.source_id) === Number(id))?.id; };
+  const ready = async (time, hours, purpose) => { const id = (await api(Rt, 'POST', '/api/vehicles/requisitions', { purpose, pickup_location: 'Head Office', destination: 'Site', ride_date: day, start_time: time, estimated_duration_hours: hours, trip_type: 'round' })).b.id; await api(At, 'POST', `/api/my-approvals/${await q(At, id)}/act`, { action: 'approved' }); return id; };
+  const first = await ready('10:00', 3, `Slot UI first ${tag}`);
+  await api(Tt, 'PUT', `/api/vehicles/requisitions/${first}/approve-and-assign`, { vehicle_id: V1, driver_user_id: D1.uid });
+  const second = await ready('11:00', 1, `Slot UI second ${tag}`);
+
+  const b = await chromium.launch();
+  const a = await login(T.email, PASS);
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 1000 } });
+  await ctx.addInitScript(([t, u]) => { localStorage.setItem('mpr_token', t); localStorage.setItem('mpr_user', JSON.stringify(u)); for (let i = 0; i < 900; i++) localStorage.setItem(`credence_webpush_snooze_${i}`, String(Date.now() + 9e9)); }, [a.token, a.user]);
+  const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
+  await p.goto(B + '/'); await p.waitForTimeout(6000);
+  await clickText(p, 'Approve'); await p.waitForTimeout(3500);
+  const card = p.locator('main').locator('div').filter({ hasText: `Slot UI second ${tag}` }).filter({ has: p.getByRole('button', { name: 'Assign & Confirm' }) }).last();
+  await card.getByPlaceholder('Pick a vehicle…').click(); await p.waitForTimeout(500);
+  const busyOpt = p.getByRole('option', { name: new RegExp(`UIA-${tag}.*Busy 10:00–13:00`) });
+  const freeOpt = p.getByRole('option', { name: new RegExp(`UIB-${tag}.*Free at this time`) });
+  ok(await busyOpt.count() === 1, 'car booked 10:00–13:00 shows "Busy 10:00–13:00" for an 11:00 ride');
+  ok(await busyOpt.getAttribute('aria-disabled') === 'true', '…and can\'t be picked');
+  ok(await freeOpt.count() === 1, 'the other car shows "Free at this time"');
+  await p.screenshot({ path: '/tmp/claude-0/sb/slots-vehicle-picker.png' });
+  await freeOpt.click(); await p.waitForTimeout(300);
+  await card.getByPlaceholder('Pick a driver…').click(); await p.waitForTimeout(500);
+  const dBusy = p.getByRole('option', { name: new RegExp(`${D1.name}.*Busy 10:00–13:00`) });
+  ok(await dBusy.count() === 1 && (await dBusy.getAttribute('aria-disabled')) === 'true', 'driver on the 10:00 ride is Busy and can\'t be picked');
+  await p.getByRole('option', { name: new RegExp(`${D2.name}.*Free at this time`) }).click(); await p.waitForTimeout(300);
+  await card.getByRole('button', { name: 'Assign & Confirm' }).click(); await p.waitForTimeout(2500);
+  ok(sql(`SELECT CONCAT(status,' ',assigned_vehicle_id) FROM vehicle_requisitions WHERE id=${second}`) === `assigned ${V2}`, 'the 11:00 ride is given the free car');
+
+  await p.goto(B + '/admin/vehicle-management'); await p.waitForTimeout(7000);
+  const board = p.getByRole('table', { name: 'Day board' });
+  ok(await p.getByText(/Day board —/).first().isVisible(), 'Vehicle Management shows the Day board');
+  await p.getByLabel('Day', { exact: true }).fill(day); await p.waitForTimeout(2500);
+  ok(await board.getByText(new RegExp(`10:00–13:00 ${R.name}`)).count() > 0 && await board.getByText(new RegExp(`11:00–12:00 ${R.name}`)).count() > 0, 'the day board shows both rides on their cars');
+  ok(await p.getByText(/min gap\s+before and after/).first().isVisible(), 'Ride deadline says each car is booked for its time plus the gap (the setting itself is Superadmin-only)');
+  await board.scrollIntoViewIfNeeded();
+  await p.screenshot({ path: '/tmp/claude-0/sb/slots-day-board.png' });
+  await p.setViewportSize({ width: 390, height: 844 }); await p.waitForTimeout(800);
+  ok(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'phone width: no sideways page scroll');
+  ok(errs.length === 0, 'no page errors ' + JSON.stringify(errs));
+  await b.close();
+  for (const id of [first, second]) await api(Tt, 'POST', `/api/vehicles/requisitions/${id}/cancel`, { reason: 'test done' });
+  sql(`UPDATE approval_templates SET is_default=0, is_active=0 WHERE id=${tpl}`);
+  if (oldDefault) sql(`UPDATE approval_templates SET is_default=1 WHERE id IN (${oldDefault})`);
+  sql(`UPDATE vehicles SET status='retired' WHERE id IN (${V1},${V2})`);
+  process.exit(fails ? 1 : 0);
+})();

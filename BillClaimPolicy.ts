@@ -40,6 +40,7 @@
 import type { Express } from "express";
 import { createHash } from "crypto";
 import { activeCompanyId } from "./companyContext";
+import { sendPushToUserIds } from "./PushNotificationService";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -120,6 +121,15 @@ export const POLICY_DEFS: PolicyDef[] = [
     group: "claim",
     label: "One new claim per day",
     help: "An employee can file one claim a day (its Claim Date). To add more bills that day they edit that claim instead of filing another.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "transport_from_check_in_out",
+    group: "claim",
+    label: "Transport bills come only from Check In/Out",
+    help:
+      "A Transport bill's amount is the total of the check-in/outs ticked for it — it can't be typed in. At least one check-in/out must be ticked, and a claim has one Transport bill (every check-in/out goes on it). Off: a Transport bill with no check-in/out can have its amount typed in.",
     type: "boolean",
     default: true
   },
@@ -299,6 +309,41 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
         " — a MySQL admin can run SET GLOBAL log_bin_trust_function_creators = 1; once (or grant the TRIGGER/SUPER privilege) and restart the app."
     );
   }
+  // The rules people must read before their first Bill Claim: each change to
+  // the rules is a new version (a hash of the rules, so any change counts),
+  // and every open / confirm of them is kept (Bill Claim → (i) Rules).
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_rule_versions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    company_ref INT NOT NULL,
+    rules_hash CHAR(64) NOT NULL,
+    changed_by VARCHAR(150) NULL,
+    summary VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL,
+    KEY idx_bcrv_company (company_ref, id)
+  )`);
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_rule_reads (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    company_ref INT NOT NULL,
+    user_id INT NOT NULL,
+    version_id INT NOT NULL,
+    action VARCHAR(16) NOT NULL,
+    device VARCHAR(60) NULL,
+    ip VARCHAR(64) NULL,
+    created_at DATETIME NOT NULL,
+    KEY idx_bcrr_user (company_ref, user_id, id),
+    KEY idx_bcrr_company (company_ref, id)
+  )`);
+  // A category's limit per day, and its limits by designation (JSON list of
+  // { designation_id, designation, max_per_bill, daily_limit, monthly_limit } —
+  // a field left blank there uses the category's own).
+  for (const sql of [
+    "ALTER TABLE bill_claim_categories ADD COLUMN daily_limit DECIMAL(12, 2) NULL AFTER max_per_bill",
+    "ALTER TABLE bill_claim_categories ADD COLUMN designation_limits TEXT NULL"
+  ]) {
+    await queryDB(sql).catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") throw err;
+    });
+  }
   // Categories come from bill_claim_categories now, so the claim's own
   // category column holds any name (or "Fuel, Toll" for a multi-category claim).
   const cols: any[] = (await queryDB("SHOW COLUMNS FROM bill_claims LIKE 'category'")) || [];
@@ -364,8 +409,41 @@ export interface BillCategory {
   is_active: boolean;
   sort_order: number;
   max_per_bill: number | null;
+  daily_limit: number | null;
   monthly_limit: number | null;
   receipt_required: boolean;
+  designation_limits: DesignationLimit[];
+  // Set on the copy a claimant gets (categoriesFor): whose designation's
+  // limits are in force instead of the category's own.
+  limits_for?: string | null;
+}
+
+export interface DesignationLimit {
+  designation_id: number | null;
+  designation: string;
+  max_per_bill: number | null;
+  daily_limit: number | null;
+  monthly_limit: number | null;
+}
+
+const num = (x: any): number | null => (x === "" || x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+
+function parseDesignationLimits(raw: any): DesignationLimit[] {
+  let list: any[] = [];
+  try {
+    list = Array.isArray(raw) ? raw : raw ? JSON.parse(String(raw)) : [];
+  } catch {
+    list = [];
+  }
+  return (Array.isArray(list) ? list : [])
+    .filter((d) => d && String(d.designation || "").trim())
+    .map((d) => ({
+      designation_id: num(d.designation_id),
+      designation: String(d.designation).trim().slice(0, 150),
+      max_per_bill: num(d.max_per_bill),
+      daily_limit: num(d.daily_limit),
+      monthly_limit: num(d.monthly_limit)
+    }));
 }
 
 function toCategory(r: any): BillCategory {
@@ -376,9 +454,38 @@ function toCategory(r: any): BillCategory {
     is_active: !!Number(r.is_active),
     sort_order: Number(r.sort_order) || 0,
     max_per_bill: r.max_per_bill != null ? Number(r.max_per_bill) : null,
+    daily_limit: r.daily_limit != null ? Number(r.daily_limit) : null,
     monthly_limit: r.monthly_limit != null ? Number(r.monthly_limit) : null,
-    receipt_required: !!Number(r.receipt_required)
+    receipt_required: !!Number(r.receipt_required),
+    designation_limits: parseDesignationLimits(r.designation_limits)
   };
+}
+
+/**
+ * The categories as they apply to one employee: where a category has limits
+ * for the employee's designation (matched by designation id, else by name),
+ * those replace the category's own — a field left blank keeps the category's.
+ */
+export async function categoriesFor(queryDB: QueryDB, userId: number): Promise<BillCategory[]> {
+  const cats = await loadCategories(queryDB);
+  if (!cats.some((c) => c.designation_limits.length)) return cats;
+  const emp: any = ((await queryDB("SELECT designation_id, designation FROM all_employees WHERE user_id = ? LIMIT 1", [userId]).catch(() => [])) || [])[0];
+  if (!emp) return cats;
+  const did = num(emp.designation_id);
+  const dname = String(emp.designation || "").trim().toLowerCase();
+  return cats.map((c) => {
+    const hit =
+      c.designation_limits.find((d) => did != null && d.designation_id === did) ||
+      (dname ? c.designation_limits.find((d) => d.designation.toLowerCase() === dname) : undefined);
+    if (!hit) return c;
+    return {
+      ...c,
+      max_per_bill: hit.max_per_bill ?? c.max_per_bill,
+      daily_limit: hit.daily_limit ?? c.daily_limit,
+      monthly_limit: hit.monthly_limit ?? c.monthly_limit,
+      limits_for: hit.designation
+    };
+  });
 }
 
 // ---- history (append-only) ----
@@ -629,7 +736,7 @@ export async function checkClaimBills(
   }
 ): Promise<{ error: string } | { lines: CheckedLine[]; total: number; categorySummary: string }> {
   const policy = await loadPolicy(queryDB);
-  const categories = await loadCategories(queryDB);
+  const categories = await categoriesFor(queryDB, args.userId);
   const { userId, today, from, to } = args;
   const win = dateWindow(policy, today, args.firstFiled);
   const fmt = (n: number) => `৳${n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -661,7 +768,7 @@ export async function checkClaimBills(
     const amount = Math.round(Number(l.amount) * 100) / 100;
     if (!Number.isFinite(amount) || amount <= 0) return { error: `Bill ${n}: enter an amount greater than 0.` };
     if (policy.enforce_category_limits && cat.max_per_bill != null && amount > cat.max_per_bill) {
-      return { error: `Bill ${n}: ${cat.name} bills can be at most ${fmt(cat.max_per_bill)} each.` };
+      return { error: `Bill ${n}: ${cat.name} bills can be at most ${fmt(cat.max_per_bill)} each${cat.limits_for ? ` for ${cat.limits_for}` : ""}.` };
     }
     const desc = typeof l.description === "string" ? l.description.trim().slice(0, 500) || null : null;
     lines.push({ category_id: cat.id, category_name: cat.name, bill_date: date, amount, description: desc });
@@ -693,17 +800,31 @@ export async function checkClaimBills(
     (policy.enforce_category_limits && lines.some((l) => categories.find((c) => c.id === l.category_id)?.receipt_required));
   if (needsFile && !args.hasAttachment) return { error: "Attach the receipt — this claim needs one." };
 
-  // Monthly limit per category: this claim plus the user's other claims (not
-  // rejected) for bills in the same calendar month.
+  // Daily / monthly limit per category: this claim plus the user's other
+  // claims (not rejected) for bills on the same day / in the same month.
   if (policy.enforce_category_limits) {
-    const limited = categories.filter((c) => c.monthly_limit != null && lines.some((l) => l.category_id === c.id));
+    const limited = categories.filter((c) => (c.monthly_limit != null || c.daily_limit != null) && lines.some((l) => l.category_id === c.id));
     if (limited.length) {
       const mine: any[] = (await queryDB("SELECT id, status FROM bill_claims WHERE user_id = ?", [userId])) || [];
       const ids = mine.filter((c) => c.status !== "rejected" && Number(c.id) !== Number(args.editingClaimId)).map((c) => Number(c.id));
       const past: any[] = ids.length
         ? (await queryDB(`SELECT category_id, category_name, bill_date, amount FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || []
         : [];
-      for (const c of limited) {
+      const forWho = (c: BillCategory) => (c.limits_for ? ` for ${c.limits_for}` : "");
+      for (const c of limited.filter((x) => x.daily_limit != null)) {
+        const days = new Set(lines.filter((l) => l.category_id === c.id).map((l) => l.bill_date));
+        for (const d of days) {
+          const used =
+            past
+              .filter((p) => (Number(p.category_id) === c.id || p.category_name === c.name) && dhakaDate(p.bill_date) === d)
+              .reduce((s, p) => s + Number(p.amount), 0) +
+            lines.filter((l) => l.category_id === c.id && l.bill_date === d).reduce((s, l) => s + l.amount, 0);
+          if (used > (c.daily_limit as number)) {
+            return { error: `${c.name}: the limit${forWho(c)} is ${fmt(c.daily_limit as number)} a day — ${d} would come to ${fmt(used)}.` };
+          }
+        }
+      }
+      for (const c of limited.filter((x) => x.monthly_limit != null)) {
         const months = new Set(lines.filter((l) => l.category_id === c.id).map((l) => l.bill_date.slice(0, 7)));
         for (const m of months) {
           const used =
@@ -712,7 +833,7 @@ export async function checkClaimBills(
               .reduce((s, p) => s + Number(p.amount), 0) +
             lines.filter((l) => l.category_id === c.id && l.bill_date.slice(0, 7) === m).reduce((s, l) => s + l.amount, 0);
           if (used > (c.monthly_limit as number)) {
-            return { error: `${c.name}: the monthly limit for ${m} is ${fmt(c.monthly_limit as number)} — this claim would make it ${fmt(used)}.` };
+            return { error: `${c.name}: the monthly limit${forWho(c)} for ${m} is ${fmt(c.monthly_limit as number)} — this claim would make it ${fmt(used)}.` };
           }
         }
       }
@@ -745,6 +866,52 @@ export async function attachClaimItems(queryDB: QueryDB, rows: any[]): Promise<a
 
 // ---- routes ----
 
+// ---- the rules people read before claiming (Bill Claim → (i) Rules) ----
+
+/** A fingerprint of everything the rules sheet says: the policy and every active category. */
+async function rulesHash(queryDB: QueryDB): Promise<string> {
+  const policy = await loadPolicy(queryDB);
+  const cats = (await loadCategories(queryDB))
+    .filter((c) => c.is_active)
+    .map((c) => [c.name, c.max_per_bill, c.daily_limit, c.monthly_limit, c.receipt_required, c.designation_limits]);
+  return createHash("sha256").update(JSON.stringify({ policy, cats })).digest("hex");
+}
+
+export interface RulesVersion {
+  id: number;
+  no: number;
+  at: string | null;
+  changed_by: string | null;
+  summary: string | null;
+}
+
+/** The current rules version — a new one is opened the first time the rules are seen changed. */
+export async function currentRulesVersion(queryDB: QueryDB): Promise<RulesVersion> {
+  const company = activeCompanyId();
+  const hash = await rulesHash(queryDB);
+  const last: any = ((await queryDB("SELECT * FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id DESC LIMIT 1", [company])) || [])[0];
+  if (!last || last.rules_hash !== hash) {
+    // Who changed it: the latest Change History entry, if there is one.
+    const h: any = last ? ((await queryDB("SELECT actor_name, target_name FROM bill_claim_policy_history WHERE company_ref = ? AND action <> 'denied' ORDER BY id DESC LIMIT 1", [company]).catch(() => [])) || [])[0] : null;
+    await queryDB("INSERT INTO bill_claim_rule_versions (company_ref, rules_hash, changed_by, summary, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())", [
+      company,
+      hash,
+      h?.actor_name || null,
+      h?.target_name ? String(h.target_name).slice(0, 255) : last ? "Rules changed" : "First version"
+    ]);
+  }
+  const rows: any[] = (await queryDB("SELECT * FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id ASC", [company])) || [];
+  const cur = rows[rows.length - 1];
+  return { id: Number(cur.id), no: rows.length, at: cur.created_at ? new Date(cur.created_at + (String(cur.created_at).endsWith("Z") ? "" : "Z")).toISOString() : null, changed_by: cur.changed_by || null, summary: cur.summary || null };
+}
+
+/** Has this person confirmed the current rules? (Their own claims need it.) */
+export async function hasReadCurrentRules(queryDB: QueryDB, userId: number): Promise<boolean> {
+  const v = await currentRulesVersion(queryDB);
+  const row = ((await queryDB("SELECT id FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND version_id = ? AND action = 'confirm' LIMIT 1", [activeCompanyId(), userId, v.id])) || [])[0];
+  return !!row;
+}
+
 export function registerBillClaimPolicyRoutes(
   app: Express,
   deps: {
@@ -752,10 +919,11 @@ export function registerBillClaimPolicyRoutes(
     requireBillClaimAccess: any;
     queryDB: QueryDB;
     getAdminModules: (userId: number) => Promise<string[]>;
+    hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
     todayInDhaka: () => string;
   }
 ) {
-  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, todayInDhaka } = deps;
+  const { authenticateToken, requireBillClaimAccess, queryDB, getAdminModules, hasModuleLayer, todayInDhaka } = deps;
 
   // Viewing: Superadmin and the Bill Claim (conveyance) module. Changing: Superadmin.
   const canView = async (req: any) => req.user?.role === "superadmin" || (await getAdminModules(req.user.id)).includes("bill_claim");
@@ -763,6 +931,17 @@ export function registerBillClaimPolicyRoutes(
     try {
       if (await canView(req)) return next();
       res.status(403).json({ error: "You don't have access to Bill Claim Policy." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+  // Who has read the rules (its own page): the page's viewers who also have
+  // the Bill Claim layer "rules_readers" (on unless layers were saved without it).
+  const canSeeReaders = async (req: any) => req.user?.role === "superadmin" || ((await canView(req)) && (await hasModuleLayer(req.user, "bill_claim", "rules_readers")));
+  const requireReaders = async (req: any, res: any, next: any) => {
+    try {
+      if (await canSeeReaders(req)) return next();
+      res.status(403).json({ error: "You don't have access to who has read the Bill Claim rules." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -784,7 +963,8 @@ export function registerBillClaimPolicyRoutes(
         defs: POLICY_DEFS,
         values: await loadPolicy(queryDB),
         categories: await loadCategories(queryDB),
-        can_edit: req.user.role === "superadmin"
+        can_edit: req.user.role === "superadmin",
+        can_see_readers: await canSeeReaders(req)
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -829,8 +1009,19 @@ export function registerBillClaimPolicyRoutes(
     if (!name) return { error: "Enter the category name." };
     const money = (x: any) => (x === "" || x == null ? null : Number(x));
     const maxPer = money(b.max_per_bill);
+    const daily = money(b.daily_limit);
     const monthly = money(b.monthly_limit);
-    if ((maxPer != null && !(maxPer > 0)) || (monthly != null && !(monthly > 0))) return { error: "Limits must be more than 0, or left blank." };
+    const bad = (x: number | null) => x != null && !(x > 0);
+    if (bad(maxPer) || bad(daily) || bad(monthly)) return { error: "Limits must be more than 0, or left blank." };
+    const byDesignation = parseDesignationLimits(b.designation_limits);
+    const seen = new Set<string>();
+    for (const d of byDesignation) {
+      const k = d.designation_id != null ? `#${d.designation_id}` : d.designation.toLowerCase();
+      if (seen.has(k)) return { error: `${d.designation} is listed twice — keep one row per designation.` };
+      seen.add(k);
+      if (bad(d.max_per_bill) || bad(d.daily_limit) || bad(d.monthly_limit)) return { error: `${d.designation}: limits must be more than 0, or left blank.` };
+      if (d.max_per_bill == null && d.daily_limit == null && d.monthly_limit == null) return { error: `${d.designation}: give at least one limit, or remove the row.` };
+    }
     return {
       v: [
         name,
@@ -839,7 +1030,9 @@ export function registerBillClaimPolicyRoutes(
         Number(b.sort_order) || 0,
         maxPer,
         monthly,
-        b.receipt_required ? 1 : 0
+        b.receipt_required ? 1 : 0,
+        daily,
+        byDesignation.length ? JSON.stringify(byDesignation) : null
       ]
     };
   };
@@ -856,7 +1049,7 @@ export function registerBillClaimPolicyRoutes(
         r.v[3] = (await loadCategories(queryDB)).reduce((m, c) => Math.max(m, c.sort_order), 0) + 1;
       }
       const result = await queryDB(
-        "INSERT INTO bill_claim_categories (name, description, is_active, sort_order, max_per_bill, monthly_limit, receipt_required) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO bill_claim_categories (name, description, is_active, sort_order, max_per_bill, monthly_limit, receipt_required, daily_limit, designation_limits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         r.v
       );
       const created = (await loadCategories(queryDB)).find((c) => c.id === Number(result.insertId));
@@ -884,7 +1077,7 @@ export function registerBillClaimPolicyRoutes(
       if (req.body?.sort_order === undefined) r.v[3] = current.sort_order;
       if (await nameTaken(r.v[0], id)) return res.status(409).json({ error: "A category with this name already exists." });
       await queryDB(
-        "UPDATE bill_claim_categories SET name = ?, description = ?, is_active = ?, sort_order = ?, max_per_bill = ?, monthly_limit = ?, receipt_required = ? WHERE id = ?",
+        "UPDATE bill_claim_categories SET name = ?, description = ?, is_active = ?, sort_order = ?, max_per_bill = ?, monthly_limit = ?, receipt_required = ?, daily_limit = ?, designation_limits = ? WHERE id = ?",
         [...r.v, id]
       );
       const updated = (await loadCategories(queryDB)).find((c) => c.id === id);
@@ -983,6 +1176,121 @@ export function registerBillClaimPolicyRoutes(
     }
   });
 
+  // ---- (i) Rules: read before the first claim, and again after a change ----
+  const utc = (v: any) => (v ? new Date(String(v).replace(" ", "T") + (String(v).endsWith("Z") ? "" : "Z")).toISOString() : null);
+  const myReading = async (userId: number) => {
+    const version = await currentRulesVersion(queryDB);
+    const rows: any[] =
+      (await queryDB("SELECT version_id, created_at FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND action = 'confirm' ORDER BY id DESC", [activeCompanyId(), userId])) || [];
+    const current = rows.find((r) => Number(r.version_id) === version.id);
+    return { version, confirmed_at: current ? utc(current.created_at) : null, confirmed_older: !current && rows.length > 0, last_confirmed_at: rows[0] ? utc(rows[0].created_at) : null };
+  };
+  app.get("/api/bill-claim-rules/mine", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
+    try {
+      res.json(await myReading(Number(req.user.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // { action: 'open' | 'confirm', device } — a confirm counts for the current rules only.
+  app.post("/api/bill-claim-rules/read", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
+    try {
+      const action = req.body?.action === "confirm" ? "confirm" : "open";
+      const version = await currentRulesVersion(queryDB);
+      if (action === "confirm" && Number(req.body?.version_id) && Number(req.body.version_id) !== version.id) {
+        return res.status(409).json({ error: "The rules changed while you were reading — read the new ones and confirm again." });
+      }
+      const device = String(req.body?.device || "").trim().slice(0, 60) || null;
+      // One "open" a person a version is enough; every confirm is kept.
+      const already =
+        action === "open"
+          ? ((await queryDB("SELECT id FROM bill_claim_rule_reads WHERE company_ref = ? AND user_id = ? AND version_id = ? AND action = 'open' AND created_at > UTC_TIMESTAMP() - INTERVAL 30 MINUTE LIMIT 1", [activeCompanyId(), req.user.id, version.id])) || [])[0]
+          : null;
+      if (!already) {
+        await queryDB("INSERT INTO bill_claim_rule_reads (company_ref, user_id, version_id, action, device, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())", [
+          activeCompanyId(),
+          req.user.id,
+          version.id,
+          action,
+          device,
+          actorFrom(req).ip
+        ]);
+      }
+      res.json(await myReading(Number(req.user.id)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // Bill Claim Policy → Who has read the rules: everyone who can file a Bill
+  // Claim (the Bill Claim switch, the Bill Claim module, or Superadmin), and the log.
+  const claimers = async () => {
+    const users: any[] = (await queryDB("SELECT id, name, role, can_view_bill_claims FROM users WHERE COALESCE(is_onboarding, 0) = 0", []).catch(() => queryDB("SELECT id, name, role, can_view_bill_claims FROM users", []))) || [];
+    const mod: any[] = (await queryDB("SELECT DISTINCT user_id FROM admin_module_permissions WHERE module_key = 'bill_claim' AND company_id = ?", [activeCompanyId()]).catch(() => [])) || [];
+    const withModule = new Set(mod.map((m) => Number(m.user_id)));
+    return users.filter((u) => u.role === "superadmin" || !!Number(u.can_view_bill_claims) || withModule.has(Number(u.id)));
+  };
+  app.get("/api/bill-claim-rules/readers", authenticateToken, requireReaders, async (_req: any, res) => {
+    try {
+      const version = await currentRulesVersion(queryDB);
+      const versions: any[] = (await queryDB("SELECT id FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id ASC", [activeCompanyId()])) || [];
+      const noOf = new Map<number, number>(versions.map((v, i) => [Number(v.id), i + 1]));
+      const people = await claimers();
+      const reads: any[] = (await queryDB("SELECT * FROM bill_claim_rule_reads WHERE company_ref = ? ORDER BY id ASC", [activeCompanyId()])) || [];
+      const emps: any[] = (await queryDB("SELECT user_id, employee_id, designation, department FROM all_employees WHERE user_id IS NOT NULL ORDER BY is_active ASC", []).catch(() => [])) || [];
+      const empOf = new Map<number, any>(emps.map((e) => [Number(e.user_id), e]));
+      const names = new Map<number, string>(((await queryDB("SELECT id, name FROM users", [])) || []).map((u: any) => [Number(u.id), u.name]));
+      const rows = people.map((u: any) => {
+        const mine = reads.filter((r) => Number(r.user_id) === Number(u.id));
+        const confirms = mine.filter((r) => r.action === "confirm");
+        const cur = confirms.filter((r) => Number(r.version_id) === version.id).pop();
+        const last = confirms[confirms.length - 1];
+        const openedNow = mine.some((r) => Number(r.version_id) === version.id);
+        const e = empOf.get(Number(u.id));
+        return {
+          user_id: Number(u.id),
+          name: u.name,
+          employee_code: e?.employee_id || null,
+          designation: e?.designation || null,
+          department: e?.department || null,
+          status: cur ? "read" : last ? "old" : openedNow || mine.length ? "opened" : "never",
+          confirmed_at: utc((cur || last)?.created_at),
+          confirmed_version: (cur || last) ? noOf.get(Number((cur || last).version_id)) || null : null,
+          device: (cur || last || mine[mine.length - 1])?.device || null,
+          opens: mine.filter((r) => r.action === "open").length
+        };
+      });
+      const log = reads
+        .slice(-200)
+        .reverse()
+        .map((r) => ({ at: utc(r.created_at), name: names.get(Number(r.user_id)) || "Unknown", action: r.action, version: noOf.get(Number(r.version_id)) || null, device: r.device || null }));
+      const changes = (await queryDB("SELECT id, changed_by, summary, created_at FROM bill_claim_rule_versions WHERE company_ref = ? ORDER BY id DESC LIMIT 20", [activeCompanyId()])) || [];
+      res.json({
+        version,
+        people: rows,
+        log,
+        changes: changes.map((c: any) => ({ no: noOf.get(Number(c.id)) || null, at: utc(c.created_at), by: c.changed_by || null, summary: c.summary || null }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  // A push to everyone who hasn't confirmed the current rules.
+  app.post("/api/bill-claim-rules/remind", authenticateToken, requireReaders, async (req: any, res) => {
+    try {
+      const version = await currentRulesVersion(queryDB);
+      const done = new Set<number>(
+        ((await queryDB("SELECT DISTINCT user_id FROM bill_claim_rule_reads WHERE company_ref = ? AND version_id = ? AND action = 'confirm'", [activeCompanyId(), version.id])) || []).map((r: any) => Number(r.user_id))
+      );
+      const to = (await claimers()).map((u: any) => Number(u.id)).filter((id: number) => !done.has(id) && id !== Number(req.user.id));
+      if (to.length) {
+        await sendPushToUserIds(queryDB, to, "Bill Claim rules", "Read the Bill Claim rules and confirm before your next claim — tap (i) Rules on Bill Claim.", { type: "bill_claim_rules" }, Number(req.user.id));
+      }
+      res.json({ success: true, sent: to.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // What the "New Bill Claim" form needs: rules, active categories,
   // allowed date window and the dates already closed for this user.
   app.get("/api/bill-claim-policy/mine", authenticateToken, requireBillClaimAccess, async (req: any, res) => {
@@ -1003,7 +1311,8 @@ export function registerBillClaimPolicyRoutes(
         min_date: win.min,
         max_date: win.max,
         values: policy,
-        categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
+        // With this employee's designation limits in place of the category's.
+        categories: (await categoriesFor(queryDB, req.user.id)).filter((c) => c.is_active),
         locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
         // "One new claim per day": the claim already filed today, if any.
         today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, req.user.id, today) : null

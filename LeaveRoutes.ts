@@ -24,6 +24,8 @@ import type { Express } from "express";
 import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
 import { runsBackgroundJobs } from "./jobRunner";
 import { leaveDayCount } from "./leaveDayCount";
+import { JOINER_KEYS, isProbation, joinerRulesOn, joinerValue, loadJoinerRules, monthsLeftFrom, prorata, type JoinerKey } from "./LeaveJoiner";
+import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 
 import { attachPersonInfo } from "./personInfo";
 // Carry-forward at the year rollover: category (balance key) -> most days that
@@ -52,7 +54,7 @@ interface LeaveRouteDeps {
   // "year_settings"/"workflow_manage" (see LEAVE_MANAGE_LAYER_KEYS in
   // server.ts). Applied to each of Leave Manage's write routes below, one
   // layer per route.
-  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage" | "leave_rules") => any;
+  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage" | "leave_rules" | "joiner_rules") => any;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   createAlert: (...args: any[]) => Promise<any>;
@@ -218,8 +220,17 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>>,
     customValues: Record<string, number>,
     actingUserId: number,
-    carry?: LeaveCarry
+    carry?: LeaveCarry,
+    // A person's FIRST balance / the year rollover: apply the Joiner & Probation rules (LeaveJoiner.ts).
+    joiner = false
   ): Promise<void> {
+    const joinerRules = joiner ? await loadJoinerRules(queryDB) : null;
+    const joinerOn = !!joinerRules && joinerRulesOn(joinerRules);
+    const joinerEmp = new Map<number, any>();
+    if (joinerOn) {
+      for (const e of ((await queryDB("SELECT user_id, joining_date, job_base FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) as any[]) || []) joinerEmp.set(Number(e.user_id), e);
+    }
+    const todayYmd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
     const categoryIdByKey = new Map<string, number>();
     for (const key of Object.keys(customValues)) {
       categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, actingUserId));
@@ -234,17 +245,22 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
     for (const userId of targetIds) {
       const used = await getUsedThisYear(userId);
+      // This person's Casual / Sick / Without Pay days, after the Joiner & Probation rules.
+      const fv: Partial<Record<JoinerKey, number>> = { ...fixedValues };
+      if (joinerOn && joinerRules) {
+        for (const k of JOINER_KEYS) if (fv[k] !== undefined) fv[k] = joinerValue(fv[k] as number, joinerRules[k], joinerEmp.get(userId), todayYmd);
+      }
 
-      if (Object.keys(fixedValues).length > 0) {
+      if (Object.keys(fv).length > 0) {
         const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
         const existing = existingRows[0];
         const nextCasual =
-          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) + carried(userId, "casual_leave") : Number(existing?.casual_leave || 0);
+          fv.casual_leave !== undefined ? Math.max(0, fv.casual_leave - used.casual) + carried(userId, "casual_leave") : Number(existing?.casual_leave || 0);
         const nextSick =
-          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) + carried(userId, "sick_leave") : Number(existing?.sick_leave || 0);
+          fv.sick_leave !== undefined ? Math.max(0, fv.sick_leave - used.sick) + carried(userId, "sick_leave") : Number(existing?.sick_leave || 0);
         const nextLwp =
-          fixedValues.leave_without_pay !== undefined
-            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay) + carried(userId, "leave_without_pay")
+          fv.leave_without_pay !== undefined
+            ? Math.max(0, fv.leave_without_pay - used.without_pay) + carried(userId, "leave_without_pay")
             : Number(existing?.leave_without_pay || 0);
 
         if (existing) {
@@ -289,7 +305,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     carry?: LeaveCarry,
     // Only Casual / Sick / LWP — for accounts that already have a custom
     // category balance set by hand, which mustn't be overwritten.
-    fixedOnly = false
+    fixedOnly = false,
+    joiner = false
   ): Promise<number> {
     const workflows: any = onlyWorkflowId
       ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
@@ -340,7 +357,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (fixedOnly) for (const k of Object.keys(customValues)) delete customValues[k];
       if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
 
-      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number, carry);
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number, carry, joiner);
       appliedCount += targetIds.length;
     }
     return appliedCount;
@@ -530,7 +547,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (!actingUserId) return;
 
       const carry = await loadCarry();
-      await applyAllActiveWorkflows(actingUserId, undefined, undefined, carry || undefined);
+      await applyAllActiveWorkflows(actingUserId, undefined, undefined, carry || undefined, false, true);
       if (carry) await capUntouchedCarryCategories(carry);
       await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = ?", [currentYear, groupId]);
       console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}, group ${groupId}).`);
@@ -579,8 +596,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       for (const id of all) defaultTriedAt.set(id, now);
       const sa: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) || [];
       const actor = sa[0] ? Number(sa[0].id) : null;
-      if (missing.length) await applyAllActiveWorkflows(actor, undefined, missing);
-      if (fixedOnly.length) await applyAllActiveWorkflows(actor, undefined, fixedOnly, undefined, true);
+      if (missing.length) await applyAllActiveWorkflows(actor, undefined, missing, undefined, false, true);
+      if (fixedOnly.length) await applyAllActiveWorkflows(actor, undefined, fixedOnly, undefined, true, true);
       return new Set(all);
     } catch (err: any) {
       console.warn("⚠️ Could not set the default leave balance: " + err.message);
@@ -887,7 +904,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // seeded with, so callers never have to special-case a missing row.
   // Leave rules (Leave Manage layer "leave_rules"): all off by default.
   const DEFAULT_LEAVE_RULES = { min_service_months: 0, gender: "any" as string, accrual_per_month: 0, balance_cap: null as number | null, carry_forward_max: null as number | null, accrual_from: null as string | null };
-  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, count_off_days: true, ...DEFAULT_LEAVE_RULES };
+  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, count_off_days: true, probation_mode: "full" as string, joiner_prorata: false, ...DEFAULT_LEAVE_RULES };
   const numOrNull = (v: any) => (v === null || v === undefined ? null : Number(v));
   async function getLeavePolicy(categoryKey: string) {
     const rows: any = await queryDB("SELECT * FROM leave_category_policies WHERE category_key = ?", [categoryKey]);
@@ -901,6 +918,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted),
       // Weekends/holidays inside a leave come off the balance (default) or not.
       count_off_days: r.count_off_days === undefined || r.count_off_days === null ? true : !!Number(r.count_off_days),
+      probation_mode: ["prorata", "none"].includes(String(r.probation_mode)) ? String(r.probation_mode) : "full",
+      joiner_prorata: !!Number(r.joiner_prorata || 0),
       min_service_months: Number(r.min_service_months) || 0,
       gender: ["female", "male"].includes(String(r.gender)) ? String(r.gender) : "any",
       accrual_per_month: Number(r.accrual_per_month) || 0,
@@ -1036,6 +1055,114 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   });
 
   // POST: credit any completed month that is still owed (also runs by itself).
+  // ---- Joiner & Probation rules (LeaveJoiner.ts; Leave Manage layer "joiner_rules") ----
+  const JOINER_POLICY_KEYS = ["casual", "sick", "without_pay"];
+  app.put("/api/leave-policies/:categoryKey/joiner-rules", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("joiner_rules"), async (req: any, res) => {
+    try {
+      const categoryKey = String(req.params.categoryKey || "").trim();
+      if (!JOINER_POLICY_KEYS.includes(categoryKey)) return res.status(400).json({ error: "These rules are for Casual, Sick and Leave Without Pay." });
+      const mode = ["prorata", "none"].includes(String(req.body?.probation_mode)) ? String(req.body.probation_mode) : "full";
+      const joinerProrata = req.body?.joiner_prorata ? 1 : 0;
+      await queryDB(
+        `INSERT INTO leave_category_policies (category_key, probation_mode, joiner_prorata, updated_by) VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE probation_mode = VALUES(probation_mode), joiner_prorata = VALUES(joiner_prorata), updated_by = VALUES(updated_by)`,
+        [categoryKey, mode, joinerProrata, req.user.id]
+      );
+      res.json(await getLeavePolicy(categoryKey));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The full-year Casual / Sick / Without Pay days a person's Balance Workflows give
+  // (General first, then their Designation's) — what pro-rata starts from.
+  async function workflowFullValues(userId: number): Promise<Partial<Record<JoinerKey, number>>> {
+    const wfs: any[] = (await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1").catch(() => [])) || [];
+    const items: any[] = (await queryDB("SELECT * FROM leave_balance_workflow_items").catch(() => [])) || [];
+    const emp: any = (((await queryDB("SELECT designation FROM all_employees WHERE user_id = ? LIMIT 1", [userId]).catch(() => [])) as any[]) || [])[0];
+    const des = String(emp?.designation || "").trim().toLowerCase();
+    const out: Partial<Record<JoinerKey, number>> = {};
+    wfs.sort((a, b) => (a.scope_type === "general" ? 0 : 1) - (b.scope_type === "general" ? 0 : 1));
+    for (const wf of wfs) {
+      if (wf.scope_type !== "general" && String(wf.designation || "").trim().toLowerCase() !== des) continue;
+      for (const it of items.filter((i) => Number(i.workflow_id) === Number(wf.id))) {
+        if ((JOINER_KEYS as readonly string[]).includes(it.category_key)) out[it.category_key as JoinerKey] = Number(it.balance_days) || 0;
+      }
+    }
+    return out;
+  }
+
+  // Confirmation (Job Base: Probation -> something else): what HR is offered to add.
+  // A Leave Type held back during Probation ("none") is offered its pro-rata share
+  // from the confirmation month, less what was already taken this year; one given
+  // pro-rata during Probation (Sick) keeps what it has, so 0 is offered.
+  app.get("/api/leave-joiner/confirmation-preview", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("joiner_rules"), async (req: any, res) => {
+    try {
+      const empId = Number(req.query.employee_id);
+      const emp: any = (((await queryDB("SELECT id, name, employee_id, user_id, joining_date, job_base FROM all_employees WHERE id = ?", [empId])) as any[]) || [])[0];
+      if (!emp) return res.status(404).json({ error: "Employee not found." });
+      const rules = await loadJoinerRules(queryDB);
+      if (!joinerRulesOn(rules) || !emp.user_id || isProbation(emp)) return res.json({ enabled: false });
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const months = monthsLeftFrom(today, today);
+      const full = await workflowFullValues(Number(emp.user_id));
+      const used = await getUsedThisYear(Number(emp.user_id));
+      const items: any[] = [];
+      for (const k of JOINER_KEYS) {
+        if (k === "leave_without_pay" || rules[k].probation_mode === "full" || full[k] === undefined) continue;
+        const policyKey = k === "casual_leave" ? "casual" : "sick";
+        const current = await getLeaveTypeBalance(Number(emp.user_id), policyKey);
+        const taken = k === "casual_leave" ? used.casual : used.sick;
+        const target = rules[k].probation_mode === "none" ? Math.max(0, prorata(full[k] as number, months) - taken) : current;
+        items.push({
+          category_key: policyKey,
+          label: policyKey === "casual" ? "Casual" : "Sick",
+          full: full[k],
+          months,
+          used: taken,
+          current,
+          add: Math.max(0, Math.round((target - current) * 2) / 2),
+          note: rules[k].probation_mode === "none" ? "" : "already given during Probation"
+        });
+      }
+      res.json({
+        enabled: items.length > 0,
+        employee: { id: Number(emp.id), name: emp.name, employee_id: emp.employee_id, joining_date: emp.joining_date ? String(emp.joining_date).slice(0, 10) : null },
+        confirmation_date: today,
+        months,
+        items
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/leave-joiner/confirmation-apply", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("joiner_rules"), async (req: any, res) => {
+    try {
+      const empId = Number(req.body?.employee_id);
+      const emp: any = (((await queryDB("SELECT id, user_id, job_base FROM all_employees WHERE id = ?", [empId])) as any[]) || [])[0];
+      if (!emp || !emp.user_id) return res.status(404).json({ error: "This employee has no login, so there is no leave balance to change." });
+      if (isProbation(emp)) return res.status(400).json({ error: "This employee is still on Probation." });
+      const items: any[] = Array.isArray(req.body?.items) ? req.body.items : [];
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const done: { category_key: string; added: number }[] = [];
+      for (const it of items) {
+        const key = String(it?.category_key || "");
+        const add = Math.round(Number(it?.add) * 2) / 2;
+        if (!["casual", "sick"].includes(key) || !Number.isFinite(add) || add < 0 || add > 366) return res.status(400).json({ error: "Each amount must be 0 or more days." });
+        if (add === 0) continue;
+        const before = await getLeaveTypeBalance(Number(emp.user_id), key);
+        await adjustLeaveTypeBalance(Number(emp.user_id), key, add);
+        const field = `leave_${key}_balance`;
+        await recordEmployeeEditHistory(queryDB, { employeeId: empId, before: { [field]: before }, after: { [field]: before + add }, trackedFields: [field], actionBy: req.user?.id ?? null, today }).catch(() => {});
+        done.push({ category_key: key, added: add });
+      }
+      res.json({ success: true, added: done });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/leave-accrual/run", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("leave_rules"), async (_req: any, res) => {
     try {
       res.json(await runLeaveAccrual());
@@ -1435,6 +1562,11 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         });
       }
 
+      // Joiner & Probation rules: a Leave Type set to "none" during Probation can't be applied for.
+      if (policy.probation_mode === "none") {
+        const jb: any = await queryDB("SELECT job_base FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+        if (isProbation(jb[0])) return res.status(400).json({ error: `${await getLeaveTypeLabel(leave_type)} isn't available during Probation.` });
+      }
       // Leave rules: who may use this Leave Type (gender, months of service).
       if (policy.gender !== "any" || policy.min_service_months > 0) {
         const empRows: any = await queryDB("SELECT gender, joining_date FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);

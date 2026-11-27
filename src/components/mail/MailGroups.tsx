@@ -16,7 +16,8 @@ import { Users, Plus, Pencil, Trash2, X, Loader2, Search, Lock, Globe, UserCheck
 import { apiUrl } from '../../lib/api';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
-import { useKeyboardInset } from '../../lib/useKeyboardInset';
+import { scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
+import { SHEET_TOP_PAD, useSheetKeyboardPad, stickySearchCls } from './MailPopup';
 import { DirectoryPerson, MyGroup, forgetMailGroups, loadDirectory, mailFetch } from '../../lib/mailApi';
 
 const inputCls = 'w-full text-sm px-3 py-2 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-sky-200 focus:outline-none';
@@ -130,12 +131,12 @@ const PeoplePicker: React.FC<{ token: string; value: string[]; onChange: (v: str
 
 // The house popup: liquid-glass card over a dimmed page.
 const Sheet: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => {
-  const keyboardInset = useKeyboardInset();
+  const keyboardPad = useSheetKeyboardPad();
   useBackButtonClose(true, onClose);
   return (
-    <div data-kb-self="" className="fixed inset-0 z-[95] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-[92vh] flex`} onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto text-left">
+    <div data-kb-self="" className={`fixed inset-0 z-[95] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4 ${SHEET_TOP_PAD}`} style={keyboardPad} onClick={onClose}>
+      <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} max-h-full sm:max-h-[92vh] flex`} onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto text-left" onFocusCapture={scrollFocusedFieldIntoView}>
           <div className="flex items-center justify-between gap-2 mb-4">
             <h3 className="text-base font-bold text-slate-900">{title}</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close">
@@ -408,9 +409,11 @@ const GroupMembers: React.FC<{ token: string; group: CentralGroupRow; onClose: (
   return (
     <Sheet title={`${group.name} — who it reaches`} onClose={onClose}>
       <div className="text-xs text-slate-500 mb-2">{group.email}</div>
-      <div className="relative mb-2">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search members" className={`${inputCls} pl-9`} />
+      <div className={stickySearchCls}>
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search members" className={`${inputCls} pl-9`} />
+        </div>
       </div>
       {error && <div className="mb-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {rows === null ? (
@@ -418,7 +421,7 @@ const GroupMembers: React.FC<{ token: string; group: CentralGroupRow; onClose: (
       ) : (
         <>
           <div className="text-[11px] text-slate-500 mb-1 px-1">{rows.length} {rows.length === 1 ? 'person' : 'people'}</div>
-          <div className="liquid-glass-inset rounded-[24px] divide-y divide-slate-200/60 max-h-[55vh] overflow-y-auto">
+          <div className="liquid-glass-inset rounded-[24px] divide-y divide-slate-200/60">
             {!shown.length && <div className="px-4 py-6 text-center text-sm text-slate-500">No one.</div>}
             {shown.map((r) => (
               <div key={r.email} className="px-3 py-2">

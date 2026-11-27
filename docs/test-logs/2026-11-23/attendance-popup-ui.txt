@@ -1,0 +1,18 @@
+PASS In: popup titled "In Time"
+PASS In: status on the map says inside the area — You're inside Head Office's area · 15 m
+PASS In: location button on the map
+PASS In: no +/- zoom buttons
+PASS In: no raw coordinates
+PASS In: Remarks (optional)
+PASS In: Cancel and Submit side by side, same size
+PASS In: Submit enabled
+PASS In: location button refreshes and stays inside
+PASS In: Submit records the In Time
+PASS Out: popup titled "Out Time"
+PASS Out (outside every project): status says it goes for approval — 36.7 km from Gulshan Tower — goes for approval
+PASS Out: label becomes Reason (needed)
+PASS Out: Submit off until a reason is written
+PASS Out: Submit on with a reason
+PASS Out: sent for approval as an off-site Out
+PASS no page errors []
+ALL PASS

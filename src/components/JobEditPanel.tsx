@@ -11,6 +11,7 @@ import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, lat
 import { Entry, BudgetItem, MprNumber, PendingJobEdit } from '../types';
 import { Spinner } from './Spinner';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
+import { EntryForField } from './EntryForField';
 
 // Pulls just the leading numeric portion out of a free-text Qty string imported from
 // Excel (e.g. "120.50 pcs" -> 120.5) — mirrors the server's parseQtyNumber (and the
@@ -243,7 +244,7 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
   // the whole page scroll, exactly as before.
   if (loading) {
     return (
-      <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 flex items-center justify-center gap-2 text-slate-500 text-sm min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
+      <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 flex items-center justify-center gap-2 text-slate-500 text-sm min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-9rem)] md:rounded-2xl md:shadow-sm">
         <Spinner size={16} /> Loading Jobs…
       </div>
     );
@@ -254,7 +255,7 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
     // Budget / Jobs / Job Entry Details look); the md: overrides already
     // here flatten it back to the original edge-to-edge plain panel on
     // desktop, unchanged.
-    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
+    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:min-h-0 md:h-[calc(100vh-9rem)] md:rounded-2xl md:shadow-sm">
       <div className="px-6 py-4 border-b border-white/40 md:border-slate-200 flex items-center justify-end md:justify-between gap-2.5 shrink-0">
         {/* Hidden on mobile — the mobile header now shows this page's own
             "Job Edit" title in the logo's place (see headerPageTitle.ts),
@@ -1674,6 +1675,8 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   const selected = budgetProjectOptions.find((o) => o.key === selectedKey) || null;
 
   const [jobName, setJobName] = useState('');
+  // "For" on a By-home-project Project (EntryForField.tsx).
+  const [forProjectId, setForProjectId] = useState('');
   const [jobDuration, setJobDuration] = useState('');
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -1914,6 +1917,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
         body: JSON.stringify({
           budget_id: selected.budget_id,
           project_id: selected.project_id,
+          ...(forProjectId ? { for_project_id: Number(forProjectId) } : {}),
           job_name: jobName.trim(),
           job_duration: jobDuration.trim(),
           items: itemsPayload,
@@ -1956,6 +1960,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
             ))}
           </select>
         </div>
+        {selected && <EntryForField token={token} projectId={String(selected.project_id)} value={forProjectId} onChange={setForProjectId} />}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Job Name</label>

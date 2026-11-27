@@ -54,7 +54,7 @@ const isWork = (d) => new Date(`${d}T00:00:00`).getDay() !== 5 && !HOLIDAYS[d];
 // ---------------------------------------------------------------------------
 at('2024-10', 'Setup by Superadmin (once)');
 const SA = (await login('admin@credence.test', 'AdminPass123')).body.token;
-const mkUser = async (name, email, role) => (await step(`Account: ${name} (${role})`, api(SA, 'POST', '/api/users', { name, email, password: 'Pass12345', role }))).body.id;
+const mkUser = async (name, email, role) => (await step(`Account: ${name} (${role})`, api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name, email, password: 'Pass12345', role }))).body.id;
 const nasrinId = await mkUser('Nasrin Sultana (HR Manager)', 'nasrin.hr@credence.test', 'admin');
 const HR_MODULES = ['employees', 'departments', 'branches', 'holidays', 'users', 'attendance', 'attendance_reports', 'office_attendance', 'leave_applications', 'recruitment', 'hr_operations', 'payroll', 'performance_management', 'grievance_disciplinary', 'exit_offboarding', 'document_vault', 'asset_management', 'vehicle_management', 'mobile_bill', 'notices', 'hr_analytics', 'task_management', 'target_reports', 'duty_roster', 'approvals', 'bill_claim', 'claims', 'admin_dashboard'];
 await step('Nasrin gets the HR modules', api(SA, 'PUT', `/api/users/${nasrinId}/module-permissions`, { modules: HR_MODULES }));

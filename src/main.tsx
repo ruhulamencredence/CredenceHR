@@ -1,10 +1,8 @@
 import './lib/polyfills.ts';
 import {StrictMode, Suspense, lazy, useCallback, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import App, { dashboardCodeReady } from './App.tsx';
-import ChatStandalone from './ChatStandalone.tsx';
-import PrivacyPolicy from './components/PrivacyPolicy.tsx';
-import VerifyPage from './components/VerifyPage.tsx';
+import { AuthScreen } from './components/AuthScreen.tsx';
+import { clearScreenCache } from './lib/screenCache.ts';
 import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
 import type { User } from './types.ts';
 import { applyBackgroundTheme, applyHeaderGlow, getSavedBackgroundTheme, getSavedHeaderGlow } from './lib/backgroundTheme.ts';
@@ -12,9 +10,66 @@ import { Capacitor } from '@capacitor/core';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
 import { applyColorMode, getSavedColorMode } from './lib/colorMode.ts';
-import { installChunkReload } from './lib/chunkReload.ts';
+import { installChunkReload, retryImport } from './lib/chunkReload.ts';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
+import { BootVeil, LoaderHold } from './components/BootVeil.tsx';
 import { BootIntroAnimation, shouldShowBootIntro } from './components/BootIntroAnimation.tsx';
+import { markBootIntroPlaying } from './lib/bootIntro';
+
+// The whole app (App.tsx: sidebar, chat, calls…) is its own download. A
+// visitor who isn't signed in on the website gets only the sign-in screen
+// first (WebSignIn below) — the app's code follows once they start typing
+// or sign in — so the sign-in page opens fast (PageSpeed). Signed in, or in
+// the Android / iOS app, it starts downloading at once, as before.
+const loadApp = (() => {
+  let p: Promise<typeof import('./App.tsx')> | null = null;
+  return () => (p ||= retryImport(() => import('./App.tsx'))().catch((err) => {
+    p = null;
+    throw err;
+  }));
+})();
+const App = lazy(loadApp);
+const ChatStandalone = lazy(retryImport(() => import('./ChatStandalone.tsx')));
+const PrivacyPolicy = lazy(retryImport(() => import('./components/PrivacyPolicy.tsx')));
+const VerifyPage = lazy(retryImport(() => import('./components/VerifyPage.tsx')));
+const hasSession = () => {
+  try {
+    return !!localStorage.getItem('mpr_token');
+  } catch {
+    return false;
+  }
+};
+
+// Website, not signed in: only the sign-in screen. On success it does what
+// App.tsx's own sign-in does (save the session, nothing from an earlier
+// sign-in shown), waits for the app's code, then hands over to <App freshLogin>.
+function WebSignIn({ onSignedIn }: { onSignedIn: () => void }) {
+  useEffect(() => {
+    // Typing / tapping on the page: fetch the app meanwhile.
+    const warm = () => void loadApp().catch(() => undefined);
+    const evs = ['pointerdown', 'keydown', 'focusin'] as const;
+    evs.forEach((e) => window.addEventListener(e, warm, { once: true, passive: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, warm));
+  }, []);
+  return (
+    <AuthScreen
+      onLoginSuccess={(newToken: string, newUser: User) => {
+        clearScreenCache();
+        localStorage.setItem('mpr_token', newToken);
+        localStorage.setItem('mpr_user', JSON.stringify(newUser));
+        // A new joiner's temporary login opens only My Onboarding.
+        if (newUser?.is_onboarding) {
+          window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+          return;
+        }
+        void loadApp()
+          .then((m) => m.dashboardCodeReady(1500))
+          .catch(() => undefined)
+          .then(onSignedIn);
+      }}
+    />
+  );
+}
 
 // Multi-company: every /api call carries the picked company (src/lib/company.ts).
 installCompanyHeader();
@@ -31,6 +86,22 @@ try {
   if (Capacitor.isNativePlatform() || standalone) document.documentElement.dataset.appShell = '1';
 } catch {
   // not available — website look
+}
+// The Android app: lighter "glass" so popups and sheets scroll smoothly. A
+// frosted blur repaints everything behind it on every frame, and the Android
+// WebView does that on the CPU on many phones (a measured More sheet: 30 fps
+// with the full blur, 53 without). index.css html[data-lite-glass] makes the
+// blurs smaller (the same look, lighter); a low-end phone (4 cores or fewer,
+// or 4 GB of memory or less) gets them smaller still.
+// The website and the iPhone app keep the full look.
+try {
+  if (Capacitor.getPlatform() === 'android') {
+    const cores = Number(navigator.hardwareConcurrency || 8);
+    const memory = Number((navigator as any).deviceMemory || 8);
+    document.documentElement.dataset.liteGlass = cores <= 4 || memory <= 4 ? 'low' : '1';
+  }
+} catch {
+  // not available — full look
 }
 applyBackgroundTheme(getSavedBackgroundTheme());
 // Light / Dark / Like this device (colorMode.ts; index.html already set it before the first paint).
@@ -107,12 +178,17 @@ const bootIntroDue = () => {
       // storage unavailable — play it
     }
   }
+  // Hide the app under it from the very first render (lib/bootIntro.ts).
+  if (bootIntroDecided) markBootIntroPlaying();
   return bootIntroDecided;
 };
 function Root() {
   const [intro, setIntro] = useState(bootIntroDue);
   const endIntro = useCallback(() => setIntro(false), []);
   const [onb, setOnb] = useState(onboardingSession);
+  // Website without a session: the light sign-in screen until signed in.
+  const [signedIn, setSignedIn] = useState(() => Capacitor.isNativePlatform() || hasSession());
+  const [freshLogin, setFreshLogin] = useState(false);
   useEffect(() => {
     const check = () => setOnb(onboardingSession());
     window.addEventListener(SESSION_CHANGED_EVENT, check);
@@ -124,7 +200,21 @@ function Root() {
   }, []);
   return (
     <>
-      {onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />}
+      {onb ? (
+        <OnboardingShell token={onb.token} user={onb.user} />
+      ) : signedIn ? (
+        <Suspense fallback={<BootVeil />}>
+          <App freshLogin={freshLogin} />
+        </Suspense>
+      ) : (
+        <WebSignIn
+          onSignedIn={() => {
+            setFreshLogin(true);
+            setSignedIn(true);
+          }}
+        />
+      )}
+      {signedIn && !onb && <LoaderHold />}
       {intro && <BootIntroAnimation onDone={endIntro} />}
     </>
   );
@@ -148,12 +238,50 @@ const render = () =>
           <Suspense fallback={null}>
             <SsoConsume token={ssoToken} />
           </Suspense>
-        ) : isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
+        ) : isPrivacyPolicy || isVerify || isStandaloneChat ? (
+          <Suspense fallback={null}>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : <ChatStandalone />}</Suspense>
+        ) : (
+          <Root />
+        )}
       </AppErrorBoundary>
     </StrictMode>,
   );
+// The stylesheet loads without holding up index.html's first frame
+// (vite.config.ts "non-blocking-app-css"): React draws only once it is in, so
+// nothing shows unstyled. No such link in development (Vite injects the CSS).
+const cssReady = (): Promise<void> => {
+  const link = document.querySelector<HTMLLinkElement>('link[data-app-css]');
+  if (!link || link.sheet) return Promise.resolve();
+  return new Promise((done) => {
+    const go = () => done();
+    link.addEventListener('load', go, { once: true });
+    link.addEventListener('error', go, { once: true });
+    window.setTimeout(go, 10_000);
+  });
+};
+// Website sign-in: index.html already shows the sign-in page's picture
+// (#web-signin-shell). React takes over once that picture is on screen, so
+// the picture people see first stays the page's "largest paint" (PageSpeed)
+// instead of React drawing a second copy of it later. At most 3 s.
+const shellPainted = (): Promise<void> => {
+  const img = document.querySelector<HTMLImageElement>('html[data-web-signin] #web-signin-shell .ws-hero');
+  if (!img) return Promise.resolve();
+  const loaded = img.complete
+    ? Promise.resolve()
+    : new Promise<void>((done) => {
+        img.addEventListener('load', () => done(), { once: true });
+        img.addEventListener('error', () => done(), { once: true });
+      });
+  const painted = loaded.then(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  return Promise.race([painted, new Promise<void>((done) => window.setTimeout(done, 3000))]);
+};
 // Signed in: keep index.html's "Loading…" screen up until the Dashboard's
 // code is ready (from the phone's cache that is a fraction of a second; never
 // more than 1.5 s), then draw — no skeleton flash on every open.
-if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession()) void dashboardCodeReady(1500).then(render);
-else render();
+if (!ssoToken && !isPrivacyPolicy && !isVerify && !isStandaloneChat && !onboardingSession() && (Capacitor.isNativePlatform() || hasSession()))
+  void loadApp()
+    .then((m) => m.dashboardCodeReady(1500))
+    .catch(() => undefined)
+    .then(cssReady)
+    .then(render);
+else void Promise.all([cssReady(), shellPainted()]).then(render);

@@ -6,7 +6,7 @@
 // MPR Numbers, Budgets (Excel import, publish, submit, approve), Rate File, Delivery Date conditions and Jobs routes,
 // moved out of server.ts unchanged. The shared helpers they use are passed in by startServer().
 
-import { isJobSubmitted, isProjectLocked, jobProjectId, onTeam, projectsToLock, teamScopeSql, unlockBudgetSubmission } from "./PepmTeam";
+import { entryShareKey, isJobSubmitted, isProjectLocked, jobEntryInfo, onTeam, projectsToLock, shareKeySql, teamScopeSql, unlockBudgetSubmission } from "./PepmTeam";
 import { activeGroupId } from "./companyContext";
 import { DeliveryConditionType } from "./deliveryDateConditions";
 import { addDaysToDateStr } from "./deliveryDateConditions";
@@ -117,11 +117,16 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
               SELECT 1 FROM projects p
                 JOIN budget_items bi ON bi.budget_id = b.id AND LOWER(TRIM(bi.project_name)) = LOWER(TRIM(p.project_name))
                 JOIN user_project_permissions upp ON upp.project_id = p.id AND upp.user_id = ?
-               WHERE NOT EXISTS (SELECT 1 FROM budget_project_locks l2 WHERE l2.budget_id = b.id AND l2.project_id = p.id))
+               WHERE NOT EXISTS (SELECT 1 FROM budget_project_locks l2 WHERE l2.budget_id = b.id AND l2.project_id = p.id
+                                   AND (l2.share_key = '' OR l2.share_key = CONCAT('u:', upp.user_id)
+                                        OR l2.share_key IN (SELECT CONCAT('f:', hu.project_id) FROM user_project_permissions hu
+                                                              JOIN projects hp ON hp.id = hu.project_id
+                                                             WHERE hu.user_id = upp.user_id AND COALESCE(hp.entry_scope, 'team') <> 'home'))))
             AND NOT EXISTS (
-              SELECT 1 FROM entries e
+              SELECT 1 FROM entries e JOIN projects ep ON ep.id = e.project_id
                WHERE e.budget_id = b.id AND e.created_by = ? AND e.deleted_at IS NULL
-                 AND NOT EXISTS (SELECT 1 FROM budget_project_locks l3 WHERE l3.budget_id = b.id AND l3.project_id = e.project_id))
+                 AND NOT EXISTS (SELECT 1 FROM budget_project_locks l3 WHERE l3.budget_id = b.id AND l3.project_id = e.project_id
+                                   AND l3.share_key = ${shareKeySql("e", "ep")}))
             AND (EXISTS (SELECT 1 FROM user_project_permissions u2 JOIN projects p2 ON p2.id = u2.project_id
                            JOIN budget_items bi2 ON bi2.budget_id = b.id AND LOWER(TRIM(bi2.project_name)) = LOWER(TRIM(p2.project_name))
                           WHERE u2.user_id = ?)
@@ -222,13 +227,16 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       // Form show/cap the remaining Requisitioned Qty available for each item
       // (req_qty is the item's total from the imported Excel; consumption is
       // tracked per Project team, per the Requisitioned Qty splitting feature).
-      const team = teamScopeSql("e", req.user);
+      // The item's Qty is one total for the Project, so this counts every
+      // entry of the caller's Projects, whatever their Entry sharing — the same
+      // total the server checks against (a number only, no one's entries).
       const items = await queryDB(
         `SELECT bi.*,
            (SELECT COALESCE(SUM(e.requisitioned_qty), 0) FROM entries e
-              WHERE e.budget_item_id = bi.id AND ${team.sql} AND e.deleted_at IS NULL) AS requisitioned_by_me
+              WHERE e.budget_item_id = bi.id AND e.deleted_at IS NULL
+                AND (e.project_id IN (SELECT upp.project_id FROM user_project_permissions upp WHERE upp.user_id = ?) OR e.created_by = ?)) AS requisitioned_by_me
          FROM budget_items bi WHERE bi.budget_id = ? ORDER BY bi.id ASC`,
-        [...team.params, req.params.id]
+        [req.user.id, req.user.id, req.params.id]
       );
       res.json(items);
     } catch (err: any) {
@@ -267,21 +275,23 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
       if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
 
-      const projectIds = await projectsToLock(queryDB, req.user, budgetId);
-      const open: number[] = [];
-      for (const pid of projectIds) if (!(await isProjectLocked(queryDB, budgetId, pid))) open.push(pid);
-      if (projectIds.length > 0 && open.length === 0) {
+      const toLock = await projectsToLock(queryDB, req.user, budgetId);
+      const open: { projectId: number; shareKey: string }[] = [];
+      for (const l of toLock) if (!(await isProjectLocked(queryDB, budgetId, l.projectId, l.shareKey))) open.push(l);
+      if (toLock.length > 0 && open.length === 0) {
         return res.json({ success: true, already_submitted: true });
       }
 
       // Block submitting an empty Budget as "finished" — the team must have at
-      // least one entry under this Budget in those Projects first. Enforced here
-      // too (not just a disabled button in the UI) so it can't be bypassed via a
-      // direct API call.
+      // least one entry under this Budget in those Projects (their share of
+      // them, PepmTeam.ts) first. Enforced here too (not just a disabled
+      // button in the UI) so it can't be bypassed via a direct API call.
       const teamEntryRows = open.length
         ? await queryDB(
-            `SELECT id FROM entries WHERE budget_id = ? AND deleted_at IS NULL AND project_id IN (${open.map(() => "?").join(",")}) LIMIT 1`,
-            [budgetId, ...open]
+            `SELECT e.id FROM entries e JOIN projects p ON p.id = e.project_id
+              WHERE e.budget_id = ? AND e.deleted_at IS NULL
+                AND (${open.map(() => `(e.project_id = ? AND ${shareKeySql("e", "p")} = ?)`).join(" OR ")}) LIMIT 1`,
+            [budgetId, ...open.flatMap((l) => [l.projectId, l.shareKey])]
           )
         : [];
       if (teamEntryRows.length === 0) {
@@ -291,8 +301,8 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       }
 
       await queryDB("INSERT IGNORE INTO budget_submissions (budget_id, user_id) VALUES (?, ?)", [budgetId, req.user.id]);
-      for (const pid of open) {
-        await queryDB("INSERT IGNORE INTO budget_project_locks (budget_id, project_id, user_id) VALUES (?, ?, ?)", [budgetId, pid, req.user.id]);
+      for (const l of open) {
+        await queryDB("INSERT IGNORE INTO budget_project_locks (budget_id, project_id, user_id, share_key) VALUES (?, ?, ?, ?)", [budgetId, l.projectId, req.user.id, l.shareKey]);
       }
       res.json({ success: true });
     } catch (err: any) {
@@ -309,12 +319,14 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const jobs = await queryDB("SELECT id, budget_id, job_no, created_by FROM jobs WHERE id = ?", [jobId]);
       if (jobs.length === 0) return res.status(404).json({ error: "Job not found" });
       const job = jobs[0];
-      const projectId = await jobProjectId(queryDB, jobId);
+      const info = await jobEntryInfo(queryDB, jobId);
+      const projectId = info.project_id;
       const active = await queryDB("SELECT id FROM entries WHERE job_id = ? AND deleted_at IS NULL LIMIT 1", [jobId]);
-      if (active.length === 0 || !(await onTeam(queryDB, req.user, projectId, job.created_by))) {
+      if (active.length === 0 || !(await onTeam(queryDB, req.user, projectId, info.created_by ?? job.created_by, info.for_project_id))) {
         return res.status(400).json({ error: "You have no entries in this Job to submit." });
       }
-      if ((await isProjectLocked(queryDB, job.budget_id, projectId)) || (await isJobSubmitted(queryDB, jobId))) {
+      const key = await entryShareKey(queryDB, projectId, info.created_by ?? job.created_by, info.for_project_id);
+      if ((await isProjectLocked(queryDB, job.budget_id, projectId, key)) || (await isJobSubmitted(queryDB, jobId))) {
         return res.json({ success: true, already_submitted: true });
       }
       await queryDB("INSERT INTO job_submissions (job_id, budget_id, user_id) VALUES (?, ?, ?)", [jobId, job.budget_id || null, req.user.id]);
@@ -989,6 +1001,67 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const { rows, file_base64, file_name, file_mimetype } = req.body;
       if (!Array.isArray(rows) || rows.length === 0) {
         return res.status(400).json({ error: "No rows found in the uploaded Excel file" });
+      }
+
+      // Project names in the sheet that aren't in Admin Panel -> Projects (a
+      // typo, or a short name) are not created silently any more: the import
+      // stops before saving anything and lists them, with look-alike Projects,
+      // and the Admin picks one for each — or "new" to add it as a Project
+      // (project_map: { "<name as in the sheet>": <project id> | "new" }).
+      const norm = (v: any) => String(v ?? "").trim().toLowerCase();
+      const squash = (v: string) => norm(v).replace(/[^a-z0-9\u0980-\u09ff]/g, "");
+      const allProjects: any[] = (await queryDB("SELECT id, project_name FROM projects")) || [];
+      const byName = new Map<string, any>(allProjects.map((p: any) => [norm(p.project_name), p]));
+      const projectMap: Record<string, any> = req.body.project_map && typeof req.body.project_map === "object" ? req.body.project_map : {};
+      const mapFor = (name: string) => projectMap[name] ?? projectMap[name.trim()] ?? Object.entries(projectMap).find(([k]) => norm(k) === norm(name))?.[1];
+      const unknown = new Map<string, number>();
+      for (const r of rows) {
+        const name = String(r?.project_name ?? "").trim();
+        if (!name) continue;
+        // Same name in another letter case / spacing: the Project's own spelling.
+        if (byName.has(norm(name))) {
+          r.project_name = byName.get(norm(name)).project_name;
+          continue;
+        }
+        const choice = mapFor(name);
+        if (choice === "new") continue;
+        if (choice !== undefined && allProjects.some((p: any) => Number(p.id) === Number(choice))) continue;
+        unknown.set(name, (unknown.get(name) || 0) + 1);
+      }
+      if (unknown.size) {
+        const words = (v: string) => new Set(norm(v).split(/[^a-z0-9\u0980-\u09ff]+/).filter((w) => w.length > 2));
+        return res.status(409).json({
+          error: "Some project names in the sheet aren't in Projects — pick the right one for each.",
+          needs_project_match: [...unknown.entries()].map(([name, count]) => {
+            const sq = squash(name);
+            const w = words(name);
+            const suggestions = allProjects
+              .map((p: any) => {
+                const pq = squash(p.project_name);
+                const shared = [...words(p.project_name)].filter((x) => w.has(x)).length;
+                const score = (pq && sq && (pq.includes(sq) || sq.includes(pq)) ? 3 : 0) + shared;
+                return { id: Number(p.id), name: String(p.project_name), score };
+              })
+              .filter((x) => x.score > 0)
+              .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+              .slice(0, 5)
+              .map(({ id, name }) => ({ id, name }));
+            return { name, rows: count, suggestions };
+          })
+        });
+      }
+      // The names the Admin matched are saved as the Project's own name.
+      for (const r of rows) {
+        const name = String(r?.project_name ?? "").trim();
+        if (!name) continue;
+        // Same name in another letter case / spacing: the Project's own spelling.
+        if (byName.has(norm(name))) {
+          r.project_name = byName.get(norm(name)).project_name;
+          continue;
+        }
+        const choice = mapFor(name);
+        const p = choice !== undefined && choice !== "new" ? allProjects.find((x: any) => Number(x.id) === Number(choice)) : null;
+        if (p) r.project_name = p.project_name;
       }
 
       // Save the original Excel file itself against this Budget (overwrites any

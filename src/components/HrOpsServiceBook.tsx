@@ -78,34 +78,41 @@ export const serviceLength = (months: number | null) => {
 };
 
 // Shared timeline (also used by Self Service -> My Letters & Service Record).
-export const ServiceTimeline: React.FC<{ events: ServiceEvent[] }> = ({ events }) =>
+// One service-history entry (also used by the merged timeline, HrOpsActivity.tsx).
+const ServiceTimelineItem: React.FC<{ ev: ServiceEvent }> = ({ ev }) => {
+  const st = EVENT_STYLE[ev.kind] || { icon: Circle, tint: 'bg-slate-100 text-slate-500' };
+  return (
+    <li className="ml-6">
+      <span className={`absolute -left-[15px] w-7 h-7 rounded-full flex items-center justify-center ring-4 ring-white ${st.tint}`}>
+        <st.icon className="w-3.5 h-3.5" />
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold text-slate-800">{ev.title}</span>
+        <span className="text-[11px] text-slate-400">{fmtDate(ev.date)}</span>
+        {ev.status === 'pending' && <Badge tone="pending">Pending approval</Badge>}
+        {ev.status === 'rejected' && <Badge tone="rejected">Rejected</Badge>}
+        {ev.status === 'approved' && ev.applied === false && <Badge tone="pending">Takes effect {fmtDate(ev.date)}</Badge>}
+        {ev.kind === 'letter' && (ev.acknowledged ? <Badge tone="approved">Acknowledged</Badge> : null)}
+      </div>
+      {ev.detail && <p className="text-xs text-slate-600 mt-0.5">{ev.detail}</p>}
+      {ev.reason && <p className="text-[11px] text-slate-400 mt-0.5">{ev.reason}</p>}
+      {ev.approved_by && ev.approved_by.length > 0 && <p className="text-[11px] text-emerald-700 mt-0.5">Approved by {ev.approved_by.join(' → ')}</p>}
+    </li>
+  );
+};
+
+const ServiceTimelineList: React.FC<{ events: ServiceEvent[] }> = ({ events }) =>
   events.length === 0 ? (
     <p className="text-sm text-slate-400 text-center py-10">No records yet.</p>
   ) : (
     <ol className="relative border-l-2 border-slate-100 ml-3.5 space-y-4">
-      {[...events].reverse().map((ev, i) => {
-        const st = EVENT_STYLE[ev.kind] || { icon: Circle, tint: 'bg-slate-100 text-slate-500' };
-        return (
-          <li key={i} className="ml-6">
-            <span className={`absolute -left-[15px] w-7 h-7 rounded-full flex items-center justify-center ring-4 ring-white ${st.tint}`}>
-              <st.icon className="w-3.5 h-3.5" />
-            </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold text-slate-800">{ev.title}</span>
-              <span className="text-[11px] text-slate-400">{fmtDate(ev.date)}</span>
-              {ev.status === 'pending' && <Badge tone="pending">Pending approval</Badge>}
-              {ev.status === 'rejected' && <Badge tone="rejected">Rejected</Badge>}
-              {ev.status === 'approved' && ev.applied === false && <Badge tone="pending">Takes effect {fmtDate(ev.date)}</Badge>}
-              {ev.kind === 'letter' && (ev.acknowledged ? <Badge tone="approved">Acknowledged</Badge> : null)}
-            </div>
-            {ev.detail && <p className="text-xs text-slate-600 mt-0.5">{ev.detail}</p>}
-            {ev.reason && <p className="text-[11px] text-slate-400 mt-0.5">{ev.reason}</p>}
-            {ev.approved_by && ev.approved_by.length > 0 && <p className="text-[11px] text-emerald-700 mt-0.5">Approved by {ev.approved_by.join(' → ')}</p>}
-          </li>
-        );
-      })}
+      {[...events].reverse().map((ev, i) => (
+        <ServiceTimelineItem key={i} ev={ev} />
+      ))}
     </ol>
   );
+
+export const ServiceTimeline = Object.assign(ServiceTimelineList, { Item: ServiceTimelineItem });
 
 export async function saveServiceBookPdf(data: ServiceBookData, mode: 'save' | 'email' = 'save') {
   if (!data.employee) return;

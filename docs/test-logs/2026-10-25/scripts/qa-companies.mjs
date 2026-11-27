@@ -32,7 +32,7 @@ const pBid = pB.body.id;
 await api(SA, 'POST', `/api/employees/${eBid}/payment-accounts`, { account_type: 'bank', account_label: 'Salary', bank_name: 'DBBL', account_number: '777000111', percentage: 100 }, B);
 
 // HR Admin of company 1 only.
-const hid = (await api(SA, 'POST', '/api/users', { name: 'HR One Company', email: 'hr.one@credence.test', password: 'HrOne#2026', role: 'admin' })).body.id;
+const hid = (await api(SA, 'POST', '/api/users', { non_employee_reason: 'QA test account',  name: 'HR One Company', email: 'hr.one@credence.test', password: 'HrOne#2026', role: 'admin' })).body.id;
 await api(SA, 'PUT', `/api/users/${hid}/module-permissions`, { modules: ['employees', 'payroll', 'approvals', 'leave_applications', 'reports'] });
 const HR = await login('hr.one@credence.test', 'HrOne#2026');
 const mine = await api(HR, 'GET', '/api/companies/mine');

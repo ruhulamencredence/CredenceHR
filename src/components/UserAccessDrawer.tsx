@@ -169,6 +169,7 @@ function FeatureRow({
   on,
   busy,
   onToggle,
+  locked,
   children
 }: {
   icon: React.ElementType;
@@ -177,6 +178,8 @@ function FeatureRow({
   on: boolean;
   busy?: boolean;
   onToggle: () => void;
+  // A Superadmin always has every feature: shown as on, no switch.
+  locked?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -189,7 +192,13 @@ function FeatureRow({
           <div className="text-sm font-semibold text-slate-800">{title}</div>
           <p className="text-xs text-slate-500 mt-0.5">{description}</p>
         </div>
-        <Switch on={on} busy={busy} onClick={onToggle} label={title} />
+        {locked ? (
+          <span className="shrink-0 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200" title="A Superadmin always has this">
+            Always on
+          </span>
+        ) : (
+          <Switch on={on} busy={busy} onClick={onToggle} label={title} />
+        )}
       </div>
       {children && <div className="mt-2 ml-11">{children}</div>}
     </div>
@@ -400,11 +409,13 @@ export function UserAccessDrawer({
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
 
-  const featureOn = [!!u.can_use_attendance, !!u.can_use_tracking, !!u.can_view_leave_summary, delivery, !!u.can_job_edit].filter(Boolean).length;
+  const featureOn = isTargetSuper ? 5 : [!!u.can_use_attendance, !!u.can_use_tracking, !!u.can_view_leave_summary, delivery, !!u.can_job_edit].filter(Boolean).length;
+  // A Superadmin's Features: shown like anyone's (they are an employee too), all on and not editable.
+  const showFeatures = canEdit || isTargetSuper;
   const tabs: { key: PageSection; label: string; icon: React.ElementType; count?: number }[] = [
     { key: 'account', label: 'Account', icon: KeyRound },
     { key: 'access', label: 'Access', icon: LayoutGrid, count: isTargetSuper ? undefined : modules.length + selfService.filter((x) => x.on).length },
-    ...(canEdit ? [{ key: 'features' as PageSection, label: 'Features', icon: Fingerprint, count: featureOn }] : []),
+    ...(showFeatures ? [{ key: 'features' as PageSection, label: 'Features', icon: Fingerprint, count: featureOn }] : []),
     ...(canEdit && isSuperAdmin && u.role === 'admin' ? [{ key: 'admin' as PageSection, label: 'Admin powers', icon: ShieldCheck }] : []),
     { key: 'activity', label: 'Activity', icon: History, count: activity?.length }
   ];
@@ -674,18 +685,24 @@ export function UserAccessDrawer({
               )}
               {templateMsg && <p className="text-[11px] text-slate-500 mt-1">{templateMsg}</p>}
             </Section>}
-            {current === 'features' && canEdit && (
+            {current === 'features' && showFeatures && (
               <>
+                {isTargetSuper && (
+                  <p className="mx-5 mt-4 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                    A Superadmin always has every feature below, and can check in at any project. They are shown here like any employee&apos;s; they can&apos;t be switched off.
+                  </p>
+                )}
                 <Section title="Attendance & location">
                   <FeatureRow
                     icon={Fingerprint}
                     title="Remote Attendance"
                     description="Shows the Check In / Check Out card on this person’s Dashboard."
-                    on={!!u.can_use_attendance}
+                    on={isTargetSuper || !!u.can_use_attendance}
+                    locked={isTargetSuper}
                     busy={busy === 'can_use_attendance'}
                     onToggle={() => toggle('can_use_attendance', !!u.can_use_attendance)}
                   >
-                    {u.can_use_attendance && (
+                    {u.can_use_attendance && !isTargetSuper && (
                       // One or many check-in Projects, each with optional
                       // From / To dates (AttendanceProjectsEditor.tsx).
                       <AttendanceProjectsEditor token={token} userId={u.id} projects={projects} />
@@ -695,7 +712,8 @@ export function UserAccessDrawer({
                     icon={Navigation}
                     title="Live location tracking (mobile app)"
                     description="The app sends this person’s location in the background for Employee Tracking and the Live Ride Map."
-                    on={!!u.can_use_tracking}
+                    on={isTargetSuper || !!u.can_use_tracking}
+                    locked={isTargetSuper}
                     busy={busy === 'can_use_tracking'}
                     onToggle={() => toggle('can_use_tracking', !!u.can_use_tracking)}
                   />
@@ -706,7 +724,8 @@ export function UserAccessDrawer({
                     icon={CalendarDays}
                     title="Leave Summary on Dashboard"
                     description="Shows the Leave Summary card and the Leave tab (their own leave list). Applying for leave is a separate permission under modules."
-                    on={!!u.can_view_leave_summary}
+                    on={isTargetSuper || !!u.can_view_leave_summary}
+                    locked={isTargetSuper}
                     busy={busy === 'can_view_leave_summary'}
                     onToggle={() => toggle('can_view_leave_summary', !!u.can_view_leave_summary)}
                   />
@@ -717,7 +736,8 @@ export function UserAccessDrawer({
                     icon={CalendarClock}
                     title="Edit Delivery Date"
                     description="Can change an entry’s Delivery Date after Submit, even after Final Submit."
-                    on={delivery}
+                    on={isTargetSuper || delivery}
+                    locked={isTargetSuper}
                     busy={busy === 'can_edit_delivery_date'}
                     onToggle={() => toggle('can_edit_delivery_date', delivery)}
                   />
@@ -725,7 +745,8 @@ export function UserAccessDrawer({
                     icon={Edit2}
                     title="Job Edit"
                     description="Can add, edit or delete MPRs inside a Job whose Budget is already Final Submitted."
-                    on={!!u.can_job_edit}
+                    on={isTargetSuper || !!u.can_job_edit}
+                    locked={isTargetSuper}
                     busy={busy === 'can_job_edit'}
                     onToggle={() => toggle('can_job_edit', !!u.can_job_edit)}
                   />

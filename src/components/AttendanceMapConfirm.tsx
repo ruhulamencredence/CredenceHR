@@ -10,9 +10,10 @@ import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
-import { X, MapPin, Check, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
+import { X, MapPin, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl } from '../lib/api';
+import { useKeyboardGap, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
@@ -72,9 +73,9 @@ const otherProjectPinIcon = L.divIcon({
 // it never gets confused with the project's site marker above.
 const userDotIcon = L.divIcon({
   className: '',
-  html: `<div style="width:16px;height:16px;border-radius:50%;background:#f43f5e;border:3px solid #ffffff;box-shadow:0 0 0 2px #f43f5e, 0 1px 4px rgba(0,0,0,0.4);"></div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8]
+  html: `<div style="width:34px;height:34px;border-radius:50%;background:rgba(37,99,235,.18);display:flex;align-items:center;justify-content:center"><div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #ffffff;box-shadow:0 1px 4px rgba(0,0,0,0.4);"></div></div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17]
 });
 
 function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -91,6 +92,20 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
 function formatDistance(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
+
+// The theme's accent (Orange / Violet / …) for the attendance-area circles —
+// Leaflet takes a colour string, not a CSS variable.
+function accentColor(): string {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--g-accent').trim();
+    if (v) return v;
+  } catch {
+    // no computed style (tests)
+  }
+  return '#f47920';
+}
+
+const nowLabel = () => new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
 // Same geolocation flow AttendanceCard.tsx already uses to get the initial
 // fix: Capacitor's plugin on the native Android app build (works without a
@@ -152,6 +167,12 @@ export default function AttendanceMapConfirm({
   token
 }: AttendanceMapConfirmProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const keyboard = useKeyboardGap();
+  // The map gets smaller while the keyboard is up; Leaflet redraws its tiles for the new size.
+  useEffect(() => {
+    const t = window.setTimeout(() => mapRef.current?.invalidateSize(), 60);
+    return () => window.clearTimeout(t);
+  }, [keyboard.open]);
   const mapRef = useRef<L.Map | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
@@ -191,7 +212,9 @@ export default function AttendanceMapConfirm({
     const center: [number, number] = hasSite
       ? [Number(project.location_lat), Number(project.location_lng)]
       : [liveCoords.latitude, liveCoords.longitude];
-    const map = L.map(mapContainerRef.current, { center, zoom: PROJECT_ZOOM });
+    // No +/- buttons: pinch to zoom (the location button sits on the map instead).
+    const map = L.map(mapContainerRef.current, { center, zoom: PROJECT_ZOOM, zoomControl: false });
+    map.attributionControl.setPrefix(false);
     mapRef.current = map;
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -209,10 +232,10 @@ export default function AttendanceMapConfirm({
       if (hasRadius) {
         circleRef.current = L.circle([Number(project.location_lat), Number(project.location_lng)], {
           radius: Number(project.location_radius),
-          color: inside ? '#059669' : '#dc2626',
-          weight: 2,
-          fillColor: inside ? '#059669' : '#dc2626',
-          fillOpacity: 0.12
+          color: accentColor(),
+          weight: 2.5,
+          fillColor: accentColor(),
+          fillOpacity: 0.1
         }).addTo(map);
       }
     }
@@ -221,16 +244,22 @@ export default function AttendanceMapConfirm({
       .addTo(map)
       .bindPopup('You are here');
 
-    if (bounds.length > 1) {
+    // Show the whole attendance area and where you are (the status line
+    // covers the top of the map, hence the larger top padding).
+    const area = circleRef.current ? circleRef.current.getBounds().extend([liveCoords.latitude, liveCoords.longitude]) : null;
+    // (The area is fitted below, once the map knows its size.)
+    if (!area && bounds.length > 1) {
       map.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
     }
 
-    setTimeout(() => {
+    const sizeTimer = setTimeout(() => {
       map.invalidateSize();
+      if (area) map.fitBounds(area, { paddingTopLeft: [24, 56], paddingBottomRight: [24, 24], maxZoom: PROJECT_ZOOM, animate: false });
       setReady(true);
     }, 80);
 
     return () => {
+      clearTimeout(sizeTimer);
       map.remove();
       mapRef.current = null;
       userMarkerRef.current = null;
@@ -283,11 +312,12 @@ export default function AttendanceMapConfirm({
       if (p.location_radius) {
         L.circle([lat, lng], {
           radius: Number(p.location_radius),
-          color: '#94a3b8',
+          color: accentColor(),
+          opacity: 0.5,
           weight: 1.5,
-          dashArray: '4 4',
-          fillColor: '#94a3b8',
-          fillOpacity: 0.06
+          dashArray: '5 4',
+          fillColor: accentColor(),
+          fillOpacity: 0.03
         }).addTo(layer);
       }
     }
@@ -312,7 +342,13 @@ export default function AttendanceMapConfirm({
       if (mapRef.current) {
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
-        if (bounds.length > 1) {
+        if (circleRef.current) {
+          mapRef.current.fitBounds(circleRef.current.getBounds().extend([fresh.latitude, fresh.longitude]), {
+            paddingTopLeft: [24, 56],
+            paddingBottomRight: [24, 24],
+            maxZoom: PROJECT_ZOOM
+          });
+        } else if (bounds.length > 1) {
           mapRef.current.fitBounds(L.latLngBounds(bounds), { padding: [48, 48], maxZoom: PROJECT_ZOOM });
         } else {
           mapRef.current.panTo([fresh.latitude, fresh.longitude]);
@@ -325,15 +361,6 @@ export default function AttendanceMapConfirm({
     }
   };
 
-  // Circle color follows inside/outside — recolor in place on every fresh fix
-  // rather than tearing down and recreating the circle.
-  useEffect(() => {
-    if (!circleRef.current || inside == null) return;
-    circleRef.current.setStyle({
-      color: inside ? '#059669' : '#dc2626',
-      fillColor: inside ? '#059669' : '#dc2626'
-    });
-  }, [inside]);
 
   // Rendered via a portal straight onto document.body instead of in place —
   // this component gets mounted deep inside UserPanel's dashboard tree,
@@ -345,137 +372,143 @@ export default function AttendanceMapConfirm({
   // background show through at the bottom. Escaping to document.body via a
   // portal sidesteps that ancestor entirely, so this now behaves like a real
   // full-screen modal on every Android version.
+  // One line on the map: where you stand against the area.
+  const status: { tone: 'ok' | 'warn' | 'bad' | 'plain'; text: string } = !hasSite
+    ? { tone: 'plain', text: `No site location set for ${project.project_name}` }
+    : !hasRadius
+      ? { tone: 'plain', text: `${formatDistance(distance as number)} from ${project.location_label || project.project_name} · no area set` }
+      : inside
+        ? { tone: 'ok', text: `You're inside ${project.project_name}'s area · ${formatDistance(distance as number)}` }
+        : offsite
+          ? { tone: 'warn', text: `${formatDistance(distance as number)} from ${project.project_name} — goes for approval` }
+          : { tone: 'bad', text: `${formatDistance(distance as number)} away — outside the ${formatDistance(Number(project.location_radius))} area` };
+  const toneCls = {
+    ok: 'bg-emerald-50/95 text-emerald-700',
+    warn: 'bg-orange-50/95 text-orange-700',
+    bad: 'bg-rose-50/95 text-rose-700',
+    plain: 'bg-white/90 text-slate-600'
+  }[status.tone];
+  const label = kind === 'in' ? 'In Time' : 'Out Time';
+  const [timeNow, setTimeNow] = useState(nowLabel);
+  useEffect(() => {
+    const t = window.setInterval(() => setTimeNow(nowLabel()), 20000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // Rendered via a portal straight onto document.body instead of in place —
+  // this component gets mounted deep inside UserPanel's dashboard tree,
+  // which has an `overflow-hidden` ancestor; on a number of Android WebViews
+  // a `position: fixed` element nested inside it gets clipped to that box.
+  // Liquid-glass popup (house style): a big map with the status line and the
+  // location button on it, Remarks / Reason, and Cancel / Submit side by side.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+      // Keeps itself above the keyboard (paddingBottom below) — so the app-wide
+      // html.kb-open rule (index.css) must not lift it a second time: both at
+      // once squeezed the popup to a sliver at the top while typing Remarks.
+      data-kb-self
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-2.5 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-        paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
+        // Typing the Reason / Remarks: the popup ends above the on-screen
+        // keyboard (some Android WebViews don't shrink the page for it, so
+        // the box stayed under the keyboard) and the box is scrolled into view.
+        paddingBottom: keyboard.gap
+          ? `${keyboard.gap + 8}px`
+          : 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.75rem)'
       }}
     >
-      <div
-        className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col"
-        style={{ maxHeight: '100%' }}
-      >
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-50 text-blue-600 p-2 rounded-xl border border-blue-100">
-              <MapPin className="w-5 h-5" />
+      <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => !submitting && onCancel()} />
+      <div className="relative w-full max-w-lg flex flex-col" style={{ maxHeight: '100%' }}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full overflow-clip flex flex-col" style={{ maxHeight: '100%' }}>
+          <div className="px-5 pt-5 pb-1 flex items-start justify-between gap-3 shrink-0">
+            <div className="min-w-0">
+              <h3 className="text-[22px] font-extrabold text-slate-900 leading-tight">{label}</h3>
+              <p className="text-[12.5px] text-slate-500 mt-0.5 truncate">
+                {offsite ? 'Outside your project area' : project.project_name} · now {timeNow}
+              </p>
             </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Confirm {kind === 'in' ? 'Check In' : 'Check Out'}
-              </h3>
-              <p className="text-xs text-slate-500">{project.project_name}</p>
-            </div>
-          </div>
-          <button
-            onClick={onCancel}
-            disabled={submitting}
-            className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-40"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-3 overflow-y-auto min-h-0">
-          <div className="relative">
-            <div
-              ref={mapContainerRef}
-              className="w-full rounded-xl border border-slate-200 overflow-hidden"
-              style={{ height: 'clamp(160px, 34vh, 320px)' }}
-            />
-            {!ready && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-50 rounded-xl">
-                <Spinner size={20} className="text-slate-400" />
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={handleUseCurrentLocation}
-              disabled={locating || submitting}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition-colors"
+              onClick={onCancel}
+              disabled={submitting}
+              aria-label="Close"
+              className="liquid-glass-chip w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-600 active:scale-95 transition-transform disabled:opacity-40"
             >
-              {locating ? <Spinner size={14} /> : <LocateFixed className="w-3.5 h-3.5" />}
-              {locating ? 'Locating…' : 'Use current location'}
+              <X className="w-4 h-4" />
             </button>
-            <span className="text-xs font-mono text-slate-500">
-              {liveCoords.latitude.toFixed(6)}, {liveCoords.longitude.toFixed(6)}
-            </span>
           </div>
-          {locateError && <p className="text-xs text-rose-600 px-1">{locateError}</p>}
 
-          {hasSite ? (
-            hasRadius ? (
+          <div className="px-4 pt-3 pb-4 space-y-3 overflow-y-auto min-h-0" onFocusCapture={scrollFocusedFieldIntoView}>
+            <div className="relative rounded-3xl overflow-hidden liquid-glass-inset" style={{ height: keyboard.open ? '120px' : 'clamp(200px, 40vh, 340px)' }}>
+              <div ref={mapContainerRef} className="absolute inset-0" />
+              {!ready && (
+                <div className="absolute inset-0 z-[500] flex items-center justify-center bg-slate-50">
+                  <Spinner size={20} className="text-slate-400" />
+                </div>
+              )}
+              {/* Status on the map: inside / outside / goes for approval. */}
               <div
-                className={`flex items-center gap-2 text-xs font-semibold px-3 py-2.5 rounded-xl ${
-                  inside ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
-                }`}
+                data-testid="attendance-map-status"
+                className={`absolute left-2.5 right-2.5 top-2.5 z-[500] flex items-start gap-1.5 rounded-[18px] px-3 py-2 text-xs font-bold leading-snug shadow-sm backdrop-blur ${toneCls}`}
               >
-                {inside ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                <span>
-                  {inside
-                    ? `You're ${formatDistance(distance as number)} from the site — inside the ${formatDistance(Number(project.location_radius))} attendance area.`
-                    : `You're ${formatDistance(distance as number)} from the site — outside the ${formatDistance(Number(project.location_radius))} attendance area.`}
-                </span>
+                {status.tone === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : status.tone === 'plain' ? <MapPin className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                <span className="min-w-0">{status.text}</span>
               </div>
-            ) : (
-              <p className="text-xs text-slate-500 px-1">
-                {formatDistance(distance as number)} from {project.location_label || project.project_name}. This project has no attendance radius set, so any location is accepted.
-              </p>
-            )
-          ) : (
-            <p className="text-xs text-slate-500 px-1">
-              This project has no site location set — your check-{kind} won't be checked against a location.
-            </p>
-          )}
-
-          {offsite && (
-            <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>
-                You're outside your project area. You can still give your {kind === 'in' ? 'In' : 'Out'} Time — it goes to your approvers and
-                counts as attendance only once it's approved. Write why below.
-              </span>
+              {/* Fresh GPS fix — on the map, like a maps app. */}
+              <button
+                type="button"
+                onClick={handleUseCurrentLocation}
+                disabled={locating || submitting}
+                aria-label="Use current location"
+                className={`absolute right-3 z-[500] w-12 h-12 rounded-full bg-white text-slate-800 shadow-[0_8px_18px_-8px_rgba(0,0,0,.45)] flex items-center justify-center active:scale-95 transition-transform disabled:opacity-60 ${keyboard.open ? 'bottom-2 w-10 h-10' : 'bottom-6'}`}
+              >
+                {locating ? <Spinner size={18} /> : <LocateFixed className="w-5 h-5" />}
+              </button>
             </div>
-          )}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-              {offsite ? 'Reason' : 'Remarks'}{' '}
-              <span className="font-normal normal-case text-slate-400">{offsite ? '(required)' : '(optional)'}</span>
-            </label>
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              maxLength={1000}
-              rows={2}
-              placeholder={kind === 'in' ? 'e.g. Reached late — traffic' : 'e.g. Left early, cleared with PM'}
-              className="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"
-            />
-          </div>
-        </div>
+            {locateError && <p className="text-xs text-rose-600 px-1">{locateError}</p>}
 
-        <div className="p-5 border-t border-slate-200 flex justify-end gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={submitting}
-            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(remarks.trim())}
-            disabled={submitting || (offsite && !remarks.trim())}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
-          >
-            {submitting ? <Spinner size={16} /> : <Check className="w-4 h-4" />}
-            {offsite ? 'Send for approval' : kind === 'in' ? 'Confirm Check In' : 'Confirm Check Out'}
-          </button>
+            <div>
+              <label htmlFor="attendance-remarks" className="block text-[13px] font-bold text-slate-900 mb-1.5 px-0.5">
+                {offsite ? 'Reason' : 'Remarks'} <span className="font-medium text-slate-500">{offsite ? '(needed)' : '(optional)'}</span>
+              </label>
+              <textarea
+                id="attendance-remarks"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                placeholder={offsite ? 'Why are you giving it from here?' : kind === 'in' ? 'e.g. Reached late — traffic' : 'e.g. Left early, cleared with PM'}
+                className={`w-full text-sm px-4 py-3 rounded-2xl liquid-glass-inset focus:outline-none focus:ring-2 focus:ring-[var(--g-accent,#f47920)] resize-none ${
+                  offsite && !remarks.trim() ? 'ring-1 ring-orange-300' : ''
+                }`}
+              />
+              {offsite && <p className="mt-1 px-1 text-[11px] text-slate-500">It goes to your approvers and counts as attendance once approved.</p>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={submitting}
+                className="liquid-glass-chip h-12 rounded-full text-[15px] font-bold text-slate-700 active:scale-[0.98] transition-transform disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirm(remarks.trim())}
+                disabled={submitting || (offsite && !remarks.trim())}
+                className="liquid-glass-button h-12 rounded-full text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:active:scale-100"
+              >
+                {submitting && <Spinner size={16} />}
+                Submit
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>,

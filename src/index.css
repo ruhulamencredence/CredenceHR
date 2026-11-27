@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Inter is loaded from index.html (non-blocking), not @import here. */
 @import "tailwindcss";
 
 /* Used by App.tsx's PanelLoadingFallback (shown briefly after login while the
@@ -349,15 +349,15 @@ body::before {
    so the dashboard shows through. */
 .liquid-glass-backdrop {
   background: rgba(15, 23, 42, 0.25);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(calc(14px * var(--glass-k, 1))) saturate(140%);
+  backdrop-filter: blur(calc(14px * var(--glass-k, 1))) saturate(140%);
 }
 .liquid-glass {
   position: relative;
   isolation: isolate;
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.6) 55%, rgba(255, 255, 255, 0.7) 100%);
-  -webkit-backdrop-filter: blur(30px) saturate(190%);
-  backdrop-filter: blur(30px) saturate(190%);
+  -webkit-backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(190%);
+  backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(190%);
   border: 1px solid rgba(255, 255, 255, 0.7);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
@@ -386,8 +386,8 @@ body::before {
 /* Round glass button (close). */
 .liquid-glass-chip {
   background: rgba(255, 255, 255, 0.55);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(12px * var(--glass-k, 1))) saturate(180%);
+  backdrop-filter: blur(calc(12px * var(--glass-k, 1))) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.8);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px -2px rgba(15, 23, 42, 0.2);
 }
@@ -396,6 +396,8 @@ body::before {
   position: relative;
   overflow: hidden;
   color: #fff;
+  /* Plain accent first: iOS before 16.2 has no color-mix() and drops the line below. */
+  background: var(--g-accent, #7f00ff);
   background: linear-gradient(180deg, color-mix(in srgb, var(--g-accent, #7f00ff) 78%, white) 0%, var(--g-accent, #7f00ff) 100%);
   border: 1px solid rgba(255, 255, 255, 0.45);
   box-shadow:
@@ -821,9 +823,10 @@ html[data-glow="sky"] { --glow-a: 125, 211, 252 !important; --glow-b: 165, 180, 
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 .hdr-blend.hdr-blend-scrolled {
+  background: rgba(255, 255, 255, 0.72);
   background: color-mix(in srgb, var(--g-surface, #ffffff) 72%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%);
+  backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%);
   box-shadow: 0 1px 0 rgba(15, 23, 42, 0.05), 0 10px 24px -18px rgba(15, 23, 42, 0.35);
 }
 .hdr-blend .hdr-round,
@@ -1424,7 +1427,7 @@ html[data-dark][data-admin-phone] main :is(.flex.gap-1.border-b, .flex.border-b.
   }
   html[data-dark][data-glass][data-admin-phone] main :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) :is(.bg-white.border.border-slate-200.rounded-2xl, .bg-white.rounded-2xl.border.border-slate-200, .bg-white.rounded-2xl.shadow-sm.border.border-slate-200, .bg-white.border.border-slate-200.rounded-xl) {
     background: linear-gradient(160deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.04)) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+    -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%);
     border-color: rgba(255, 255, 255, 0.14) !important;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 40px -18px rgba(0, 0, 0, 0.7) !important;
   }
@@ -1480,36 +1483,36 @@ html[data-dark][data-glass] body::before {
 html[data-dark][data-glass] .page-glow { background: transparent !important; }
 html[data-dark][data-glass] :is(.bg-white, [class*="bg-white/"]):not(.gsidebar *):not(button):not(.bg-white .bg-white):not(nav *) {
   background: linear-gradient(160deg, rgba(255,255,255,.10), rgba(255,255,255,.04)) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%);
   border-color: rgba(255,255,255,.14) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.04), 0 18px 40px -18px rgba(0,0,0,.7) !important;
 }
 html[data-dark][data-glass] .bg-white .bg-white, html[data-dark][data-glass] .bg-white [class*="bg-white/"] { background: rgba(255,255,255,.05) !important; border-color: rgba(255,255,255,.10) !important; }
 html[data-dark][data-glass] .gsidebar {
   background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03)) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(170%); backdrop-filter: blur(30px) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(170%);
   border-right: 1px solid rgba(255,255,255,.12) !important;
   box-shadow: inset -1px 0 0 rgba(255,255,255,.05) !important;
 }
 html[data-dark][data-glass] .gsidebar [class*="bg-white/15"] { background-color: rgba(255,255,255,.12) !important; }
 html[data-dark][data-glass] header.sticky {
   background: rgba(20,22,26,.45) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%);
   border-bottom-color: rgba(255,255,255,.10) !important;
 }
 html[data-dark][data-glass] nav path[fill="var(--g-accent)"] { fill: rgba(26,28,33,.9) !important; stroke: rgba(255,255,255,.12); stroke-width: 1; }
-html[data-dark][data-glass] nav.fixed.bottom-0 > div:has(svg) { -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); }
+html[data-dark][data-glass] nav.fixed.bottom-0 > div:has(svg) { -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))); backdrop-filter: blur(calc(24px * var(--glass-k, 1))); }
 html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.07) !important; }
 html[data-dark][data-glass] .liquid-glass {
   background: linear-gradient(160deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.06) 55%, rgba(255,255,255,.09) 100%) !important;
-  -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(34px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(34px * var(--glass-k, 1))) saturate(180%);
   border-color: rgba(255,255,255,.18) !important;
 }
 html[data-dark][data-glass] .liquid-glass-backdrop { background: rgba(0,0,0,.35); }
 html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"],
 html[data-dark][data-glass] svg:has(path[fill="url(#welcomeBannerGradient)"]) { background: transparent !important; }
 html[data-dark][data-glass] path[fill="url(#welcomeBannerGradient)"] { fill: rgba(255,255,255,.06) !important; stroke: rgba(255,255,255,.12); }
-html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: rgba(255,255,255,.06) !important; backdrop-filter: blur(24px); border-bottom: 1px solid rgba(255,255,255,.12); }
+html[data-dark][data-glass] [class*="rounded-b-[28px]"][style*="var(--g-gradient)"] { background: rgba(255,255,255,.06) !important; backdrop-filter: blur(calc(24px * var(--glass-k, 1))); border-bottom: 1px solid rgba(255,255,255,.12); }
 /* Cards floating over a map (Employee Tracking's "Right now" and the map's
    chips — the z-[1000] overlays): the light map would show through clear
    glass and wash out the light text, so they are near-solid dark glass. */
@@ -1517,7 +1520,7 @@ html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]
 html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
 html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
   background: rgba(28, 30, 35, 0.9) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%);
   border-color: rgba(255, 255, 255, 0.14) !important;
 }
 /* Pickers that float over a form (the leave calendar…, class "solid-pop"):
@@ -1525,7 +1528,7 @@ html[data-dark][data-dark][data-glass][data-glass][data-glass] [class*="z-[1000]
    are near-solid dark glass. */
 html[data-dark][data-dark][data-glass][data-glass] .solid-pop.solid-pop.solid-pop.solid-pop {
   background: rgba(28, 30, 35, 0.96) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%);
   border-color: rgba(255, 255, 255, 0.14) !important;
 }
 /* Alerts popup: an unread alert stands out — white in light mode, a soft
@@ -1561,7 +1564,7 @@ html[data-dark] .att-clock { --ac-face: rgba(255,255,255,.04); --ac-rim: rgba(25
    cards misses it. Same glass here, and its In / Out tiles as inner wells. */
 html[data-dark][data-glass] .att-card, html[data-dark][data-glass] .leave-card {
   background: linear-gradient(160deg, rgba(255,255,255,.10), rgba(255,255,255,.04)) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(170%); backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(170%);
   border-color: rgba(255,255,255,.14) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.16), inset 0 -1px 0 rgba(255,255,255,.04), 0 18px 40px -18px rgba(0,0,0,.7) !important;
 }
@@ -1583,7 +1586,7 @@ html[data-dark] .ast-shelf { --as-fill: rgba(255,255,255,.03); --as-line: rgba(2
    sits on it without a second glass layer. */
 html[data-dark][data-glass] .chat-popup {
   background: rgba(26, 28, 33, 0.94) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%);
   border-color: rgba(255, 255, 255, 0.14) !important;
 }
 html[data-dark][data-glass] .chat-popup > .bg-white { background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -1637,7 +1640,7 @@ html[data-lglass] body::before {
 html[data-lglass] .page-glow { background: transparent !important; }
 html[data-lglass] :is(.bg-white, [class*="bg-white/"]):not(.gsidebar *):not(button):not(.bg-white .bg-white):not(nav *) {
   background: linear-gradient(160deg, rgba(255,255,255,.72), rgba(255,255,255,.48)) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%);
   border-color: rgba(255,255,255,.85) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 18px 40px -22px rgba(30,41,59,.35) !important;
 }
@@ -1646,31 +1649,62 @@ html[data-lglass] .bg-white .bg-white, html[data-lglass] .bg-white [class*="bg-w
    slate, the open item an accent tint. */
 html[data-lglass] .gsidebar {
   background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.35)) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(30px * var(--glass-k, 1))) saturate(180%);
   border-right: 1px solid rgba(255,255,255,.8) !important;
+}
+/* The phone's slide-in menu sits over the coloured page: at 35–55% white the
+   orange header and cards showed through and the menu looked washed out.
+   Nearly solid frosted white, a short accent band at the top only (the white
+   logo stays visible on it), a crisp edge and a soft shadow. */
+html[data-lglass] .gsidebar.fixed {
+  background:
+    /* glass sheen: a soft light streak across the top corner */
+    linear-gradient(125deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 38%),
+    linear-gradient(180deg, rgba(var(--g-accent-rgb), .80) 0, rgba(var(--g-accent-rgb), .45) 64px, rgba(var(--g-accent-rgb), .08) 150px, rgba(var(--g-accent-rgb), 0) 210px),
+    /* see-through enough for the page's colours to glow softly behind, opaque enough for crisp text */
+    linear-gradient(180deg, rgba(255,255,255,.80), rgba(255,255,255,.70)) !important;
+  -webkit-backdrop-filter: blur(calc(48px * var(--glass-k, 1))) saturate(170%) brightness(1.04); backdrop-filter: blur(calc(48px * var(--glass-k, 1))) saturate(170%) brightness(1.04);
+  border-right: 1px solid rgba(255,255,255,.85) !important;
+  box-shadow: inset -1px 0 0 rgba(15,23,42,.06), inset 0 1px 0 rgba(255,255,255,.9), 12px 0 40px rgba(15,23,42,.22) !important;
 }
 html[data-lglass] .gsidebar [class*="text-white"] { color: #334155 !important; }
 html[data-lglass] .gsidebar :is([class*="bg-white/15"], [class*="bg-white/20"]) { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
 html[data-lglass] .gsidebar input[type="text"] { color: #334155 !important; background-color: rgba(255,255,255,.6) !important; box-shadow: inset 0 0 0 1px rgba(15,23,42,.06) !important; }
 html[data-lglass] .gsidebar input[type="text"]::placeholder { color: #94a3b8 !important; }
 html[data-lglass] .gsidebar svg[class*="text-white"] { color: #64748b !important; }
+/* The sidebar's search results (the full column's dropdown and the minimized
+   column's popup): frosted white with slate text, not the dark purple panel
+   (its text had turned slate above, so it was dark on dark). */
+html[data-lglass] .gsidebar .gsidebar-pop,
+html[data-lglass] [data-gsidebar-searchfly] {
+  background: rgba(255,255,255,.94) !important;
+  -webkit-backdrop-filter: blur(calc(20px * var(--glass-k, 1))) saturate(170%); backdrop-filter: blur(calc(20px * var(--glass-k, 1))) saturate(170%);
+  border-color: rgba(15,23,42,.08) !important;
+  box-shadow: 0 18px 40px -18px rgba(15,23,42,.35), inset 0 1px 0 #fff !important;
+}
+html[data-lglass] [data-gsidebar-searchfly] [class*="text-white"] { color: #334155 !important; }
+html[data-lglass] :is(.gsidebar .gsidebar-pop, [data-gsidebar-searchfly]) :is([class*="text-white/45"], [class*="text-white/50"], [class*="text-white/40"]) { color: #94a3b8 !important; }
+html[data-lglass] :is(.gsidebar .gsidebar-pop, [data-gsidebar-searchfly]) [class*="hover:bg-white/10"]:hover { background-color: rgba(15,23,42,.05) !important; }
+html[data-lglass] [data-gsidebar-searchfly] [class*="bg-white/15"] { background-color: rgba(var(--g-accent-rgb), .14) !important; color: rgb(var(--g-accent-rgb)) !important; }
+html[data-lglass] [data-gsidebar-searchfly] input[type="text"] { color: #334155 !important; background-color: rgba(15,23,42,.04) !important; }
+html[data-lglass] [data-gsidebar-searchfly] input[type="text"]::placeholder { color: #94a3b8 !important; }
 @media (min-width: 768px) {
   html[data-lglass] header.sticky {
     background: rgba(255,255,255,.55) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%);
     border-bottom-color: rgba(255,255,255,.8) !important;
   }
 }
 @media (max-width: 767px) {
-  html[data-lglass] header.sticky { -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%); }
+  html[data-lglass] header.sticky { -webkit-backdrop-filter: blur(calc(20px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(20px * var(--glass-k, 1))) saturate(160%); }
 }
 html[data-lglass] .liquid-glass {
   background: linear-gradient(160deg, rgba(255,255,255,.80) 0%, rgba(255,255,255,.55) 55%, rgba(255,255,255,.70) 100%) !important;
-  -webkit-backdrop-filter: blur(34px) saturate(180%); backdrop-filter: blur(34px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(34px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(34px * var(--glass-k, 1))) saturate(180%);
 }
 /* My Attendance / Leave Summary draw their own background (see Dark Glass). */
 html[data-lglass] .att-card, html[data-lglass] .leave-card {
-  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(180%);
   border-color: rgba(255,255,255,.85) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 18px 40px -22px rgba(30,41,59,.35) !important;
 }
@@ -1680,14 +1714,103 @@ html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"]:is(.bg-white, [c
 html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"] > :is(.bg-white, [class*="bg-white/"]),
 html[data-lglass][data-lglass][data-lglass] [class*="z-[1000]"] > * > :is(.bg-white, [class*="bg-white/"]) {
   background: rgba(255, 255, 255, 0.92) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(18px * var(--glass-k, 1))) saturate(160%);
 }
 html[data-lglass][data-lglass] .solid-pop.solid-pop.solid-pop.solid-pop {
   background: rgba(255, 255, 255, 0.97) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%);
 }
 html[data-lglass] .chat-popup {
   background: rgba(255, 255, 255, 0.95) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%); backdrop-filter: blur(calc(24px * var(--glass-k, 1))) saturate(160%);
 }
 html[data-lglass] .chat-popup > .bg-white { background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* iPhones on iOS 15 (e.g. iPhone 7 / 7 Plus, which can't go past 15.8):
+   Tailwind's gradients are written "to bottom right in oklab", which Safari
+   only understands from 16.2 — before that the whole gradient was dropped,
+   so the Home quick access icons showed a white icon on nothing. There the
+   gradient is drawn without "in oklab" (colours blend a little differently,
+   the same colours). Unlayered, so it wins over the utilities. */
+@supports not (background-image: linear-gradient(in oklab, red, blue)) {
+  .bg-gradient-to-t { --tw-gradient-position: to top; }
+  .bg-gradient-to-tr { --tw-gradient-position: to top right; }
+  .bg-gradient-to-r { --tw-gradient-position: to right; }
+  .bg-gradient-to-br { --tw-gradient-position: to bottom right; }
+  .bg-gradient-to-b { --tw-gradient-position: to bottom; }
+  .bg-gradient-to-bl { --tw-gradient-position: to bottom left; }
+  .bg-gradient-to-l { --tw-gradient-position: to left; }
+  .bg-gradient-to-tl { --tw-gradient-position: to top left; }
+}
+
+/* Android app: lighter glass, for smooth scrolling (main.tsx sets
+   html[data-lite-glass] = "1", or "low" on a low-end phone). Every frosted
+   blur in this file is blur(calc(N * var(--glass-k, 1))) — unset (website,
+   iPhone) it is exactly the original size; here it is scaled down. Tailwind's
+   backdrop-blur-* classes read --blur-*, scaled the same way. The blur behind
+   a popup (More, notices…) stays too, just smaller. */
+html[data-lite-glass] {
+  --glass-k: 0.4;
+  --blur-xs: 2px;
+  --blur-sm: 4px;
+  --blur-md: 5px;
+  --blur-lg: 6px;
+  --blur-xl: 10px;
+  --blur-2xl: 16px;
+  --blur-3xl: 24px;
+}
+html[data-lite-glass='low'] {
+  --glass-k: 0.2;
+  --blur-sm: 2px;
+  --blur-md: 3px;
+  --blur-lg: 4px;
+  --blur-xl: 5px;
+  --blur-2xl: 8px;
+  --blur-3xl: 12px;
+}
+/* A smaller blur lets the page behind read through the popup card, so the
+   card is a little less see-through here. :where() keeps the specificity of
+   the plain .liquid-glass rule, so every theme's own card colour still wins. */
+:where(html[data-lite-glass]:not([data-dark])) .liquid-glass {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.93) 0%, rgba(255, 255, 255, 0.86) 55%, rgba(255, 255, 255, 0.9) 100%);
+}
+/* A popup over its own blurred backdrop (More, notices, confirmDialog…): the
+   backdrop keeps its full blur — the look stays — and the card on top skips
+   its own second blur; what is behind the card is already blurred, so it
+   looks the same, and one full-screen blur less per frame is what makes the
+   sheet scroll smoothly (measured More sheet: 30 -> ~42 fps). */
+html[data-lite-glass] .liquid-glass-backdrop {
+  --glass-k: 1;
+}
+html[data-lite-glass] .liquid-glass-backdrop .liquid-glass,
+html[data-lite-glass] .liquid-glass-backdrop ~ .liquid-glass,
+html[data-lite-glass] .liquid-glass-backdrop ~ * .liquid-glass {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-lite-glass] .backdrop-blur-\[20px\] {
+  --tw-backdrop-blur: blur(calc(20px * var(--glass-k)));
+}
+html[data-lite-glass] .backdrop-blur-\[8px\] {
+  --tw-backdrop-blur: blur(calc(8px * var(--glass-k)));
+}
+
+/* While the app's open animation (BootIntroAnimation.tsx) covers the screen,
+   the app under it draws nothing, so its moving parts don't take the frames
+   the animation needs. Removed as the animation starts fading out. */
+html[data-boot-intro] body * { visibility: hidden; }
+html[data-boot-intro] .boot-intro,
+html[data-boot-intro] .boot-intro * { visibility: visible; }
+
+/* The Infinity loader (components/ThemedInfinity.tsx, index.html): its seven
+   stroke colours, darkest to lightest, made from the theme accent. */
+.chr-il {
+  --il-a: var(--g-accent, #ff6700);
+  --il-1: color-mix(in srgb, var(--il-a), #000 55%);
+  --il-2: color-mix(in srgb, var(--il-a), #000 35%);
+  --il-3: color-mix(in srgb, var(--il-a), #000 15%);
+  --il-4: var(--il-a);
+  --il-5: color-mix(in srgb, var(--il-a), #fff 30%);
+  --il-6: color-mix(in srgb, var(--il-a), #fff 55%);
+  --il-7: color-mix(in srgb, var(--il-a), #fff 75%);
+}

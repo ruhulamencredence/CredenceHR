@@ -18,6 +18,8 @@ import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from
 
 import { SearchSelect } from './Combobox';
 import { personLabel } from '../lib/personLabel';
+import { DriverOption, driverOptionLabel, sortDrivers, driverBusy } from '../lib/driverPicker';
+import { rideTimeOf, vehicleChoices, type SlotVehicle } from '../lib/vehicleSlots';
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem extends ClaimReviewFields {
@@ -36,6 +38,8 @@ interface MyApprovalItem extends ClaimReviewFields {
   // open the full check-in/check-out details (including location) before
   // deciding. See ApproveApplications.tsx for the original of this pattern.
   claim_refs?: BillClaimReference[];
+  // Only on a 'vehicle_requisition' item — when the ride is (for the car picker).
+  vehicle_requisition_details?: { ride_date: string; start_time: string; estimated_duration_hours: number } | null;
   // Only on a 'bill_claim' item — the claim's bills (category / date / amount).
   claim_items?: BillClaimItem[];
   source_approved_amount?: number | null;
@@ -64,16 +68,11 @@ interface MyApprovalItem extends ClaimReviewFields {
   can_edit_asset_items?: boolean;
 }
 
-interface AvailableVehicle {
-  id: number;
-  vehicle_no: string;
-  model: string;
-}
+type AvailableVehicle = SlotVehicle;
 
-interface DriverCandidate {
-  id: number;
-  name: string;
-}
+// The driver picker (GET /api/vehicles/driver-picker): Inventory -> Drivers,
+// with each one's booked rides.
+type DriverCandidate = DriverOption;
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
   t === 'bill_claim'
@@ -170,7 +169,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       .then((r) => r.json())
       .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
       .catch(() => {});
-    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders })
+    fetch(apiUrl('/api/vehicles/driver-picker'), { headers: authHeaders })
       .then((r) => r.json())
       .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
@@ -235,6 +234,11 @@ useLiveRefresh(() => load());
     // Bill Claim: Return / Reject tell the employee why.
     if (item.source_type === 'bill_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
       setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
+    // A ride request is never rejected without a reason (the server refuses too).
+    if (item.source_type === 'vehicle_requisition' && action === 'rejected' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: 'Write why this ride is rejected in Remarks — the rider sees it.' });
       return;
     }
     setActingId(id);
@@ -575,9 +579,10 @@ useLiveRefresh(() => load());
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >
                           <option value="">Pick a vehicle…</option>
-                          {availableVehicles.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.model} ({v.vehicle_no})
+                          {/* Free for this ride's time first; a car booked then can't be picked. */}
+                          {vehicleChoices(availableVehicles, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map(({ v, label, busy }) => (
+                            <option key={v.id} value={v.id} disabled={busy}>
+                              {label}
                             </option>
                           ))}
                         </SearchSelect>
@@ -587,8 +592,10 @@ useLiveRefresh(() => load());
                           className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         >
                           <option value="">Pick a driver…</option>
-                          {driverCandidates.map((d) => (
-                            <option key={d.id} value={d.id}>{personLabel(d)}</option>
+                          {sortDrivers(driverCandidates, assignForm[item.id]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id })).map((d) => (
+                            <option key={d.id} value={d.id} disabled={!!driverBusy(d, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}>
+                              {driverOptionLabel(d, assignForm[item.id]?.vehicle_id, rideTimeOf({ ...item.vehicle_requisition_details, id: item.source_id }))}
+                            </option>
                           ))}
                         </SearchSelect>
                         <button
@@ -630,7 +637,7 @@ useLiveRefresh(() => load());
                       <input
                         type="text"
                         aria-label="Remarks"
-                        placeholder={item.source_type === 'bill_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
+                        placeholder={item.source_type === 'bill_claim' ? 'Remarks (a reason is needed to Return or Reject)' : item.source_type === 'vehicle_requisition' ? 'Remarks (a reason is needed to Reject)' : 'Remarks (optional)'}
                         value={remarksDraft[item.id] || ''}
                         onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

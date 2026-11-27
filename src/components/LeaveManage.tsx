@@ -37,6 +37,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const canManageAll = user.role === 'superadmin' || !!user.can_manage_leave;
   // Leave Rules (accrual, carry-forward, who may apply) have their own layer, off until ticked.
   const canRules = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('leave_rules');
+  // Joiner & Probation rules (new joiner / Probation / Confirmation balance) have their own layer, off until ticked.
+  const canJoiner = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('joiner_rules');
   // Same isNativeApp split JobEditPanel.tsx already uses: the web build keeps
   // the table below untouched, the Android APK build gets a card list instead
   // (a wide multi-column table doesn't work well on a phone screen).
@@ -110,6 +112,30 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const emptyRules: RulesDraft = { gender: 'any', min_service_months: '0', accrual_per_month: '0', balance_cap: '', carry_forward_max: '' };
   const rulesFor = (key: string): RulesDraft => rulesDraft[key] || emptyRules;
   const setRules = (key: string, patch: Partial<RulesDraft>) => setRulesDraft((prev) => ({ ...prev, [key]: { ...(prev[key] || emptyRules), ...patch } }));
+  // Joiner & Probation rules (Casual / Sick / Without Pay only).
+  type JoinerDraft = { probation_mode: 'full' | 'prorata' | 'none'; joiner_prorata: boolean };
+  const [joinerDraft, setJoinerDraft] = useState<Record<string, JoinerDraft>>({});
+  const [savingJoinerFor, setSavingJoinerFor] = useState<string | null>(null);
+  const joinerFor = (key: string): JoinerDraft => joinerDraft[key] || { probation_mode: 'full', joiner_prorata: false };
+  const saveJoiner = async (key: string) => {
+    setSavingJoinerFor(key);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-policies/${key}/joiner-rules`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(joinerFor(key))
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save the rules');
+      setPolicySuccess('Joiner & Probation rules saved. They apply to new joiners, new Probation and Confirmation from now on; saved balances are not changed.');
+    } catch (err: any) {
+      setPolicyError(err.message || 'Could not save the rules');
+    } finally {
+      setSavingJoinerFor(null);
+    }
+  };
 
   const draftFor = (categoryKey: string) =>
     policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false, count_off_days: true };
@@ -121,6 +147,11 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave Policies');
       const rows: LeaveCategoryPolicy[] = Array.isArray(data) ? data : [];
       setPolicies(rows);
+      setJoinerDraft(
+        Object.fromEntries(
+          rows.map((p) => [p.category_key, { probation_mode: (p.probation_mode as JoinerDraft['probation_mode']) || 'full', joiner_prorata: !!p.joiner_prorata }])
+        )
+      );
       setRulesDraft(
         Object.fromEntries(
           rows.map((p) => [
@@ -1440,6 +1471,48 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                                   <p className="text-[10px] text-slate-400 mt-0.5">Most that moves into next year; 0 = all lapse</p>
                                 </div>
                               </div>
+                            </div>
+                          )}
+
+                          {canJoiner && ['casual', 'sick', 'without_pay'].includes(cat.key) && (
+                            <div className="mt-3 pt-3 border-t border-slate-100">
+                              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                                <span className="text-[11px] font-bold text-slate-700">Joiner &amp; Probation</span>
+                                <button
+                                  type="button"
+                                  onClick={() => saveJoiner(cat.key)}
+                                  disabled={savingJoinerFor === cat.key}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold disabled:opacity-50"
+                                >
+                                  {savingJoinerFor === cat.key ? <Spinner size={12} /> : null} Save
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">During Probation (Job Base)</label>
+                                  <select
+                                    value={joinerFor(cat.key).probation_mode}
+                                    onChange={(e) => setJoinerDraft((prev) => ({ ...prev, [cat.key]: { ...joinerFor(cat.key), probation_mode: e.target.value as JoinerDraft['probation_mode'] } }))}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="full">No limit (full days)</option>
+                                    <option value="prorata">Pro-rata (months left of the year ÷ 12)</option>
+                                    <option value="none">Not given</option>
+                                  </select>
+                                </div>
+                                <label className="flex items-center gap-2 text-xs text-slate-700 sm:mt-5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={joinerFor(cat.key).joiner_prorata}
+                                    onChange={(e) => setJoinerDraft((prev) => ({ ...prev, [cat.key]: { ...joinerFor(cat.key), joiner_prorata: e.target.checked } }))}
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  Joined during the year: pro-rata
+                                </label>
+                              </div>
+                              <p className="text-[10px] text-slate-400 mt-1">
+                                Pro-rata = the Balance Workflow's days × months left of the year ÷ 12, the joining month counted whole, to the nearest half day. Saved balances are never changed by these rules.
+                              </p>
                             </div>
                           )}
                         </div>

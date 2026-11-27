@@ -593,8 +593,11 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
     let limit = Number(b.limit_amount);
     if (limitSource === "type") {
       const lim = typeLimit(await policies(), emp?.employee_type || null);
-      if (lim == null) return { error: `No limit is set for ${emp?.employee_type ? `"${emp.employee_type}"` : "this employee's type"} and no default limit either — set one under Limits, or give a custom limit.` };
-      limit = lim;
+      // A spare SIM (given to nobody, kept in stock): no limit is needed yet —
+      // 0 for now, and it follows the employee's type once it is given.
+      if (lim == null && !emp) limit = 0;
+      else if (lim == null) return { error: `No limit is set for ${emp?.employee_type ? `"${emp.employee_type}"` : "this employee's type"} and no default limit either — set one under Limits, or give a custom limit.` };
+      else limit = lim;
     } else if (!Number.isFinite(limit) || limit < 0) {
       return { error: "Enter the limit in taka." };
     }
@@ -734,6 +737,8 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         if (lim != null && (!Number.isFinite(lim) || lim < 0)) out.errors.push("Limit is not a number");
         out.limit_source = lim != null ? "custom" : "type";
         out.limit_amount = lim != null ? money(lim) : typeLimit(pols, emp?.employee_type || null);
+        // A spare SIM (no Emp. ID): no limit needed yet — 0 until it is given (like the SIM form).
+        if (out.limit_amount == null && !emp && !code) out.limit_amount = 0;
         if (out.limit_amount == null) out.errors.push("No limit given and no type/default limit set");
         out.duty_location = str(row.duty_location, 150) || null;
         out.employee_id = emp?.id || null;

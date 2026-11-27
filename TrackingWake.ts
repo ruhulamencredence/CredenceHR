@@ -38,7 +38,7 @@ export async function wakeQuietTrackers(queryDB: QueryDB): Promise<number> {
     (await queryDB(
       `/*unscoped*/ SELECT s.user_id, e.id AS employee_pk FROM tracking_device_state s JOIN users u ON u.id = s.user_id
        LEFT JOIN all_employees e ON e.user_id = s.user_id
-       WHERE u.can_use_tracking = 1 AND COALESCE(u.is_blocked, 0) = 0
+       WHERE (u.can_use_tracking = 1 OR u.role = 'superadmin') AND COALESCE(u.is_blocked, 0) = 0
          AND s.reported_at < NOW() - INTERVAL ${QUIET_MIN} MINUTE
          AND (s.reported_at > NOW() - INTERVAL ${RECENT_HOURS} HOUR
               OR (s.mode = 'off_sched' AND s.reported_at > NOW() - INTERVAL ${OFF_SCHEDULE_DAYS} DAY))`

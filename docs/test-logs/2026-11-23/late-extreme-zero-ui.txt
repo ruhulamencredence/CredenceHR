@@ -1,0 +1,11 @@
+PASS Late Policy: Extreme Lates per Deducted Day field
+PASS field allows 0
+PASS 0 shows the "no separate deduction — counted with lates" note
+PASS Save stores 0
+PASS summary box says Extreme counts with the lates
+PASS history shows "0 (with lates)"
+PASS admin: no page errors []
+PASS employee card: Extreme Delay "counts with lates"
+PASS employee card: 3 lates this month (3 lates = 1 day) → 1 day's salary — nexplained Delay 2 Extreme Delay 1 counts with lates 3 lates this month (3 lates = 1 day) → 1 day's salary is set to be deducted this month for late attendance.
+PASS employee: no page errors []
+ALL PASS

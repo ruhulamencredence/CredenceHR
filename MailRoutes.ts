@@ -304,7 +304,23 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_accounts.employee_id", "ALTER TABLE mail_accounts ADD COLUMN employee_id INT NULL", ["ER_DUP_FIELDNAME"]);
   // Senders whose pictures always show (no "Show pictures" each time).
   await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_messages.via_server", "ALTER TABLE mail_messages ADD COLUMN via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  await run("mail_settings.send_via_server", "ALTER TABLE mail_settings ADD COLUMN send_via_server TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // A colleague who hasn't connected their mailbox in Credence Mail (or
+  // can't open it): 'server' = the mail goes through the mail server to
+  // their real mailbox (default); 'inside' = held in an inside-only mailbox
+  // in CredenceHR as before.
+  await run(
+    "mail_system_settings.unconnected_route",
+    "ALTER TABLE mail_system_settings ADD COLUMN unconnected_route VARCHAR(10) NOT NULL DEFAULT 'server'",
+    ["ER_DUP_FIELDNAME"]
+  );
+  // The Website / Facebook / LinkedIn links of the Credence design signature
+  // (Mail Administration -> Signature). NULL = the built-in address; '' = no such link.
+  await run("mail_system_settings.sig_website", "ALTER TABLE mail_system_settings ADD COLUMN sig_website VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_system_settings.sig_facebook", "ALTER TABLE mail_system_settings ADD COLUMN sig_facebook VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_system_settings.sig_linkedin", "ALTER TABLE mail_system_settings ADD COLUMN sig_linkedin VARCHAR(300) NULL", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
   // When read / star was last changed here (UTC). The mail server is told in
@@ -347,6 +363,29 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
     ) DEFAULT CHARSET=utf8mb4`
   );
   await run("users.can_use_mail_groups", "ALTER TABLE users ADD COLUMN can_use_mail_groups TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // My folders: the person's own folders, real folders on their mail server
+  // (also seen in Outlook / the phone's mail app). Part of Credence Mail —
+  // whoever has Mail has them. A message in one has folder_role "f:<id>" and
+  // the label "Folder:<id>".
+  await run(
+    "mail_folders",
+    `CREATE TABLE IF NOT EXISTS mail_folders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      account_id INT NOT NULL,
+      user_id INT NOT NULL,
+      path VARCHAR(500) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      parent_id INT NULL,
+      selectable TINYINT(1) NOT NULL DEFAULT 1,
+      system_role VARCHAR(20) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mail_folder_path (account_id, path(191)),
+      KEY idx_mail_folders_user (user_id)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  // Sent / Trash / Spam / Drafts that hold folders of their own (Roundcube,
+  // Outlook: "Sent > Monthly Reports > Zone-1"): kept as a heading in the tree.
+  await run("mail_folders.system_role", "ALTER TABLE mail_folders ADD COLUMN system_role VARCHAR(20) NULL AFTER selectable", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +585,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     // Only reading: nothing in the mailbox may change (a manual sync and a
     // search on the mail server just fetch mail).
     const path = String(req.path || "");
-    if (req.method !== "GET" && !(req.method === "POST" && (path === "/api/mail/sync" || path === "/api/mail/search-server"))) throw bad("An opened mailbox is read only.", 403);
+    if (req.method !== "GET" && !(req.method === "POST" && (path === "/api/mail/sync" || path === "/api/mail/search-server" || path === "/api/mail/older"))) throw bad("An opened mailbox is read only.", 403);
     // One log line per person per mailbox every 30 minutes, not per click.
     const key = `${req.user.id}:${target}`;
     if (Date.now() - (lastOpenLog.get(key) || 0) > 30 * 60_000) {
@@ -724,6 +763,98 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return f && f.inbox ? f : resolveFolders(a, c);
   }
 
+  // ---- My folders (part of Credence Mail) ----------------------------------
+  // Real folders on the person's mail server. Each one is a sync "role" of
+  // its own ("f:<id>" -> its server path), so syncing, moving, read / star
+  // and delete work for it the same way as for Inbox.
+  const folderCache = new Map<number, { ok: boolean; at: number }>();
+  // No switch of their own: whoever may use Credence Mail (users.can_use_mail,
+  // or a Superadmin; not a new joiner's temporary login) has their folders.
+  async function hasFolders(userId: number): Promise<boolean> {
+    const hit = folderCache.get(userId);
+    if (hit && Date.now() - hit.at < 30_000) return hit.ok;
+    const rows: any[] = (await queryDB("SELECT role, can_use_mail, is_onboarding FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    const u = rows[0];
+    const ok = !!u && (u.role === "superadmin" || (!!Number(u.can_use_mail) && !Number(u.is_onboarding)));
+    folderCache.set(userId, { ok, at: Date.now() });
+    return ok;
+  }
+  const folderIdOf = (role: any): number | null => {
+    const m = /^f:(\d+)$/.exec(String(role || ""));
+    return m ? Number(m[1]) : null;
+  };
+  const folderLabelOf = (labels: string[]) => labels.find((l) => /^Folder:\d+$/.test(l)) || null;
+  const folderRows = async (accountId: number): Promise<any[]> =>
+    ((await queryDB("SELECT * FROM mail_folders WHERE account_id = ? ORDER BY path ASC", [accountId]).catch(() => [])) || []) as any[];
+  // Inbox / Sent / Trash / Spam / Drafts, plus the person's own folders.
+  async function allFoldersOf(a: any, c: ImapFlow) {
+    const f: Record<string, string> = { ...(await foldersOf(a, c)) };
+    if (await hasFolders(Number(a.user_id))) for (const r of await folderRows(Number(a.id))) if (Number(r.selectable)) f[`f:${r.id}`] = r.path;
+    return f;
+  }
+  // The folders as the mail server has them now (also ones made in Outlook /
+  // on the phone): new ones added, renamed / deleted ones followed.
+  const foldersListedAt = new Map<number, number>();
+  async function refreshFolders(a: any, force = false) {
+    if (isInternalBox(a)) return;
+    if (!force && Date.now() - (foldersListedAt.get(Number(a.id)) || 0) < 60_000) return;
+    foldersListedAt.set(Number(a.id), Date.now());
+    await withAccountLock(Number(a.id), () =>
+      withImap(a, async (c) => {
+        // Inbox / Sent / Trash / Spam / Drafts are shown already (and synced as themselves).
+        const roleByPath = new Map<string, string>(Object.entries(await foldersOf(a, c)).map(([role, path]) => [String(path).toLowerCase(), role]));
+        const list: any[] = await c.list();
+        // Gmail-style views of mail that is in other folders anyway — never folders of their own.
+        const virtual = (m: any) => ["\\All", "\\Flagged", "\\Important"].includes(String(m.specialUse || ""));
+        const hasKids = (p: string) => list.some((x) => String(x.path).startsWith(p + (x.delimiter || "/")) && String(x.path) !== p);
+        const mine = list.filter((m) => {
+          if (virtual(m)) return false;
+          const role = String(m.path).toUpperCase() === "INBOX" ? "inbox" : roleByPath.get(String(m.path).toLowerCase());
+          // A special folder only as the heading of the folders inside it (not Inbox: its folders sit at the top).
+          return role ? role !== "inbox" && hasKids(String(m.path)) : true;
+        });
+        const have = await folderRows(Number(a.id));
+        const byPath = new Map<string, any>(have.map((r) => [String(r.path), r]));
+        for (const m of mine) {
+          const role = roleByPath.get(String(m.path).toLowerCase()) || null;
+          // A heading (Sent / Trash…) opens as itself, never as "one of my folders".
+          const selectable = role || m.flags?.has?.("\\Noselect") || m.flags?.has?.("\\NonExistent") ? 0 : 1;
+          const name = String(m.name || m.path).slice(0, 255);
+          const old = byPath.get(String(m.path));
+          if (!old) await queryDB("INSERT IGNORE INTO mail_folders (account_id, user_id, path, name, selectable, system_role) VALUES (?, ?, ?, ?, ?, ?)", [Number(a.id), Number(a.user_id), String(m.path).slice(0, 500), name, selectable, role]);
+          else if (old.name !== name || Number(old.selectable) !== selectable || (old.system_role || null) !== role)
+            await queryDB("UPDATE mail_folders SET name = ?, selectable = ?, system_role = ? WHERE id = ?", [name, selectable, role, old.id]);
+        }
+        // Gone from the server: its local copies go too (the mail itself is wherever the server put it).
+        const onServer = new Set(mine.map((m) => String(m.path)));
+        for (const r of have) if (!onServer.has(String(r.path))) await dropFolderRow(a, Number(r.id));
+        // Parents by path ("Projects/Gulshan" sits in "Projects").
+        const rows = await folderRows(Number(a.id));
+        const delimOf = (p: string) => list.find((m) => String(m.path) === p)?.delimiter || "/";
+        const idByPath = new Map<string, number>(rows.map((r) => [String(r.path), Number(r.id)]));
+        for (const r of rows) {
+          const d = delimOf(String(r.path));
+          const cut = String(r.path).lastIndexOf(d);
+          const parent = cut > 0 ? idByPath.get(String(r.path).slice(0, cut)) ?? null : null;
+          if ((r.parent_id == null ? null : Number(r.parent_id)) !== parent) await queryDB("UPDATE mail_folders SET parent_id = ? WHERE id = ?", [parent, r.id]);
+        }
+      })
+    );
+  }
+  async function dropFolderRow(a: any, id: number) {
+    const ids = [id, ...(await folderRows(Number(a.id))).filter((r) => Number(r.parent_id) === id).map((r) => Number(r.id))];
+    for (const x of ids) {
+      // Mail kept here only by label (a CredenceHR-only mailbox) goes back to Inbox.
+      await queryDB(
+        "UPDATE mail_messages SET labels_json = REPLACE(labels_json, ?, '\"Inbox\"'), folder_role = IF(folder_role = ?, 'inbox', folder_role) WHERE account_id = ? AND uid IS NULL AND labels_json LIKE ?",
+        [JSON.stringify(`Folder:${x}`), `f:${x}`, Number(a.id), `%${JSON.stringify(`Folder:${x}`)}%`]
+      );
+      await queryDB("DELETE FROM mail_messages WHERE account_id = ? AND folder_role = ? AND uid IS NOT NULL", [Number(a.id), `f:${x}`]);
+      await queryDB("DELETE FROM mail_folder_state WHERE account_id = ? AND role = ?", [Number(a.id), `f:${x}`]);
+      await queryDB("DELETE FROM mail_folders WHERE id = ? AND account_id = ?", [x, Number(a.id)]);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Settings helpers
   // -------------------------------------------------------------------------
@@ -736,7 +867,11 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       pictureSenders: parseJson<string[]>(r.picture_senders_json, []),
       layout: parseJson<any>(r.layout_json, { density: "comfortable", previewPane: "right", theme: "light" }),
       language: r.language || "en",
-      timezone: r.timezone || "Asia/Dhaka"
+      timezone: r.timezone || "Asia/Dhaka",
+      // The person's own default for "Send through the mail server" in Compose.
+      sendViaServer: !!Number(r.send_via_server),
+      // What the Credence design signature links to (Mail Administration -> Signature).
+      signatureLinks: (await systemSettings()).signatureLinks
     };
   }
 
@@ -785,6 +920,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (act.markRead) isRead = 1;
         if (act.star) isStarred = 1;
         if (act.categorize) category = String(act.categorize).slice(0, 30);
+        // "Move to folder": one of the person's own folders in this mailbox (checked when the rule is saved and here).
+        const fid = Number(act.moveToFolder);
+        if (fid > 0 && lab.includes("Inbox") && (await hasFolders(userId))) {
+          const f: any[] = (await queryDB("SELECT id FROM mail_folders WHERE id = ? AND user_id = ? AND selectable = 1", [fid, userId]).catch(() => [])) || [];
+          if (f.length) lab = lab.filter((l) => l !== "Inbox" && !/^Folder:\d+$/.test(l)).concat(`Folder:${fid}`);
+        }
         const extra = [...(Array.isArray(act.applyLabels) ? act.applyLabels : []), ...(act.applyLabel ? [act.applyLabel] : [])];
         for (const l of extra) if (l && !lab.includes(String(l))) lab.push(String(l).slice(0, 60));
       }
@@ -792,7 +933,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return { labels: lab, isRead, isStarred, category };
   }
 
-  async function storeFetched(a: any, role: string, msg: any, fresh: boolean): Promise<any | null> {
+  async function storeFetched(a: any, role: string, msg: any, fresh: boolean, noRules = false): Promise<any | null> {
     const env = msg.envelope || {};
     let parsed: any = {};
     try {
@@ -830,14 +971,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const text = String(parsed.text || "").replace(/\s+/g, " ").trim();
     const snippet = (text || subject).slice(0, 200);
     const flags: Set<string> = msg.flags || new Set();
-    const labels = [ROLE_LABEL[role] || "Inbox"];
+    const fid = folderIdOf(role);
+    const labels = [fid ? `Folder:${fid}` : ROLE_LABEL[role] || "Inbox"];
     let category = role === "inbox" ? categorize(fromEmail, subject, text) : "primary";
     let isRead = flags.has("\\Seen") || role === "sent" ? 1 : 0;
     let isStarred = flags.has("\\Flagged") ? 1 : 0;
     let lab = labels;
 
-    // Incoming mail: blocked senders go to Spam; then the user's own rules.
-    if (role === "inbox") {
+    // Incoming mail: blocked senders go to Spam; then the user's own rules
+    // (not for older mail fetched on request — it stays where the server has it).
+    if (role === "inbox" && !noRules) {
       const ruled = await incomingRules(Number(a.user_id), { fromEmail, fromName, to, subject, text, hasFiles: files.length > 0 }, { labels: lab, isRead, isStarred, category });
       lab = ruled.labels;
       isRead = ruled.isRead;
@@ -922,13 +1065,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // -------------------------------------------------------------------------
   // Sync: new mail by UID, folder by folder
   // -------------------------------------------------------------------------
-  async function syncAccount(a: any, roles: string[] = SYNC_ROLES): Promise<{ inbox: number; sent: number; junk: number; fresh: any[] }> {
-    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, fresh: [] };
+  async function syncAccount(a: any, roles?: string[]): Promise<{ inbox: number; sent: number; junk: number; folders: number; fresh: any[] }> {
+    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, folders: 0, fresh: [] };
     return withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
-        const out = { inbox: 0, sent: 0, junk: 0, fresh: [] as any[] };
-        const folders = await foldersOf(a, c);
-        for (const role of roles) {
+        const out = { inbox: 0, sent: 0, junk: 0, folders: 0, fresh: [] as any[] };
+        const folders = await allFoldersOf(a, c);
+        // A full sync covers the person's own folders too.
+        for (const role of roles || [...SYNC_ROLES, ...Object.keys(folders).filter((k) => folderIdOf(k))]) {
           const path = folders[role];
           if (!path) continue;
           let lock: any;
@@ -976,8 +1120,20 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
                 }
                 const row = await storeFetched(a, role, m, !firstTime);
                 if (row?.addFlags.length) await c.messageFlagsAdd(String(m.uid), row.addFlags, { uid: true }).catch(() => undefined);
+                // A rule filed it in one of the person's folders: there on the server too.
+                const ruled = role === "inbox" && row ? folderLabelOf(row.labels) : null;
+                if (ruled) {
+                  const toRole = `f:${ruled.slice(7)}`;
+                  const res: any = folders[toRole] ? await c.messageMove(String(m.uid), folders[toRole], { uid: true }).catch(() => null) : null;
+                  const newUid = res?.uidMap?.get(Number(m.uid));
+                  if (newUid) await queryDB("UPDATE mail_messages SET folder_role = ?, uid = ? WHERE id = ?", [toRole, newUid, row.id]);
+                  // No new number from the server: the folder's own sync brings it in.
+                  else if (res) await queryDB("DELETE FROM mail_messages WHERE id = ?", [row.id]);
+                  else await queryDB("UPDATE mail_messages SET labels_json = ? WHERE id = ?", [JSON.stringify(row.labels.filter((l: string) => l !== ruled).concat("Inbox")), row.id]);
+                }
                 if (row) {
-                  (out as any)[role]++;
+                  if (folderIdOf(role)) out.folders++;
+                  else (out as any)[role]++;
                   if (role === "inbox" && !firstTime && row.labels.includes("Inbox")) out.fresh.push(row);
                 }
               }
@@ -1041,7 +1197,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     try {
       const r = await syncAccount(a, roles);
       if (r.fresh.length) announceNew(Number(a.user_id), Number(a.id), r.fresh);
-      if (r.inbox || r.sent || r.junk) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
+      if (r.inbox || r.sent || r.junk || r.folders) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
       return r;
     } catch (e: any) {
       const msg = e?.status ? e.message : imapError(e);
@@ -1065,7 +1221,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // cPanel mailbox doesn't see it.
   const DOMAIN_RE = /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
   const DEFAULT_DOMAINS = ["credencehousinglimited.com"];
-  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[] } } | null = null;
+  type Unconnected = "server" | "inside";
+  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[]; unconnected: Unconnected; signatureLinks: { website: string; facebook: string; linkedin: string } } } | null = null;
+  const DEFAULT_SIG_LINKS = { website: "https://www.credencehousingltd.com/", facebook: "https://www.facebook.com/credencehousingltd/", linkedin: "https://www.linkedin.com/company/credencehousinglimited/posts/" };
   async function systemSettings() {
     if (systemCache && Date.now() - systemCache.at < 30_000) return systemCache.v;
     const row: any = ((await queryDB("SELECT * FROM mail_system_settings WHERE id = 1").catch(() => [])) || [])[0];
@@ -1075,7 +1233,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           .map((d) => d.trim().toLowerCase())
           .filter((d) => DOMAIN_RE.test(d))
       : DEFAULT_DOMAINS;
-    const v = { internalDelivery: row ? !!Number(row.internal_delivery) : true, domains };
+    const v = {
+      internalDelivery: row ? !!Number(row.internal_delivery) : true,
+      domains,
+      unconnected: (row?.unconnected_route === "inside" ? "inside" : "server") as Unconnected,
+      signatureLinks: {
+        website: row?.sig_website == null ? DEFAULT_SIG_LINKS.website : String(row.sig_website),
+        facebook: row?.sig_facebook == null ? DEFAULT_SIG_LINKS.facebook : String(row.sig_facebook),
+        linkedin: row?.sig_linkedin == null ? DEFAULT_SIG_LINKS.linkedin : String(row.sig_linkedin)
+      }
+    };
     systemCache = { at: Date.now(), v };
     return v;
   }
@@ -1083,8 +1250,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
 
   // Which recipients get the mail inside CredenceHR: address -> the
   // connected mailboxes with that address (usually one).
-  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean } = { create: true }): Promise<Map<string, any[]>> {
+  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean; viaServer?: boolean } = { create: true }): Promise<Map<string, any[]>> {
     const out = new Map<string, any[]>();
+    // The sender chose "Send through the mail server": nobody gets it inside.
+    if (opts.viaServer) return out;
     const sys = await systemSettings();
     if (!sys.internalDelivery || !sys.domains.includes(domainOf(a.email))) return out;
     const wanted = [...new Set(recipients.map((x) => x.toLowerCase()))].filter((x) => sys.domains.includes(domainOf(x)));
@@ -1102,13 +1271,23 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     //    made here for mail that came before).
     const boxes: any[] =
       (await queryDB(
-        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, m.provider, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
          FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id
          WHERE m.email IN (${marks})`,
         wanted
       ).catch(() => [])) || [];
+    // Only a colleague using Credence Mail gets it inside: their own mailbox
+    // connected (not an inside-only one), Mail on for them, not blocked.
+    // Anyone else gets it through the mail server in their real mailbox
+    // (seen in Outlook / the phone, and in Credence Mail once they connect)
+    // — unless Mail Administration keeps such mail inside (sys.unconnected).
+    // A sender with only an inside-only mailbox can't use the mail server
+    // at all: their mail to colleagues stays inside as before.
+    const keepInside = sys.unconnected === "inside" || isInternalBox(a);
     for (const r of boxes) {
       if (Number(r.user_id) && Number(r.is_blocked)) continue;
+      const usable = !isInternalBox(r) && Number(r.user_id) > 0 && hasAccess(r);
+      if (!usable && !keepInside) continue;
       add(String(r.email).toLowerCase(), { id: Number(r.id), user_id: Number(r.user_id), employee_id: r.employee_id, email: r.email, notify: Number(r.user_id) > 0 && hasAccess(r) });
     }
     // 2. Everyone else whose address it is: a CredenceHR login email, or an
@@ -1118,7 +1297,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     //    (for the Employee's login, or — no login yet — held for the
     //    Employee and handed over when they get one; see claimHeld).
     const missing = wanted.filter((x) => !out.has(x));
-    if (!missing.length) return out;
+    if (!missing.length || !keepInside) return out;
     const mm = missing.map(() => "?").join(",");
     const people: any[] = [
       ...((await queryDB(
@@ -1360,14 +1539,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // Sends one built message: inside CredenceHR to the internal recipients,
   // by SMTP to the rest. SMTP goes first — if it fails, nobody got it yet
   // and the mail can simply be sent again.
-  async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean } = {}) {
+  async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean; viaServer?: boolean } = {}) {
     // Group addresses are opened into their members (the To / Cc lines still
     // show the group, so a Reply all goes back to it).
     const g = await expandGroups(a, recipients);
     const denied = g.groups.filter((x) => x.denied);
     if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you`, 403);
     const all = [...new Set([...g.rest, ...g.members])];
-    const internal = await internalTargets(a, all);
+    const internal = await internalTargets(a, all, { create: true, viaServer: !!opts.viaServer });
     const external = all.filter((x) => !internal.has(x));
     if (external.length) await sendRaw(a, { from: a.email, to: external }, raw);
     const blobs = internal.size ? await deliverInside(a, internal, m, opts) : [];
@@ -1435,7 +1614,11 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   const roleForLabels = (labels: string[], current: string | null) => {
     if (labels.includes("Trash")) return "trash";
     if (labels.includes("Spam")) return "junk";
+    const own = folderLabelOf(labels);
+    if (own) return `f:${own.slice(7)}`;
     if (labels.includes("Inbox") && (current === "trash" || current === "junk")) return "inbox";
+    // Out of one of the person's folders (to Inbox / Archive): back in the server's Inbox.
+    if (folderIdOf(current)) return "inbox";
     return current;
   };
 
@@ -1466,10 +1649,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     sendError: r.send_error || null,
     messageId: r.message_id || null,
     // Came / went inside CredenceHR, not through the mail server.
-    internal: !!Number(r.via_internal)
+    internal: !!Number(r.via_internal),
+    // Chosen "Send through the mail server" (kept on drafts / scheduled mail).
+    viaServer: !!Number(r.via_server)
   });
   const LIST_COLS =
-    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id, via_internal";
+    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id, via_internal, via_server";
   async function messageOf(userId: number, id: any, withBody = true): Promise<any> {
     const rows: any[] = await queryDB(`SELECT ${withBody ? "*" : LIST_COLS + ", folder_role, uid"} FROM mail_messages WHERE id = ? AND user_id = ?`, [Number(id), userId]);
     if (!rows[0]) throw bad("Message not found.", 404);
@@ -1493,6 +1678,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         ourDomains: enabled ? (await systemSettings()).domains : [],
         canDirectory: enabled && (await hasDirectory(req.user)),
         canMyGroups: enabled && (await hasMyGroups(Number(req.user.id))),
+        canFolders: enabled && (await hasFolders(Number(req.user.id))),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -1521,14 +1707,36 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const [canOpen, canPassword] = await Promise.all([hasModuleLayer(req.user, "mail_admin", "mail_open"), hasModuleLayer(req.user, "mail_admin", "mail_password")]);
       const isSuper = req.user.role === "superadmin";
       noStore(res);
+      // One page at a time: the whole list used to be sent at once.
+      const all = await adminMailboxes();
+      const perPerson = new Map<number, number>();
+      for (const r of all) perPerson.set(Number(r.user_id), (perPerson.get(Number(r.user_id)) || 0) + 1);
+      const nameOf = (r: any) => String(r.user_name || r.user_login || r.user_username || `#${r.user_id}`);
+      const q = String(req.query.q || "").trim().toLowerCase();
+      const multi = String(req.query.multi || "") === "1";
+      const perPage = Math.min(200, Math.max(10, Math.trunc(Number(req.query.per_page)) || 50));
+      const filtered = all
+        .filter((r) => !q || `${nameOf(r)} ${r.user_login || r.user_username || ""} ${r.email || ""}`.toLowerCase().includes(q))
+        .filter((r) => !multi || (perPerson.get(Number(r.user_id)) || 0) > 1)
+        // One person's mailboxes stay together.
+        .sort((x, y) => nameOf(x).localeCompare(nameOf(y)) || Number(x.user_id) - Number(y.user_id));
+      const pages = Math.max(1, Math.ceil(filtered.length / perPage));
+      const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
       res.json({
         canOpen,
         canPassword,
         serverReady: !!mailKey(),
-        items: (await adminMailboxes()).map((r) => ({
+        total: filtered.length,
+        page,
+        perPage,
+        pages,
+        totalMailboxes: all.length,
+        people: perPerson.size,
+        multiPeople: [...perPerson.values()].filter((n) => n > 1).length,
+        items: filtered.slice((page - 1) * perPage, page * perPage).map((r) => ({
           id: Number(r.id),
           userId: Number(r.user_id),
-          userName: r.user_name || r.user_login || r.user_username || `#${r.user_id}`,
+          userName: nameOf(r),
           userLogin: r.user_login || r.user_username || "",
           emailAddress: r.email,
           name: r.display_name || r.email,
@@ -1538,6 +1746,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           lastSyncAt: fromDb(r.last_sync_at),
           lastError: r.last_error || null,
           connectedAt: fromDb(r.created_at),
+          boxes: perPerson.get(Number(r.user_id)) || 1,
           // The Superadmin's own mailbox is only for the Superadmin.
           locked: r.user_role === "superadmin" && !isSuper
         }))
@@ -1574,6 +1783,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     requireModuleLayer("mail_admin", "read"),
     handler(async (req, res) => {
       if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const perPage = Math.min(200, Math.max(10, Math.trunc(Number(req.query.per_page)) || 50));
+      const total = Number((((await queryDB("SELECT COUNT(*) AS n FROM mail_admin_log l JOIN users t ON t.id = l.target_user_id")) as any[])[0] || {}).n || 0);
+      const pages = Math.max(1, Math.ceil(total / perPage));
+      const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page)) || 1));
       const rows: any[] =
         (await queryDB(
           `SELECT l.id, l.action, l.account_id, l.created_at, l.actor_user_id, l.target_user_id, a.name AS actor_name, t.name AS target_name, m.email AS mailbox
@@ -1581,11 +1794,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
            JOIN users t ON t.id = l.target_user_id
            LEFT JOIN users a ON a.id = l.actor_user_id
            LEFT JOIN mail_accounts m ON m.id = l.account_id
-           ORDER BY l.id DESC LIMIT 300`
+           ORDER BY l.id DESC LIMIT ? OFFSET ?`,
+          [perPage, (page - 1) * perPage]
         )) || [];
       noStore(res);
-      res.json(
-        rows.map((r) => ({
+      res.json({
+        total,
+        page,
+        perPage,
+        pages,
+        items: rows.map((r) => ({
           id: Number(r.id),
           action: r.action,
           at: fromDb(r.created_at),
@@ -1593,7 +1811,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           target: r.target_name || `#${r.target_user_id}`,
           mailbox: r.mailbox || null
         }))
-      );
+      });
     })
   );
 
@@ -1612,6 +1830,25 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (blocked[0]) return `${blocked[0].name}'s CredenceHR account is blocked`;
     const inactive: any[] = (await queryDB(`/*unscoped*/ SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? AND is_active = 0 LIMIT 1`, [email]).catch(() => [])) || [];
     if (inactive[0]) return `${inactive[0].name} is no longer an active Employee`;
+    if (sys.unconnected === "server") {
+      // Someone of ours, just not on Credence Mail.
+      const box: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT m.provider, u.role, u.can_use_mail, u.is_onboarding, u.name FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id WHERE m.email = ? LIMIT 1`,
+          [email]
+        ).catch(() => [])) || [];
+      const who: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding FROM users u WHERE LOWER(TRIM(u.email)) = ?
+           UNION ALL SELECT e.name, NULL, NULL, NULL FROM all_employees e WHERE COALESCE(e.is_active, 1) = 1 AND LOWER(TRIM(e.email)) = ? LIMIT 1`,
+          [email, email]
+        ).catch(() => [])) || [];
+      const b = box[0];
+      const name = b?.name || who[0]?.name;
+      if (b && !isInternalBox(b) && !(b.role === "superadmin" || (Number(b.can_use_mail) && !Number(b.is_onboarding))))
+        return `${name || "This colleague"} has Credence Mail turned off — it goes to their mailbox through the mail server`;
+      if (b || who[0]) return `${name || "This colleague"} hasn't connected their mailbox in Credence Mail — it goes to their mailbox through the mail server`;
+    }
     return "no Employee in the Employee Directory (and no CredenceHR login) has this email";
   }
 
@@ -1640,15 +1877,17 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const written = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
       const g = await expandGroups(a, written);
       const all = [...new Set([...g.rest, ...g.members])];
-      const inside = await internalTargets(a, all, { create: false });
+      const viaServer = !!req.body?.viaServer;
+      const inside = await internalTargets(a, all, { create: false, viaServer });
       const external = all.filter((x) => !inside.has(x));
       res.json({
+        viaServer,
         internal: all.filter((x) => inside.has(x)),
         // Groups written, how many each reaches, and any the sender can't use.
         groups: g.groups,
         external,
         // Why each one goes through the mail server.
-        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, await whyOutside(a, x)]))),
+        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, viaServer ? "you chose to send through the mail server" : await whyOutside(a, x)]))),
         // So the screen can say why ours went out through the server.
         ourDomains: (await systemSettings()).domains,
         enabled: (await systemSettings()).internalDelivery
@@ -1660,7 +1899,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // module's "read"; changing it: the explicit-only "mail_settings" layer.
   const publicSystem = async (req: any) => ({
     ...(await systemSettings()),
-    canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_settings")
+    canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_settings"),
+    canEditSignature: await hasModuleLayer(req.user, "mail_admin", "mail_signature")
   });
   app.get(
     "/api/mail/admin/settings",
@@ -1680,6 +1920,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const b = req.body || {};
       const cur = await systemSettings();
       const on = b.internalDelivery === undefined ? cur.internalDelivery : !!b.internalDelivery;
+      const unconnected: Unconnected = b.unconnected === undefined ? cur.unconnected : b.unconnected === "inside" ? "inside" : "server";
       let domains = cur.domains;
       if (b.domains !== undefined) {
         const list = (Array.isArray(b.domains) ? b.domains : String(b.domains).split(/[\s,;]+/)).map((d: any) => String(d || "").trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
@@ -1689,15 +1930,43 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (!domains.length) throw bad("Keep at least one domain (e.g. credencehousinglimited.com).");
       }
       await queryDB(
-        `INSERT INTO mail_system_settings (id, internal_delivery, internal_domains, updated_by) VALUES (1, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE internal_delivery = VALUES(internal_delivery), internal_domains = VALUES(internal_domains), updated_by = VALUES(updated_by)`,
-        [on ? 1 : 0, domains.join(","), Number(req.user.id)]
+        `INSERT INTO mail_system_settings (id, internal_delivery, internal_domains, unconnected_route, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE internal_delivery = VALUES(internal_delivery), internal_domains = VALUES(internal_domains), unconnected_route = VALUES(unconnected_route), updated_by = VALUES(updated_by)`,
+        [on ? 1 : 0, domains.join(","), unconnected, Number(req.user.id)]
       );
       systemCache = null;
       res.json(await publicSystem(req));
     })
   );
 
+
+  // The links on the Credence design signature. Seeing them: the module's "read";
+  // changing them: the explicit-only "mail_signature" layer. An empty address hides that link.
+  app.put(
+    "/api/mail/admin/signature-links",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_signature"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const b = req.body || {};
+      const cur = (await systemSettings()).signatureLinks;
+      const pick = (key: "website" | "facebook" | "linkedin", label: string) => {
+        if (b[key] === undefined) return cur[key];
+        const v = String(b[key] ?? "").trim();
+        if (v === "") return "";
+        if (!/^https?:\/\/[^\s"'<>]{3,290}$/i.test(v)) throw bad(`${label} must be a full web address starting with https:// (or leave it empty to hide the link).`);
+        return v;
+      };
+      const next = { website: pick("website", "Website"), facebook: pick("facebook", "Facebook"), linkedin: pick("linkedin", "LinkedIn") };
+      await queryDB(
+        `INSERT INTO mail_system_settings (id, sig_website, sig_facebook, sig_linkedin, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE sig_website = VALUES(sig_website), sig_facebook = VALUES(sig_facebook), sig_linkedin = VALUES(sig_linkedin), updated_by = VALUES(updated_by)`,
+        [next.website, next.facebook, next.linkedin, Number(req.user.id)]
+      );
+      systemCache = null;
+      res.json(await publicSystem(req));
+    })
+  );
 
   // ---- Groups: Mail Administration -> Groups ---------------------------------
   // Seeing them: the module's "read"; adding / changing / removing: the
@@ -2030,7 +2299,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   );
 
   // ---- Sync ---------------------------------------------------------------
-  const lastManualSync = new Map<number, number>();
+  const lastManualSync = new Map<string, number>();
   app.post(
     "/api/mail/sync",
     ...gate,
@@ -2039,20 +2308,220 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const result: any[] = [];
       for (const a of list) {
         // A sync for the same mailbox a few seconds ago is enough.
-        const prev = lastManualSync.get(Number(a.id)) || 0;
+        const syncKey = `${a.id}:${Number(req.body?.folderId) || ""}`;
+        const prev = lastManualSync.get(syncKey) || 0;
         if (Date.now() - prev < 10_000) {
           result.push({ accountId: Number(a.id), skipped: true });
           continue;
         }
-        lastManualSync.set(Number(a.id), Date.now());
+        lastManualSync.set(syncKey, Date.now());
         try {
-          const r = await syncAndNotify(a);
-          result.push({ accountId: Number(a.id), inbox: r.inbox, sent: r.sent, spam: r.junk });
+          // { folderId }: just that one of the person's folders (opened in the list).
+          const fid = Number(req.body?.folderId);
+          const r = await syncAndNotify(a, fid > 0 ? [`f:${fid}`] : undefined);
+          result.push({ accountId: Number(a.id), inbox: r.inbox, sent: r.sent, spam: r.junk, folders: r.folders });
         } catch (e: any) {
           result.push({ accountId: Number(a.id), error: e.message });
         }
       }
       res.json({ accounts: result });
+    })
+  );
+
+  // ---- My folders (part of Credence Mail) -----------------------------------
+  const requireFolders = async (req: any, write: boolean) => {
+    if (write && req.mailViewAs) throw bad("Read only.", 403);
+    if (!(await hasFolders(uid(req)))) throw bad("Credence Mail isn't turned on for your account.", 403);
+  };
+  const RESERVED_FOLDERS = new Set(["inbox", "sent", "sent items", "trash", "deleted items", "spam", "junk", "drafts", "archive", "starred", "important", "scheduled", "all"]);
+  const folderName = (v: any, delim: string) => {
+    const name = String(v ?? "").replace(/[\u0000-\u001f]/g, "").trim();
+    if (!name) throw bad("Give the folder a name.");
+    if (name.length > 60) throw bad("A folder name can be at most 60 characters.");
+    if (name.includes(delim) || /[\\/*%]/.test(name)) throw bad(`A folder name can't have ${delim === "/" ? "/" : `"${delim}" or /`} \\ * or %.`);
+    return name;
+  };
+  const folderOut = (r: any, counts: Map<string, any>) => {
+    const c = counts.get(`Folder:${r.id}`) || {};
+    return { id: Number(r.id), accountId: Number(r.account_id), name: r.name, path: r.path, parentId: r.parent_id == null ? null : Number(r.parent_id), selectable: !!Number(r.selectable), systemRole: r.system_role || null, total: Number(c.n || 0), unread: Number(c.unread || 0) };
+  };
+  async function folderCounts(userId: number) {
+    const rows: any[] =
+      (await queryDB(
+        `SELECT labels_json, is_read FROM mail_messages WHERE user_id = ? AND labels_json LIKE '%"Folder:%' AND labels_json NOT LIKE '%"Trash"%' AND labels_json NOT LIKE '%"Spam"%'`,
+        [userId]
+      ).catch(() => [])) || [];
+    const m = new Map<string, any>();
+    for (const r of rows) {
+      const l = folderLabelOf(parseJson<string[]>(r.labels_json, []));
+      if (!l) continue;
+      const c = m.get(l) || { n: 0, unread: 0 };
+      c.n++;
+      if (!Number(r.is_read)) c.unread++;
+      m.set(l, c);
+    }
+    return m;
+  }
+  const myFolder = async (req: any, id: any) => {
+    const f: any = ((await queryDB("SELECT * FROM mail_folders WHERE id = ? AND user_id = ?", [Number(id), uid(req)])) || [])[0];
+    if (!f) throw bad("That folder no longer exists.", 404);
+    return { f, a: await accountOf(uid(req), f.account_id) };
+  };
+  // ?accountId= &refresh=1 — every mailbox's folders (as the server has them), with counts.
+  app.get(
+    "/api/mail/folders",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      await requireFolders(req, false);
+      const list = req.query.accountId ? [await accountOf(uid(req), req.query.accountId)] : await accountsOf(uid(req));
+      const errors: any[] = [];
+      for (const a of list) await refreshFolders(a, req.query.refresh === "1").catch((e) => errors.push({ accountId: Number(a.id), error: imapError(e) }));
+      const counts = await folderCounts(uid(req));
+      const out: any[] = [];
+      for (const a of list) out.push(...(await folderRows(Number(a.id))).map((r) => folderOut(r, counts)));
+      res.json({ folders: out, errors });
+    })
+  );
+  // { accountId, name, parentId? } — a new folder on the mail server.
+  app.post(
+    "/api/mail/folders",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const a = await accountOf(uid(req), req.body?.accountId);
+      const parent = req.body?.parentId ? (await myFolder(req, req.body.parentId)).f : null;
+      if (parent && Number(parent.account_id) !== Number(a.id)) throw bad("That folder belongs to another mailbox.");
+      if ((await folderRows(Number(a.id))).length >= 300) throw bad("At most 300 folders in a mailbox.");
+      let path = "";
+      let name = "";
+      if (isInternalBox(a)) {
+        name = folderName(req.body?.name, "/");
+        path = parent ? `${parent.path}/${name}` : name;
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const ns: any = (c as any).namespace || {};
+            const delim = ns.delimiter || (await c.list())[0]?.delimiter || "/";
+            name = folderName(req.body?.name, delim);
+            if (!parent && RESERVED_FOLDERS.has(name.toLowerCase())) throw bad(`"${name}" is already a mail folder — pick another name.`);
+            path = parent ? `${parent.path}${delim}${name}` : `${ns.prefix || ""}${name}`;
+            const exists = (await c.list()).some((m: any) => String(m.path).toLowerCase() === path.toLowerCase());
+            if (exists) throw bad(`There is already a folder "${name}" here.`);
+            const r: any = await c.mailboxCreate(path);
+            path = String(r?.path || path);
+            await c.mailboxSubscribe(path).catch(() => undefined);
+          })
+        );
+      }
+      const dupe: any[] = await queryDB("SELECT id FROM mail_folders WHERE account_id = ? AND LOWER(path) = LOWER(?)", [Number(a.id), path]);
+      if (dupe.length) throw bad(`There is already a folder "${name}" here.`);
+      const ins: any = await queryDB("INSERT INTO mail_folders (account_id, user_id, path, name, parent_id, selectable) VALUES (?, ?, ?, ?, ?, 1)", [
+        Number(a.id), uid(req), path.slice(0, 500), name, parent ? Number(parent.id) : null
+      ]);
+      res.json({ success: true, folder: folderOut({ id: ins.insertId, account_id: a.id, name, path, parent_id: parent?.id ?? null, selectable: 1 }, new Map()) });
+    })
+  );
+  // { name } — renamed on the server; the folders inside it move with it.
+  app.patch(
+    "/api/mail/folders/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const { f, a } = await myFolder(req, req.params.id);
+      if (f.system_role) throw bad(`This is your ${ROLE_LABEL[f.system_role] || "mail"} folder — it can't be renamed here.`);
+      const all = await folderRows(Number(a.id));
+      let newPath = "";
+      let name = "";
+      if (isInternalBox(a)) {
+        name = folderName(req.body?.name, "/");
+        const cut = String(f.path).lastIndexOf("/");
+        newPath = cut > 0 ? `${String(f.path).slice(0, cut)}/${name}` : name;
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const list = await c.list();
+            const delim = list.find((m: any) => String(m.path) === String(f.path))?.delimiter || (c as any).namespace?.delimiter || "/";
+            name = folderName(req.body?.name, delim);
+            const cut = String(f.path).lastIndexOf(delim);
+            const ns: any = (c as any).namespace || {};
+            newPath = cut > 0 ? `${String(f.path).slice(0, cut)}${delim}${name}` : `${ns.prefix && String(f.path).startsWith(ns.prefix) ? ns.prefix : ""}${name}`;
+            if (newPath === f.path) return;
+            if (!f.parent_id && RESERVED_FOLDERS.has(name.toLowerCase())) throw bad(`"${name}" is already a mail folder — pick another name.`);
+            if (list.some((m: any) => String(m.path).toLowerCase() === newPath.toLowerCase() && String(m.path) !== String(f.path))) throw bad(`There is already a folder "${name}" here.`);
+            const r: any = await c.mailboxRename(String(f.path), newPath);
+            newPath = String(r?.newPath || newPath);
+            await c.mailboxSubscribe(newPath).catch(() => undefined);
+          })
+        );
+      }
+      if (newPath && newPath !== f.path) {
+        // This folder and every folder inside it: the new path in front.
+        const inside = (id: number): any[] => all.filter((r) => Number(r.parent_id) === id).flatMap((r) => [r, ...inside(Number(r.id))]);
+        for (const r of [f, ...inside(Number(f.id))]) {
+          const p = String(r.path);
+          if (!p.startsWith(String(f.path))) continue;
+          const np = newPath + p.slice(String(f.path).length);
+          await queryDB("UPDATE mail_folders SET path = ?, name = IF(id = ?, ?, name) WHERE id = ?", [np.slice(0, 500), Number(f.id), name, Number(r.id)]);
+          await queryDB("UPDATE mail_folder_state SET path = ? WHERE account_id = ? AND role = ?", [np.slice(0, 255), Number(a.id), `f:${r.id}`]);
+        }
+      }
+      res.json({ success: true });
+    })
+  );
+  // Deleted on the server with the folders inside it; their mail goes back to Inbox first — no mail is deleted.
+  app.delete(
+    "/api/mail/folders/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireFolders(req, true);
+      const { f, a } = await myFolder(req, req.params.id);
+      if (f.system_role) throw bad(`This is your ${ROLE_LABEL[f.system_role] || "mail"} folder — it can't be deleted here.`);
+      const all = await folderRows(Number(a.id));
+      const under = (id: number): any[] => all.filter((r) => Number(r.parent_id) === id).flatMap((r) => [...under(Number(r.id)), r]);
+      const doomed = [...under(Number(f.id)), f]; // deepest first
+      let moved = 0;
+      const toInbox = async (id: number, map?: Map<number, number>) => {
+        const rows: any[] = (await queryDB("SELECT id, uid, labels_json FROM mail_messages WHERE account_id = ? AND labels_json LIKE ?", [Number(a.id), `%${JSON.stringify(`Folder:${id}`)}%`])) || [];
+        for (const r of rows) {
+          const labels = parseJson<string[]>(r.labels_json, []).filter((l) => l !== `Folder:${id}`);
+          if (!labels.includes("Inbox")) labels.unshift("Inbox");
+          const newUid = r.uid != null && map ? map.get(Number(r.uid)) ?? null : r.uid;
+          await queryDB("UPDATE mail_messages SET labels_json = ?, folder_role = 'inbox', uid = ? WHERE id = ?", [JSON.stringify(labels), newUid, Number(r.id)]);
+        }
+        moved += rows.length;
+      };
+      if (isInternalBox(a)) {
+        for (const r of doomed) await toInbox(Number(r.id));
+      } else {
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            for (const r of doomed) {
+              let map: Map<number, number> | undefined;
+              if (Number(r.selectable)) {
+                const lock = await c.getMailboxLock(String(r.path)).catch(() => null);
+                if (lock) {
+                  try {
+                    if (Number((c as any).mailbox?.exists || 0) > 0) map = ((await c.messageMove("1:*", "INBOX")) as any)?.uidMap;
+                  } finally {
+                    lock.release();
+                  }
+                }
+              }
+              await toInbox(Number(r.id), map);
+              await c.mailboxDelete(String(r.path)).catch((e: any) => {
+                if (!/NONEXISTENT|doesn't exist|not exist/i.test(String(e?.responseText || e?.message || ""))) throw e;
+              });
+            }
+          })
+        );
+      }
+      for (const r of doomed) {
+        await queryDB("DELETE FROM mail_folder_state WHERE account_id = ? AND role = ?", [Number(a.id), `f:${r.id}`]);
+        await queryDB("DELETE FROM mail_folders WHERE id = ?", [Number(r.id)]);
+      }
+      io.to(`user:${uid(req)}`).emit("mail:changed", { accountId: Number(a.id) });
+      res.json({ success: true, folders: doomed.length, movedToInbox: moved });
     })
   );
 
@@ -2108,6 +2577,63 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         queryDB(`SELECT ${LIST_COLS} FROM mail_messages WHERE ${w} ORDER BY mail_date DESC, id DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`, params)
       ]);
       res.json({ items: rows.map((r: any) => toApi(r, false)), total: Number(countRows[0]?.n || 0), unread: Number(countRows[0]?.unread || 0), page, limit });
+    })
+  );
+
+  // { label: Inbox | Sent | Spam | Folder:<id>, accountId? } — older mail
+  // than the mailbox brought in (it starts with the latest INITIAL_SYNC of
+  // each folder): the next OLDER_BATCH from the server, oldest kept last.
+  const OLDER_BATCH = 100;
+  app.post(
+    "/api/mail/older",
+    ...gate,
+    handler(async (req, res) => {
+      const label = String(req.body?.label || "");
+      const fid = /^Folder:(\d+)$/.exec(label)?.[1];
+      const role = fid ? `f:${fid}` : label === "Inbox" ? "inbox" : label === "Sent" ? "sent" : label === "Spam" ? "junk" : "";
+      if (!role) throw bad("Older mail comes for Inbox, Sent, Spam or one of your folders.");
+      let list: any[];
+      if (fid) {
+        await requireFolders(req, false);
+        const { f, a } = await myFolder(req, fid);
+        if (!Number(f.selectable)) throw bad("That folder only holds other folders.");
+        list = [a];
+      } else list = req.body?.accountId ? [await accountOf(uid(req), req.body.accountId)] : await accountsOf(uid(req));
+      let added = 0;
+      let left = 0;
+      for (const a of list) {
+        if (isInternalBox(a)) continue;
+        // Never synced yet: the normal first sync brings the latest ones.
+        const known: any[] = await queryDB("SELECT MIN(uid) AS u FROM mail_messages WHERE account_id = ? AND folder_role = ? AND uid IS NOT NULL", [Number(a.id), role]);
+        if (!known[0]?.u) {
+          const r = await syncAndNotify(a, [role]).catch(() => null);
+          added += r ? r.inbox + r.sent + r.junk + r.folders : 0;
+          continue;
+        }
+        await withAccountLock(Number(a.id), () =>
+          withImap(a, async (c) => {
+            const path = (await allFoldersOf(a, c))[role];
+            if (!path) return;
+            const lock = await c.getMailboxLock(path);
+            try {
+              const upto = Number(known[0].u) - 1;
+              if (upto < 1) return;
+              const uids: number[] = ((await c.search({ uid: `1:${upto}` }, { uid: true })) || []) as number[];
+              const take = uids.slice(-OLDER_BATCH);
+              left += uids.length - take.length;
+              if (!take.length) return;
+              for await (const m of c.fetch(take.join(","), { uid: true, envelope: true, flags: true, source: true, internalDate: true }, { uid: true })) {
+                // Old mail: no alert, no auto-reply; rules don't move it.
+                const row = await storeFetched(a, role, m, false, true);
+                if (row) added++;
+              }
+            } finally {
+              lock.release();
+            }
+          })
+        );
+      }
+      res.json({ added, left });
     })
   );
 
@@ -2331,7 +2857,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const labels = parseJson<string[]>(row.labels_json, []);
     return labels.includes("Trash") || (!row.uid && (labels.includes("Drafts") || labels.includes("Scheduled")));
   };
-  const toTrashLabels = (row: any) => [...parseJson<string[]>(row.labels_json, []).filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive"), "Trash"];
+  const toTrashLabels = (row: any) => [...parseJson<string[]>(row.labels_json, []).filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive" && !/^Folder:\d+$/.test(l)), "Trash"];
   async function deleteOne(userId: number, row: any) {
     const labels = parseJson<string[]>(row.labels_json, []);
     if (deletesForGood(row)) {
@@ -2363,7 +2889,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const a = await accountOf(userId, accountId);
     await withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
-        const folders = await foldersOf(a, c);
+        const folders = await allFoldersOf(a, c);
         const path = folders[role];
         if (!path) return;
         const lock = await c.getMailboxLock(path);
@@ -2479,8 +3005,20 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       if (action === "delete") await deleteMany(uid(req), rows);
       else if (action === "move") {
         const to = String(req.body?.to || "");
-        if (!["Inbox", "Spam", "Archive"].includes(to)) throw bad("Move to Inbox, Spam or Archive.");
-        await moveMany(uid(req), rows, (r) => [...parseJson<string[]>(r.labels_json, []).filter((l) => !["Inbox", "Spam", "Trash", "Archive"].includes(l)), to]);
+        const fid = /^Folder:(\d+)$/.exec(to)?.[1];
+        if (!["Inbox", "Spam", "Archive"].includes(to) && !fid) throw bad("Move to Inbox, Spam, Archive or one of your folders.");
+        let list = rows;
+        if (fid) {
+          // One of the person's own folders: only mail of that same mailbox goes in.
+          if (!(await hasFolders(uid(req)))) throw bad("Credence Mail isn't turned on for your account.", 403);
+          const f: any = ((await queryDB("SELECT * FROM mail_folders WHERE id = ? AND user_id = ?", [Number(fid), uid(req)])) || [])[0];
+          if (!f) throw bad("That folder no longer exists.", 404);
+          if (!Number(f.selectable)) throw bad("That folder only holds other folders.");
+          list = rows.filter((r) => Number(r.account_id) === Number(f.account_id));
+          if (!list.length) throw bad("That folder belongs to another mailbox.");
+        }
+        await moveMany(uid(req), list, (r) => [...parseJson<string[]>(r.labels_json, []).filter((l) => !["Inbox", "Spam", "Trash", "Archive"].includes(l) && !/^Folder:\d+$/.test(l)), to]);
+        return res.json({ success: true, done: list.length, skipped: rows.length - list.length });
       } else {
         const patch = req.body?.patch || {};
         if (Array.isArray(patch.labels)) for (const r of rows) await applyPatch(uid(req), r, patch);
@@ -2567,7 +3105,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       subject: row.subject || "",
       html: row.body || "",
       files
-    });
+    }, { viaServer: !!Number(row.via_server) });
     // A copy in the server's Sent folder (other mail apps see it too) — only
     // when it went out through the server; mail that stayed inside
     // CredenceHR is kept here only.
@@ -2622,17 +3160,18 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       refs = [...refList(orig?.refs), inReplyTo].filter((x, i, all) => all.indexOf(x) === i).join(" ").slice(0, 4000);
     }
     const thread = threadOf(messageId, inReplyTo, refs);
+    const viaServer = b.viaServer ? 1 : 0;
     let id = existingId;
     if (id) {
       await queryDB(
-        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, refs = ?, message_id = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ? WHERE id = ? AND user_id = ?`,
-        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, refs, messageId, thread, a.email, a.display_name || a.email, id, userId]
+        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, refs = ?, message_id = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ?, via_server = ? WHERE id = ? AND user_id = ?`,
+        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, refs, messageId, thread, a.email, a.display_name || a.email, viaServer, id, userId]
       );
     } else {
       const r: any = await queryDB(
-        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, message_id, thread_id, in_reply_to, refs, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at)
-         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?)`,
-        [userId, Number(a.id), messageId, thread, inReplyTo, refs, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt]
+        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, message_id, thread_id, in_reply_to, refs, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at, via_server)
+         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?, ?)`,
+        [userId, Number(a.id), messageId, thread, inReplyTo, refs, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, viaServer]
       );
       id = Number(r.insertId);
     }
@@ -2794,7 +3333,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
            picture_senders_json = VALUES(picture_senders_json), layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
         [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.pictureSenders), JSON.stringify(next.layout), next.language, next.timezone]
       );
-      res.json(next);
+      // The person's own "Send through the mail server" default (a plain true / false).
+      let sendViaServer = cur.sendViaServer;
+      if (typeof b.sendViaServer === "boolean") {
+        sendViaServer = b.sendViaServer;
+        await queryDB(
+          "INSERT INTO mail_settings (user_id, send_via_server) VALUES (?, ?) ON DUPLICATE KEY UPDATE send_via_server = VALUES(send_via_server)",
+          [uid(req), sendViaServer ? 1 : 0]
+        );
+      }
+      res.json({ ...next, sendViaServer });
     })
   );
 
@@ -2900,7 +3448,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           markRead: !!ac.markRead,
           star: !!ac.star,
           applyLabels: (Array.isArray(ac.applyLabels) ? ac.applyLabels : ac.applyLabel ? [ac.applyLabel] : []).map((x: any) => str(x, 60)).filter(Boolean).slice(0, 10),
-          categorize: str(ac.categorize, 30) || undefined
+          categorize: str(ac.categorize, 30) || undefined,
+          // One of the person's own folders (My folders); checked again when mail arrives.
+          moveToFolder: Number(ac.moveToFolder) > 0 ? Number(ac.moveToFolder) : undefined
         }),
         is_active: b.isActive === false ? 0 : 1
       };
@@ -3183,6 +3733,44 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         if (now - last > 3 * 60_000) syncAndNotify(a, ["inbox"]).catch(() => undefined);
       }
     }
+    for (const a of accts) {
+      if (isInternalBox(a) || now - (folderCheckAt.get(Number(a.id)) || 0) < 5 * 60_000) continue;
+      folderCheckAt.set(Number(a.id), now);
+      if (await hasFolders(Number(a.user_id))) await syncFolderChanges(a).catch(() => undefined);
+    }
+  }
+
+  // My folders in the background: every 5 minutes for people online, one
+  // login asks the server how far each folder has got (STATUS — no mail is
+  // fetched for that); only folders with new mail are then synced. A folder
+  // nobody has opened yet comes in a few at a time.
+  const folderCheckAt = new Map<number, number>();
+  async function syncFolderChanges(a: any) {
+    if (isInternalBox(a)) return;
+    await refreshFolders(a).catch(() => undefined);
+    const rows = (await folderRows(Number(a.id))).filter((r) => Number(r.selectable));
+    if (!rows.length) return;
+    const states = new Map<string, any>(
+      (((await queryDB("SELECT role, uidvalidity, last_uid FROM mail_folder_state WHERE account_id = ?", [Number(a.id)])) || []) as any[]).map((x) => [String(x.role), x])
+    );
+    const changed: string[] = [];
+    let firstTimes = 0;
+    await withAccountLock(Number(a.id), () =>
+      withImap(a, async (c) => {
+        for (const r of rows) {
+          const role = `f:${r.id}`;
+          const st = states.get(role);
+          if (!st) {
+            if (firstTimes++ < 3) changed.push(role);
+            continue;
+          }
+          const s: any = await c.status(String(r.path), { uidNext: true, uidValidity: true }).catch(() => null);
+          if (!s) continue;
+          if (Number(s.uidValidity) !== Number(st.uidvalidity) || Number(s.uidNext) - 1 > Number(st.last_uid)) changed.push(role);
+        }
+      })
+    );
+    if (changed.length) await syncAndNotify(a, changed);
   }
 
   // Scheduled mail whose time has come.

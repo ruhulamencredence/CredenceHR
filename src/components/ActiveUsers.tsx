@@ -9,8 +9,9 @@
 // and a laptop shows twice. Refreshes itself every 30 seconds. Also where
 // the Superadmin sets how long a sign-in lasts and ends one (SessionSecurity.ts).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Globe, LogOut, Monitor, RefreshCw, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, ChevronDown, Globe, LogOut, Monitor, RefreshCw, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
+import { useCardOpen } from '../lib/useCardOpen';
 import { useHrApi, Notice, inputCls } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
@@ -66,6 +67,7 @@ const SessionSecurityCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMsg: (
   const [form, setForm] = useState<Record<PolicyKey, string> | null>(null);
   const [limits, setLimits] = useState<Record<PolicyKey, [number, number]> | null>(null);
   const [saving, setSaving] = useState(false);
+  const [open, toggle] = useCardOpen('active-users-session-security');
   const toForm = (p: Policy) => Object.fromEntries(POLICY_FIELDS.map(([k]) => [k, String(p[k])])) as Record<PolicyKey, string>;
   useEffect(() => {
     api
@@ -97,14 +99,21 @@ const SessionSecurityCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMsg: (
   };
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3">
-      <div>
-        <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" /> Session security
-        </div>
-        <p className="text-[11px] text-slate-500 mt-0.5">
-          After this, the person has to sign in again. Logout, a changed password and Sign out below end a sign-in at once.
-        </p>
-      </div>
+      <button type="button" aria-expanded={open} onClick={toggle} className="w-full flex items-start gap-2 text-left">
+        <ChevronDown className={`w-4 h-4 mt-0.5 shrink-0 text-slate-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+        <span className="flex-1 min-w-0">
+          <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" /> Session security
+          </span>
+          <span className="block text-[11px] text-slate-500 mt-0.5">
+            {open
+              ? 'After this, the person has to sign in again. Logout, a changed password and Sign out below end a sign-in at once.'
+              : // Closed: how long each kind of sign-in lasts, e.g. "Website sign-in lasts 12 hours · App sign-in lasts 7 days".
+                POLICY_FIELDS.filter(([, label]) => label.endsWith('lasts')).map(([k, label, unit]) => `${label} ${policy[k]} ${unit.split(' ')[0]}`).join(' · ') + (changed ? ' · changes not saved' : '')}
+          </span>
+        </span>
+      </button>
+      {open && (<>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
         {POLICY_FIELDS.map(([k, label, unit]) => (
           <label key={k} className="block">
@@ -142,6 +151,7 @@ const SessionSecurityCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMsg: (
           </button>
         </div>
       )}
+      </>)}
     </div>
   );
 };
@@ -193,6 +203,18 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState('');
+  // The sticky search bar's height: the table's column titles stick just
+  // below it, which sits under the app's 4rem header (computer screens; a
+  // phone shows cards instead of the table).
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(48);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setBarH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const [msg, setMsg] = useState<Msg>(null);
 
   const load = useCallback(() => {
@@ -293,7 +315,11 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Range tabs + search stay at the top while the list scrolls, and the
+          table's column titles stay right under them (sticky; the table box
+          clips instead of scrolling sideways so the sticky titles follow
+          the page, not the box). */}
+      <div ref={barRef} className="md:sticky md:top-16 z-20 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm flex flex-wrap items-center gap-2">
         <div className="inline-flex p-0.5 rounded-lg bg-slate-100">
           {RANGES.map(([key, label]) => (
             <button
@@ -360,9 +386,9 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
           </div>
 
           {/* Wider screens: table. */}
-          <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
+          <div className="hidden md:block overflow-clip rounded-xl border border-slate-200">
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500">
+              <thead className="sticky z-10 bg-slate-50 text-left text-[10px] uppercase tracking-wide text-slate-500 shadow-[0_1px_0_rgb(226,232,240)]" style={{ top: 64 + barH }}>
                 <tr>
                   <th className="px-3 py-2 font-semibold">Account</th>
                   <th className="px-3 py-2 font-semibold">Status</th>
