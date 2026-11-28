@@ -1405,3 +1405,7 @@ Departments → Edit → Teams-এ প্রতিটা team-এ নতুন �
 ## Dashboard My Attendance: সংশোধিত In দেখায় (২৮ নভেম্বর)
 
 Dashboard-এর My Attendance কার্ড আর "Checked in at …" চিপ (`dayPicture` — `/api/attendance/day-status`, `/api/attendance/today-summary`) আগে GPS অবস্থান ছাড়া কোনো In গুনত না, যাতে অফিস মেশিনের পাঞ্চ থেকে কপি হওয়া সারি দুবার না আসে। ফলে Timesheet থেকে অনুমোদিত Correction বা Admin-এর দেওয়া In (এগুলোতে GPS থাকে না) Timesheet-এ দেখাত, কিন্তু Dashboard "Not checked in" বলত। এখন GPS ছাড়া সারি শুধু তখনই বাদ যায় যখন ঠিক সেই মিনিটে মেশিনের পাঞ্চ আছে (তখন পাঞ্চটাই In); বাকিগুলো In হিসেবে গোনা হয়।
+
+## "Supervisor / Reports to" সব জায়গায় অনুমোদনের পথ মেনে (২৮ নভেম্বর)
+
+Service Book, Employee 360, HR Operations-এর চিঠি/রিপোর্ট (`HROperationsRoutes.ts` `snapshotOf`) আগে Direct Supervisor না থাকলে Departments-এর পুরোনো একক Supervisor ঘর (`departments.supervisor_user_id`) দেখাত — team চালুর পর সেটা আর কিছু পড়ে না, আর সেখানে Head-ই ছিলেন, তাই প্রায় সবার Supervisor হিসেবে Head দেখাত। এখন সব জায়গায় একই নিয়ম, যে পথে আবেদন যায় (`DepartmentTeams.ts` `reportingLineByEmployee`): Direct Supervisor (Employees → Supervisor) → নিজের team-এর Supervisor (নিজে হলে নয়) → Head of Department (team-এ "Skip the Head" চালু থাকলে নয়) → না হলে "Not set"। Employee Directory-র "Reports to" আর Employees তালিকার Department-এর টুলটিপ (`GET /api/employees` `reports_to_name`, সাথে Head-এর নাম) একই নিয়ম মানে।

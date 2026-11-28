@@ -57,6 +57,7 @@ import { requestApprovalReconcile } from "./approvalReconcile";
 import { activeCompanyId } from "./companyContext";
 
 import { attachPersonInfo } from "./personInfo";
+import { reportingLineByEmployee } from "./DepartmentTeams";
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
 interface HROperationsRouteDeps {
@@ -855,7 +856,7 @@ interface EmployeeSnapshot {
 }
 
 export async function loadEmployeeWorld(queryDB: QueryDB) {
-  const [employees, services, salaries, supervisors, users, projects, departments, branches] = await Promise.all([
+  const [employees, services, salaries, supervisors, users, projects, departments, branches, reportsTo] = await Promise.all([
     queryDB("SELECT * FROM all_employees"),
     queryDB("SELECT * FROM hr_employee_service").catch(() => []),
     queryDB("SELECT * FROM salary_structures").catch(() => []),
@@ -863,9 +864,11 @@ export async function loadEmployeeWorld(queryDB: QueryDB) {
     queryDB("SELECT * FROM users").catch(() => []),
     queryDB("SELECT * FROM projects").catch(() => []),
     queryDB("SELECT * FROM departments").catch(() => []),
-    queryDB("SELECT * FROM branches").catch(() => [])
+    queryDB("SELECT * FROM branches").catch(() => []),
+    // Team Supervisor / Head of Department per employee (DepartmentTeams.ts).
+    reportingLineByEmployee(queryDB)
   ]);
-  return { employees, services, salaries, supervisors, users, projects, departments, branches };
+  return { employees, services, salaries, supervisors, users, projects, departments, branches, reportsTo };
 }
 type World = Awaited<ReturnType<typeof loadEmployeeWorld>>;
 
@@ -884,17 +887,15 @@ export function snapshotOf(world: World, employeeId: number, asOf?: string): Emp
     .filter((s: any) => Number(s.employee_id) === employeeId && Number(s.is_direct) === 1)
     .sort((a: any, b: any) => Number(b.id) - Number(a.id))[0];
   const supEmp = supRow ? world.employees.find((e: any) => Number(e.id) === Number(supRow.supervisor_id)) : null;
-  // No supervisor of their own: the Department's Supervisor (a login), shown
-  // as that person's Employee record when they have one. Not when the
-  // Department's Supervisor is this person themself.
+  // No supervisor of their own: the one their requests go to — their team's
+  // Supervisor, else the Head of their Department (not when the team skips
+  // the Head; DepartmentTeams.ts reportingLineByEmployee), shown as that
+  // person's Employee record when they have one. It used to be the old
+  // single Department Supervisor (departments.supervisor_user_id), which
+  // nothing else reads since teams — so the Head showed for everyone.
   let deptSup: { id: number; name: string; from_department: true } | null = null;
   if (!supEmp) {
-    const dept = world.departments.find(
-      (d: any) =>
-        (employee.department_id != null && Number(d.id) === Number(employee.department_id)) ||
-        (employee.department_id == null && employee.department && String(d.name || "").trim().toLowerCase() === String(employee.department).trim().toLowerCase())
-    );
-    const supUserId = dept?.supervisor_user_id ? Number(dept.supervisor_user_id) : null;
+    const supUserId = world.reportsTo.get(employeeId) || null;
     if (supUserId && supUserId !== Number(employee.user_id || 0)) {
       const asEmp = world.employees.find((e: any) => Number(e.user_id) === supUserId && Number(e.is_active ?? 1) === 1) || world.employees.find((e: any) => Number(e.user_id) === supUserId);
       const asUser = world.users.find((u: any) => Number(u.id) === supUserId);

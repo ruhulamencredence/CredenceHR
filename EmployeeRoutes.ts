@@ -22,6 +22,7 @@ import { employeeFieldProblem } from "./EmployeeValidation";
 import { autoLinkByEmployeeId, employeeIdConflict, orphanLoginForEmployeeId, syncEmployeeLoginId } from "./EmployeeLoginId";
 import { requestApprovalReconcile } from "./approvalReconcile";
 import { divisionOfBranchType } from "./BranchDivision";
+import { reportingLineByEmployee } from "./DepartmentTeams";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -100,6 +101,17 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
           })
         : allSorted;
       const sorted = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : allSorted;
+      // Who each one reports to — the person their requests go to first: the
+      // Direct Supervisor (Employees -> Supervisor), else their team's
+      // Supervisor, else the Head (not when the team skips the Head).
+      const [line, directRows, nameRows]: any[] = await Promise.all([
+        reportingLineByEmployee(queryDB),
+        queryDB("SELECT es.employee_id, sup.name FROM employee_supervisors es JOIN all_employees sup ON sup.id = es.supervisor_id WHERE es.is_direct = 1 ORDER BY es.id").catch(() => []),
+        queryDB("SELECT u.id, COALESCE(e.name, u.name) AS name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id").catch(() => [])
+      ]);
+      const directOf = new Map<number, string>((directRows || []).map((r: any) => [Number(r.employee_id), String(r.name || "")]));
+      const nameOfUser = new Map<number, string>((nameRows || []).map((r: any) => [Number(r.id), String(r.name || "")]));
+      const reportsTo = (id: number) => directOf.get(id) || (line.get(id) ? nameOfUser.get(line.get(id)) || null : null);
       const shaped =
         sorted.map((e: any) => {
           const out: Record<string, any> = {
@@ -127,7 +139,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
             // Office Attendance device PIN — the edit form shows (and keeps) it.
             zk_device_pin: e.zk_device_pin ?? null,
             // Whose employee (the list mixes companies in All companies mode).
-            company_id: Number(e.company_id ?? 1)
+            company_id: Number(e.company_id ?? 1),
+            reports_to_name: reportsTo(Number(e.id))
           };
           for (const field of EMPLOYEE_EXT_FIELDS) {
             out[field] = (EMPLOYEE_BOOL_FIELDS as readonly string[]).includes(field)

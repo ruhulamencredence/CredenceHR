@@ -26,7 +26,7 @@
 
 import type { Express } from "express";
 import { companyStore } from "./companyContext";
-import { teamSupervisorByEmployee } from "./DepartmentTeams";
+import { reportingLineByEmployee } from "./DepartmentTeams";
 
 interface EmployeeDirectoryRouteDeps {
   authenticateToken: any;
@@ -94,24 +94,21 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
       );
       // "Reports to" the way a request actually goes: the Direct Supervisor
       // (Employees -> Supervisor) if set, else the Supervisor of the person's
-      // team (Departments -> Teams), else the Head of their Department. It
+      // team (Departments -> Teams), else the Head of their Department (not
+      // when the team has "Skip the Head of Department" on). It
       // used to show only the first, so someone given a Supervisor through a
       // team read "Not set".
       const loadAll = async () => {
-        const [list, teamSup, heads, logins] = await Promise.all([
+        const [list, line, logins] = await Promise.all([
           load(),
-          teamSupervisorByEmployee(queryDB),
-          queryDB("SELECT id, head_user_id FROM departments WHERE is_active = 1").catch(() => []),
+          reportingLineByEmployee(queryDB),
           queryDB("SELECT u.id, COALESCE(e.name, u.name) AS name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id").catch(() => [])
         ]);
-        const headOf = new Map<number, number>(((heads || []) as any[]).filter((h) => h.head_user_id).map((h) => [Number(h.id), Number(h.head_user_id)]));
         const nameOfUser = new Map<number, string>(((logins || []) as any[]).map((u) => [Number(u.id), String(u.name || "")]));
         for (const r of list as any[]) {
           if (r.supervisor_name) continue;
-          const self = Number(r.user_id) || 0;
-          const team = teamSup.get(Number(r.id));
-          const head = r.department_id ? headOf.get(Number(r.department_id)) : undefined;
-          const pick = team && team !== self ? team : head && head !== self ? head : null;
+          // Team Supervisor, else Head — not when the team skips the Head.
+          const pick = line.get(Number(r.id));
           if (pick) r.supervisor_name = nameOfUser.get(pick) || null;
         }
         return list;
