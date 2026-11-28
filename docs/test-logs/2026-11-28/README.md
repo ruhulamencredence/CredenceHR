@@ -40,3 +40,27 @@ ALL PASS
 (it adds bills without receipts): ALL PASS — the day-by-day form is unchanged.
 
 Screens: `receipts-keyboard.png`, `receipts-list.png`, `receipts-review.png`.
+
+## Personal mobile only in Admin Panel -> Employees
+
+`all_employees.mobile` (Employee Info -> Personal Contact -> Personal Mobile)
+is no longer sent anywhere else. My Team, HR 360, HR Reports ("Contact No."
+column, same key `mobile`), Vehicle drivers, Asset handover, the SIM list's
+employee picker and Headcount now use the office Contact No. (`phone`), or
+nothing. Copies already saved on rides (`driver_mobile`) and asset handovers
+(`handed_to_mobile`, `return_via_mobile`) are replaced at server start.
+
+`scripts/personal-mobile-only-in-employees.cjs` (a team member given personal
+01711000111 and office 01999000222, put back afterwards):
+
+```
+PASS a team member: Farhana Yasmin
+PASS My Team shows the office Contact No.: 01999000222
+PASS the personal mobile is nowhere in the reply
+PASS no office number → no phone (not the personal one)
+PASS HR 360: office Contact No., no personal mobile
+PASS HR Reports "Contact No." column: office number only
+PASS HR Reports column is labelled "Contact No."
+PASS Vehicle -> Drivers employee list: office Contact No. (01999000222)
+PASS Vehicle -> Drivers list: no personal mobile
+```

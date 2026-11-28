@@ -204,7 +204,9 @@ export const REPORT_COLUMNS: ColumnDef[] = [
   C("religion", "Religion", "Personal", "text", "base"),
   C("marital_status", "Marital Status", "Personal", "text", "base"),
   C("nationality", "Nationality", "Personal", "text", "base"),
-  C("mobile", "Mobile", "Personal", "text", "base"),
+  // key stays "mobile" so saved reports keep working; it is the office Contact No. —
+  // the personal mobile is shown only in Admin Panel -> Employees.
+  C("mobile", "Contact No.", "Personal", "text", "base"),
   C("email", "Email", "Personal", "text", "base"),
 
   C("previous_companies", "Previous Companies", "Experience", "list", "records"),
@@ -404,7 +406,7 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
       religion: e.religion || null,
       marital_status: e.marital_status || null,
       nationality: e.nationality || null,
-      mobile: e.mobile || e.phone || null,
+      mobile: e.phone || null,
       email: e.email || null,
       _emp: e,
       _snap: snap

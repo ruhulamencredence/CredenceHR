@@ -78,7 +78,7 @@ export function registerEmployeeHeadcountRoutes(app: Express, deps: Deps) {
           name: r.e.name,
           designation: r.e.designation || "",
           department: r.e.department || "",
-          phone: r.e.phone || r.e.mobile || "",
+          phone: r.e.phone || "",
           joining_date: r.e.joining_date || null,
           active: Number(r.e.is_active ?? 1) !== 0
         });

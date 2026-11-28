@@ -201,7 +201,8 @@ export function registerMyTeamRoutes(app: Express, deps: Deps) {
       res.json({
         ...person(emp, via),
         email: emp.email || null,
-        phone: emp.mobile || emp.phone || null,
+        // Office Contact No. only — the personal mobile stays in Admin Panel -> Employees.
+        phone: emp.phone || null,
         joining_date: emp.joining_date ? (emp.joining_date instanceof Date ? emp.joining_date.toLocaleDateString("en-CA") : String(emp.joining_date).slice(0, 10)) : null,
         today: {
           status: statusOf(day),
