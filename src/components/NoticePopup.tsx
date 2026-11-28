@@ -5,7 +5,7 @@ import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { NOTICES_CHANGED_EVENT } from '../lib/noticesLive';
-import { NoticeContent, NoticeCover, CoverChips, PRIORITY_TILE, PRIORITY_STYLE, noticeWhen, readMinutes } from './notice/NoticeParts';
+import { NoticeContent, NoticeCover, NoticeBadges, PRIORITY_TILE, PRIORITY_STYLE, noticeWhen, readMinutes } from './notice/NoticeParts';
 import { NoticeDetail } from './notice/NoticeDetail';
 import { Paperclip } from 'lucide-react';
 // Loaded only when a tracking notice is shown (it carries the tracking
@@ -260,10 +260,13 @@ export const NoticeSheet: React.FC<{
         </div>
       )}
       {hasCover && (
-        <div className="relative mx-3 mt-3 rounded-[24px] overflow-hidden">
-          <NoticeCover file={current.cover} localUrl={coverLocalUrl} token={token} className="h-[190px] max-h-[30vh]" />
-          <span className="absolute left-3 bottom-3">
-            <CoverChips priority={priority} pinned={current.pinned} />
+        // The whole cover, uncropped; the badges go under it, not on it.
+        <div className="mx-3 mt-3">
+          <div className="rounded-[24px] overflow-hidden bg-slate-100">
+            <NoticeCover file={current.cover} localUrl={coverLocalUrl} token={token} fit="contain" className="h-auto max-h-[34vh]" />
+          </div>
+          <span className="block mt-2.5 px-2">
+            <NoticeBadges priority={priority} pinned={current.pinned} />
           </span>
         </div>
       )}

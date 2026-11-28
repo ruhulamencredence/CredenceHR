@@ -769,13 +769,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     },
     // SIM & ID Card: the company SIM given to you (limit, bills) and asking HR for a SIM / ID card.
     { key: 'g_sim_self', label: 'SIM & ID Card', icon: Smartphone, entries: pick('myMobileSim', 'myRequisitions') },
-    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('alerts', 'noticeBoard', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation', 'tutorials') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
   const managementDashboardItem = itemByKey.get('management_dashboard') || null;
-  // Credence Mail and Chat sit on their own at the top of Self Service,
-  // not inside a group.
-  const selfTopItems: NavItem[] = ['credenceMail', 'chat'].map((k) => itemByKey.get(k)).filter((i): i is NavItem => !!i);
+  // Credence Mail, Chat and the Notice Board sit on their own at the top of
+  // Self Service, not inside a group.
+  const selfTopItems: NavItem[] = ['credenceMail', 'chat', 'noticeBoard'].map((k) => itemByKey.get(k)).filter((i): i is NavItem => !!i);
   const adminTopItems: NavItem[] = [adminDashboardItem, managementDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
   const adminGroups = makeGroups([
     {
