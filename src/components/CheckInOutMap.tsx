@@ -14,6 +14,7 @@
 //   Purpose (kept as a draft, same as the form; typed freely — no
 //   suggestions), Remarks.
 // - Check Out: the Check In pin, a dashed line to you and the distance.
+// - Every Project's site and area on the map, for context (GET /api/projects/all).
 // - "My location" re-reads GPS. The same API calls as the form
 //   (POST /api/claims/check-in, /api/claims/:id/check-out), so the same
 //   access (requireMovementClaimAccess) and approvals apply.
@@ -34,6 +35,17 @@ import { useMdUp } from '../lib/useMdUp';
 import { Spinner } from './Spinner';
 
 type Coords = { latitude: number; longitude: number };
+// A Project's site (muted gray, so it never reads as you or your Check In).
+const projectPinIcon = L.divIcon({
+  className: '',
+  html: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));">
+    <path d="M12 0C7.03 0 3 4.03 3 9c0 6.75 9 15 9 15s9-8.25 9-15c0-4.97-4.03-9-9-9z" fill="#94a3b8"/>
+    <circle cx="12" cy="9" r="3.4" fill="white"/>
+  </svg>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 22],
+  popupAnchor: [0, -19]
+});
 const DHAKA: L.LatLngTuple = [23.8103, 90.4125];
 const ZOOM = 16;
 
@@ -197,6 +209,40 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   useEffect(() => {
     mapRef.current?.invalidateSize();
   }, [wide]);
+
+  // Every Project's site and area (gray pin, dashed circle, name on tap) so
+  // people can see where the sites are — context only: Check In/Out may still
+  // be given from anywhere. GET /api/projects/all (any signed-in account, the
+  // same list the In / Out Time map draws); archived Projects left out.
+  useEffect(() => {
+    let gone = false;
+    let layer: L.LayerGroup | null = null;
+    fetch(apiUrl('/api/projects/all'), { headers: auth })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: any[]) => {
+        const map = mapRef.current;
+        if (gone || !map || !Array.isArray(rows)) return;
+        layer = L.layerGroup();
+        for (const p of rows) {
+          if (p.location_lat == null || p.location_lng == null || Number(p.is_archived)) continue;
+          const at: L.LatLngTuple = [Number(p.location_lat), Number(p.location_lng)];
+          L.marker(at, { icon: projectPinIcon, zIndexOffset: -100 })
+            .addTo(layer)
+            .bindTooltip(String(p.project_name || ''), { direction: 'top', offset: [0, -20] })
+            .bindPopup(String(p.project_name || ''));
+          if (p.location_radius) {
+            L.circle(at, { radius: Number(p.location_radius), color: accent(), opacity: 0.55, weight: 1.5, dashArray: '5 4', fillColor: accent(), fillOpacity: 0.05, interactive: false }).addTo(layer);
+          }
+        }
+        layer.addTo(map);
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+      layer?.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const submit = async () => {
     if (!coords || open === undefined) return;

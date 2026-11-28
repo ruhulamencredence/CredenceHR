@@ -56,6 +56,11 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
   };
   const canReport = layer('notice_read_report');
   const canEmail = layer('notice_email');
+  // Each operation its own tick (Module Access -> Notices).
+  const canCreate = layer('notice_create');
+  const canEdit = layer('notice_edit');
+  const canPublish = layer('notice_publish');
+  const canDelete = layer('notice_delete');
 
   const authHeaders = { Authorization: `Bearer ${token}` };
   const fetchAll = useCallback(async () => {
@@ -132,9 +137,9 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">Write a notice with pictures and files, choose who gets it and when, and see who has read it.</p>
         </div>
-        <button type="button" onClick={() => setComposer({ notice: null })} className="liquid-glass-button rounded-full inline-flex items-center justify-center gap-1.5 py-2 px-4 font-semibold text-sm whitespace-nowrap">
+        {canCreate && <button type="button" onClick={() => setComposer({ notice: null })} className="liquid-glass-button rounded-full inline-flex items-center justify-center gap-1.5 py-2 px-4 font-semibold text-sm whitespace-nowrap">
           <Plus className="w-4 h-4" /> New notice
-        </button>
+        </button>}
       </div>
 
       {message && (
@@ -206,18 +211,18 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                         <BarChart3 className="w-4 h-4" /> Who read it
                       </button>
                     )}
-                    <button type="button" onClick={() => handleToggleActive(n)} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title={n.is_active ? 'Pause (hide from people)' : 'Publish'} aria-label={n.is_active ? 'Pause' : 'Publish'}>
+                    {canPublish && <button type="button" onClick={() => handleToggleActive(n)} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title={n.is_active ? 'Pause (hide from people)' : 'Publish'} aria-label={n.is_active ? 'Pause' : 'Publish'}>
                       {n.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button type="button" onClick={() => duplicate(n)} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title="Make a copy" aria-label="Make a copy">
+                    </button>}
+                    {canCreate && <button type="button" onClick={() => duplicate(n)} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title="Make a copy" aria-label="Make a copy">
                       <Copy className="w-4 h-4" />
-                    </button>
-                    <button type="button" onClick={() => setComposer({ notice: n })} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title="Edit" aria-label="Edit">
+                    </button>}
+                    {canEdit && <button type="button" onClick={() => setComposer({ notice: n })} className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg" title="Edit" aria-label="Edit">
                       <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button type="button" onClick={() => handleDelete(n.id)} disabled={deletingId === n.id} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg disabled:opacity-50" title="Delete" aria-label="Delete">
+                    </button>}
+                    {canDelete && <button type="button" onClick={() => handleDelete(n.id)} disabled={deletingId === n.id} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg disabled:opacity-50" title="Delete" aria-label="Delete">
                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    </button>}
                   </div>
                 </div>
               </div>
@@ -233,6 +238,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
           notice={composer.notice}
           copyOf={composer.copyOf || null}
           canEmail={canEmail}
+          canPublish={canPublish}
           onClose={() => setComposer(null)}
           onSaved={(text) => {
             setComposer(null);

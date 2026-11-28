@@ -207,9 +207,12 @@ export const NoticeComposer: React.FC<{
   // "Make a copy": same text and settings, no files, a new notice.
   copyOf?: Notice | null;
   canEmail: boolean;
+  // Module Access -> Notices -> Publish: without it a new notice is saved as a
+  // draft and when it goes out / comes down / the pin are left as they are.
+  canPublish?: boolean;
   onClose: () => void;
   onSaved: (msg: string) => void;
-}> = ({ token, user, notice, copyOf, canEmail, onClose, onSaved }) => {
+}> = ({ token, user, notice, copyOf, canEmail, canPublish = true, onClose, onSaved }) => {
   const draftKey = `credence_notice_draft_${user.id}`;
   const [form, setForm] = useState<Form>(() =>
     notice
@@ -818,7 +821,12 @@ export const NoticeComposer: React.FC<{
                       ))}
                     </div>
                   </div>
-                  <div className="grid sm:grid-cols-2 gap-3">
+                  {!canPublish && (
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-3.5 py-2.5">
+                      {notice ? 'When it goes out, comes down and the pin stay as they are' : 'It is saved as a draft'} — publishing needs the "Publish" permission (Module Access → Notices).
+                    </p>
+                  )}
+                  {canPublish && <><div className="grid sm:grid-cols-2 gap-3">
                     <div className="rounded-[22px] bg-white/70 border border-white p-3.5 space-y-2">
                       <CardTitle icon={Send} title="Publish" />
                       <Seg label="Publish" value={form.publish_mode} onChange={(v) => set('publish_mode', v)} options={[['now', 'Now'], ['later', 'Later']]} />
@@ -834,11 +842,11 @@ export const NoticeComposer: React.FC<{
                       )}
                     </div>
                   </div>
-                  <p className="text-[11px] text-slate-500 -mt-3">Times are Dhaka time.</p>
+                  <p className="text-[11px] text-slate-500 -mt-3">Times are Dhaka time.</p></>}
                   <div>
                     <SectionLabel>Options</SectionLabel>
                     <div className="rounded-[22px] bg-white/70 border border-white px-3.5 py-1">
-                      <Toggle icon={Pin} on={form.pinned} onChange={(v) => set('pinned', v)} label="Pin it on top of the Notice Board" />
+                      {canPublish && <Toggle icon={Pin} on={form.pinned} onChange={(v) => set('pinned', v)} label="Pin it on top of the Notice Board" />}
                       <Toggle icon={CheckCircle2} on={requireAck} disabled={urgent} onChange={(v) => set('require_ack', v)} label="Ask for “I have read this”" hint={urgent ? 'Always on for an urgent notice.' : 'Shows who has read it, and the popup comes back until they tap it.'} />
                       <Toggle icon={Smartphone} on={form.send_push} onChange={(v) => set('send_push', v)} label="Push notification to phones" />
                       {canEmail && <Toggle icon={Mail} on={form.send_email} onChange={(v) => set('send_email', v)} label="Email it too" hint="To each person's email address, from the company's mail account." />}
@@ -991,16 +999,16 @@ export const NoticeComposer: React.FC<{
                   <ChevronLeft className="w-4 h-4" /> <span className="hidden sm:inline">Back</span>
                 </button>
               )}
-              <button type="button" disabled={saving} onClick={() => void save(false)} className="px-4 py-2 rounded-full text-sm font-semibold bg-white border border-slate-200 inline-flex items-center gap-1.5 disabled:opacity-60">
+              {(canPublish || !notice?.is_active) && <button type="button" disabled={saving} onClick={() => void save(false)} className="px-4 py-2 rounded-full text-sm font-semibold bg-white border border-slate-200 inline-flex items-center gap-1.5 disabled:opacity-60">
                 <Save className="w-4 h-4" /> <span className="hidden sm:inline">Save as draft</span><span className="sm:hidden">Draft</span>
-              </button>
+              </button>}
               {step !== 'review' ? (
                 <button type="button" onClick={() => setStep(STEPS[stepIndex + 1].key)} className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold inline-flex items-center gap-1">
                   Next<span className="hidden sm:inline">: {STEPS[stepIndex + 1].label}</span> <ChevronRight className="w-4 h-4" />
                 </button>
               ) : (
-                <button type="button" disabled={saving} onClick={() => void save(true)} className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-60">
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} {publishLabel}
+                (canPublish || notice) && <button type="button" disabled={saving} onClick={() => void save(canPublish ? true : !!notice?.is_active)} className="liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-60">
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} {canPublish ? publishLabel : 'Save changes'}
                 </button>
               )}
             </div>

@@ -24,7 +24,7 @@
 | Bill Claim | `bill_claim` | `read` Bill Claim<br>🔒`on_behalf` Claim on Behalf<br>`rules_readers` Who has read the rules |
 | Bill Disbursement | `disbursement` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
-| Notices | `notices` | `read` Write & publish notices<br>🔒`notice_read_report` Who has read it (report & send again)<br>🔒`notice_email` Send notices by email<br>🔒`notice_animations` Animation library (add / remove) |
+| Notices | `notices` | `read` View notices<br>🔒`notice_create` New notice & Duplicate<br>🔒`notice_edit` Edit<br>🔒`notice_publish` Publish / Pause / Take down / Pin<br>🔒`notice_delete` Delete<br>🔒`notice_read_report` Who has read it (report & send again)<br>🔒`notice_email` Send notices by email<br>🔒`notice_animations` Animation library (add / remove) |
 | Holidays (Global Calendar) | `holidays` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Payroll | `payroll` | `read` Payroll<br>`payroll_view` View only (Audit / Accounts)<br>🔒`salary_amounts` See salary amounts<br>🔒`ot_rules` OT Rules (overtime pay)<br>`approval_sheet` Approval — Salary sheet (view)<br>`month_compare` Approval — Month comparison (view)<br>`top_sheet` Approval — Top Sheet (view)<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`hrd_review` HR Director review<br>🔒`audit_approve` Audit (after payment)<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
 | Asset Management | `asset_management` | শুধু মডিউলের অনুমতি (layer নেই) |

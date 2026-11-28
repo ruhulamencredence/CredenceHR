@@ -2571,6 +2571,24 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     console.warn("⚠️ Could not give existing Payroll accounts the new See salary amounts layer: " + err.message);
   }
 
+  // Notices -> each operation its own layer (28 Nov 2026, owner's choice):
+  // every account that already has Notices keeps writing, editing and
+  // publishing as before — only Delete becomes its own tick. Once.
+  try {
+    if (!(await getStartupMarker(dbPool, "notice_layers_split"))) {
+      const [holders]: any = await dbPool.query("SELECT DISTINCT user_id FROM admin_module_permissions WHERE module_key = 'notices'");
+      for (const h of holders || []) {
+        const uid = Number(h.user_id);
+        for (const l of ["read", "notice_create", "notice_edit", "notice_publish"]) {
+          await dbPool.query("INSERT IGNORE INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, 'notices', ?)", [uid, l]);
+        }
+      }
+      await setStartupMarker(dbPool, "notice_layers_split", String((holders || []).length));
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not give existing Notices accounts the new operation layers: " + err.message);
+  }
+
   // Second pass (see the first call above): on a brand-new database this is
   // what gives departments and Module Access layers their company_id. On an
   // existing one every step is already done and is skipped.
