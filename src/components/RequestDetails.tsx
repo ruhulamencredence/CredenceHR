@@ -28,7 +28,8 @@ interface Details {
   requester: { name: string | null; employee_id: string | null; designation: string | null; department: string | null; branch: string | null } | null;
   fields: { label: string; value: string }[];
   table: { columns: string[]; rows: string[][] } | null;
-  attachments: { label: string }[];
+  // file: a Bill Claim bill's own receipt (opened with &file=)
+  attachments: { label: string; file?: number }[];
   has_file: boolean;
   locations: { label: string; lat: number; lng: number; place?: string | null }[];
   timeline: {
@@ -91,8 +92,8 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
 
   // Opens in the app's own viewer (AttachmentViewer) — a new tab does
   // nothing in the Android / iPhone app.
-  const [viewing, setViewing] = useState<string | null>(null);
-  const openFile = (label?: string) => setViewing(label || 'Attachment');
+  const [viewing, setViewing] = useState<number | null>(null);
+  const openFile = (i: number) => setViewing(i);
 
   const rq = data?.requester;
   return createPortal(
@@ -180,7 +181,7 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
                     <button
                       key={i}
                       type="button"
-                      onClick={() => openFile(a.label)}
+                      onClick={() => openFile(i)}
                       disabled={!data.has_file}
                       className="liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 disabled:opacity-50"
                     >
@@ -237,13 +238,23 @@ export const RequestDetailsPopup: React.FC<{ token: string; type: string; id: nu
           )}
         </div>
       </div>
-      {viewing && (
-        <AttachmentViewer token={token} src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${id}`} name={viewing} onClose={() => setViewing(null)} />
+      {viewing != null && data?.attachments[viewing] && (
+        <AttachmentViewer
+          token={token}
+          src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${id}${data.attachments[viewing].file ? `&file=${data.attachments[viewing].file}` : ''}`}
+          name={data.attachments[viewing].label}
+          nav={attachmentNav(data.attachments.length, viewing, setViewing)}
+          onClose={() => setViewing(null)}
+        />
       )}
     </div>,
     document.body
   );
 };
+
+// ‹ › through a request's attachments (a Bill Claim has one per receipt).
+const attachmentNav = (count: number, index: number, set: (i: number) => void) =>
+  count > 1 ? { index, count, onPrev: () => set(Math.max(0, index - 1)), onNext: () => set(Math.min(count - 1, index + 1)) } : undefined;
 
 /** A small "Details" button that opens the popup above for one request. */
 export const RequestDetailsButton: React.FC<{ token: string; type: string; id: number | string; className?: string; label?: string }> = ({ token, type, id, className = '', label = 'Details' }) => {
@@ -287,7 +298,7 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
   const [data, setData] = useState<Details | null>(null);
   const [failed, setFailed] = useState(false);
   // The attachment open in the app's own viewer (its label), if any.
-  const [viewing, setViewing] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<number | null>(null);
   useEffect(() => {
     if (!type || !Number.isFinite(n) || n <= 0) return;
     let alive = true;
@@ -321,9 +332,9 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
 
   const skip = new Set(['Status', ...hide]);
   const fields = data.fields.filter((f) => !skip.has(f.label) && f.value !== '');
-  const openFile = (e: React.MouseEvent, label?: string) => {
+  const openFile = (e: React.MouseEvent, i: number) => {
     e.stopPropagation();
-    setViewing(label || 'Attachment');
+    setViewing(i);
   };
   const table = !noTable && data.table && data.table.rows.length ? data.table : null;
   if (!fields.length && !table && !data.attachments.length && !data.locations.length) return null;
@@ -371,7 +382,7 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
             <button
               key={i}
               type="button"
-              onClick={(e) => openFile(e, a.label)}
+              onClick={(e) => openFile(e, i)}
               disabled={!data.has_file}
               className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50"
             >
@@ -392,11 +403,12 @@ export const RequestDetailsInline: React.FC<{ token: string; type: string; id: n
           ))}
         </div>
       )}
-      {viewing && (
+      {viewing != null && data.attachments[viewing] && (
         <AttachmentViewer
           token={token}
-          src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${n}`}
-          name={viewing}
+          src={`/api/approval-details/file?type=${encodeURIComponent(type)}&id=${n}${data.attachments[viewing].file ? `&file=${data.attachments[viewing].file}` : ''}`}
+          name={data.attachments[viewing].label}
+          nav={attachmentNav(data.attachments.length, viewing, setViewing)}
           onClose={() => setViewing(null)}
         />
       )}

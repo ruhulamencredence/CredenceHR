@@ -22,6 +22,15 @@ erDiagram
     text reason
     int version
   }
+  bill_claim_item_files {
+    int id PK
+    int bill_claim_id FK
+    int item_id
+    varchar file_name
+    varchar file_mimetype
+    int file_size
+    longblob file_data
+  }
   bill_claim_items {
     int id PK
     int bill_claim_id FK
@@ -167,6 +176,7 @@ erDiagram
   }
   users ||--o{ bill_claim_department_access : "user_id"
   bill_claims ||--o{ bill_claim_history : "bill_claim_id"
+  bill_claims ||--o{ bill_claim_item_files : "bill_claim_id"
   bill_claims ||--o{ bill_claim_items : "bill_claim_id"
   leave_categories ||..o{ bill_claim_items : "category_id"
   bill_claims ||--o{ bill_claim_references : "bill_claim_id"

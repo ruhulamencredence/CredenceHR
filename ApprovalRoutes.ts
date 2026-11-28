@@ -28,7 +28,7 @@
 // Approval Requests through them), so they're threaded through as deps
 // rather than duplicated or re-imported directly.
 
-import { dhakaDate, loadPolicy } from "./BillClaimPolicy";
+import { dhakaDate, loadPolicy, itemFilesOf } from "./BillClaimPolicy";
 import { claimChangesFor } from "./BillClaimHistory";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
@@ -227,17 +227,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     // The claim's bills (category / date / amount) for the approver.
     const itemRows: any[] =
       (await queryDB(
-        `SELECT bill_claim_id, category_name, bill_date, amount, description FROM bill_claim_items
+        `SELECT id, bill_claim_id, category_name, bill_date, amount, description FROM bill_claim_items
           WHERE bill_claim_id IN (${billClaimIds.map(() => "?").join(",")}) ORDER BY bill_date, id`,
         billClaimIds
       ).catch(() => [])) || [];
+    // and each bill's receipts (names only; opened via /api/approval-details/file?file=)
+    const itemFiles = await itemFilesOf(queryDB, billClaimIds);
     const itemsByClaim: Record<number, any[]> = {};
     for (const it of itemRows) {
       (itemsByClaim[Number(it.bill_claim_id)] ||= []).push({
+        id: Number(it.id),
         category_name: it.category_name,
         bill_date: dhakaDate(it.bill_date),
         amount: Number(it.amount),
-        description: it.description ?? null
+        description: it.description ?? null,
+        files: itemFiles.get(Number(it.id)) || []
       });
     }
     return rows.map((r: any) =>

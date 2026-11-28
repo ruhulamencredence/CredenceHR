@@ -1204,7 +1204,7 @@ useLiveRefresh(() => load(true));
                           </div>
                         )}
 
-                        {item.source_type === 'bill_claim' && <ClaimBillLines items={item.claim_items} compact />}
+                        {item.source_type === 'bill_claim' && <ClaimBillLines items={item.claim_items} compact token={token} fileSrc={(f) => `/api/approval-details/file?type=bill_claim&id=${item.source_id}&file=${f}`} />}
                         {item.source_type === 'bill_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                           <div className="mt-2 space-y-1 max-w-md">
                             {item.claim_refs.map((r) => (
