@@ -377,7 +377,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
          ORDER BY d.name ASC`
       );
       // Teams (DepartmentTeams.ts): name, Supervisor, how many people.
-      const teams: any[] = (await queryDB("SELECT t.id, t.department_id, t.name, t.supervisor_user_id, t.everyone_else, u.name AS supervisor_name FROM department_teams t LEFT JOIN users u ON u.id = t.supervisor_user_id WHERE t.is_active = 1 ORDER BY t.everyone_else DESC, t.name").catch(() => [])) || [];
+      const teams: any[] = (await queryDB("SELECT t.id, t.department_id, t.name, t.supervisor_user_id, t.everyone_else, t.skip_head, u.name AS supervisor_name FROM department_teams t LEFT JOIN users u ON u.id = t.supervisor_user_id WHERE t.is_active = 1 ORDER BY t.everyone_else DESC, t.name").catch(() => [])) || [];
       const members: any[] = (await queryDB("SELECT team_id, COUNT(*) AS n FROM department_team_members GROUP BY team_id").catch(() => [])) || [];
       const memberCount = new Map<number, number>(members.map((m: any) => [Number(m.team_id), Number(m.n)]));
       res.json(
@@ -388,7 +388,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
           head_name: d.head_name || null,
           teams: teams
             .filter((t: any) => Number(t.department_id) === Number(d.id))
-            .map((t: any) => ({ id: Number(t.id), name: t.name, supervisor_user_id: t.supervisor_user_id ? Number(t.supervisor_user_id) : null, supervisor_name: t.supervisor_name || null, everyone_else: Number(t.everyone_else) === 1, members: memberCount.get(Number(t.id)) || 0 })),
+            .map((t: any) => ({ id: Number(t.id), name: t.name, supervisor_user_id: t.supervisor_user_id ? Number(t.supervisor_user_id) : null, supervisor_name: t.supervisor_name || null, everyone_else: Number(t.everyone_else) === 1, skip_head: Number(t.skip_head) === 1, members: memberCount.get(Number(t.id)) || 0 })),
           supervisor_user_id: d.supervisor_user_id || null,
           supervisor_name: d.supervisor_name || null,
           include_supervisor_approval: !!Number(d.include_supervisor_approval),

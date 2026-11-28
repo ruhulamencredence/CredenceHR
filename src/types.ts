@@ -651,7 +651,7 @@ export interface Department {
   // Supervisor, then the Head, then the workflow.
   head_user_id?: number | null;
   head_name?: string | null;
-  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; members: number }[];
+  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; skip_head?: boolean; members: number }[];
 }
 
 

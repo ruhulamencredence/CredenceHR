@@ -80,7 +80,7 @@ import { registerSimInventoryRoutes } from "./SimInventory";
 import { registerAttendanceAdminEditRoutes } from "./AttendanceAdminEdit";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
-import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
+import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead, teamSkipsHead } from "./DepartmentTeams";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
@@ -891,9 +891,13 @@ async function resolveDepartmentSupervisor(employeeUserId: number): Promise<numb
 // The Head of Department step (DepartmentTeams.ts): after the Supervisor,
 // always, when the employee's Department has a Head — skipped when the Head
 // is the requester, is already the Supervisor step, or can't act any more.
-async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null): Promise<number | null> {
+// keepTeamRule: a request already waiting on the Head keeps that step when its
+// team is later set to skip the Head (the switch is for new requests only).
+async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null, keepTeamRule = false): Promise<number | null> {
   const head = await resolveDepartmentHead(queryDB, employeeUserId);
   if (!head || head === supervisorId) return null;
+  // Their team is set to "Skip the Head of Department" (Departments -> team).
+  if (!keepTeamRule && (await teamSkipsHead(queryDB, employeeUserId))) return null;
   if ((await inactiveUserIds([head])).has(head)) return null;
   return head;
 }
@@ -1350,7 +1354,7 @@ async function reconcileOneApproval(r: any): Promise<number> {
   if (onHeadStep(r)) {
     const stored = Number(r.head_step_user_id);
     const storedGone = (await inactiveUserIds([stored])).has(stored);
-    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null);
+    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null, true);
     if (desired === stored && !storedGone) return changed;
     const who = await whoName();
     const oldName = await nameOf(stored);
