@@ -1410,3 +1410,11 @@ Dashboard-এর My Attendance কার্ড আর "Checked in at …" চি
 ## "Supervisor / Reports to" সব জায়গায় অনুমোদনের পথ মেনে (২৮ নভেম্বর)
 
 Service Book, Employee 360, HR Operations-এর চিঠি/রিপোর্ট (`HROperationsRoutes.ts` `snapshotOf`) আগে Direct Supervisor না থাকলে Departments-এর পুরোনো একক Supervisor ঘর (`departments.supervisor_user_id`) দেখাত — team চালুর পর সেটা আর কিছু পড়ে না, আর সেখানে Head-ই ছিলেন, তাই প্রায় সবার Supervisor হিসেবে Head দেখাত। এখন সব জায়গায় একই নিয়ম, যে পথে আবেদন যায় (`DepartmentTeams.ts` `reportingLineByEmployee`): Direct Supervisor (Employees → Supervisor) → নিজের team-এর Supervisor (নিজে হলে নয়) → Head of Department (team-এ "Skip the Head" চালু থাকলে নয়) → না হলে "Not set"। Employee Directory-র "Reports to" আর Employees তালিকার Department-এর টুলটিপ (`GET /api/employees` `reports_to_name`, সাথে Head-এর নাম) একই নিয়ম মানে।
+
+## Check In/Out ম্যাপে Project-এর এলাকা (২৮ নভেম্বর)
+
+Check In/Out-এর পূর্ণ-পর্দা ম্যাপে (`CheckInOutMap.tsx`) এখন সব Project-এর অবস্থান ধূসর পিনে আর তার attendance এলাকা ড্যাশ-দেওয়া বৃত্তে দেখায় (পিনে মাউস রাখলে / চাপলে নাম; archived Project বাদ)। শুধু দেখার জন্য — Check In/Out আগের মতোই যেকোনো জায়গা থেকে দেওয়া যায়, কোনো নিয়ম বদলায়নি। তালিকা আসে `GET /api/projects/all` থেকে, যেটা In / Out Time-এর ম্যাপও ব্যবহার করে (যেকোনো signed-in account), তাই নতুন কোনো তথ্য উন্মুক্ত হয়নি।
+
+## Notices: প্রতিটা কাজের আলাদা অনুমতি (২৮ নভেম্বর)
+
+Module Access → Notices-এ এখন আলাদা টিক: View notices (`read`), New notice & Duplicate (`notice_create`), Edit (`notice_edit`), Publish / Pause / Take down / Pin (`notice_publish`), Delete (`notice_delete`) — আর আগের Who has read it, Email, Animation। নতুন চারটা explicit-only; টিক না থাকলে বোতাম দেখায় না (`NoticeManager.tsx`, `NoticeComposer.tsx`) আর API আটকায় (`NoticeRoutes.ts`: POST → create, PUT → edit, PUT `/active` → publish, DELETE → delete, ফাইল আপলোড → create বা edit)। Publish ছাড়া নতুন notice Draft হিসেবে সেভ হয় (schedule / take-down / pin ছাড়া), আর Edit-এ সেগুলো আগের মতো থাকে। একবারের মাইগ্রেশনে (`notice_layers_split`, `schemaMigrations.ts`) যাঁদের আগে থেকে Notices ছিল তাঁরা View, New, Edit, Publish পেয়েছেন — শুধু Delete আলাদা টিক (মালিকের সিদ্ধান্ত)। Superadmin সব পারেন।

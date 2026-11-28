@@ -464,7 +464,12 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
   // the body; ?kind=image|file&name=…&type=… say what it is. It belongs to no
   // notice until one is saved with it (unused uploads go after two days).
   const rawUpload = express.raw({ type: () => true, limit: NOTICE_FILE_MAX_BYTES });
-  app.post("/api/notices/files", authenticateToken, requireAdmin, requireModule("notices"), rawUpload, async (req: any, res) => {
+  // Pictures / files go into a notice being written or edited.
+  const canWriteNotices = async (req: any, res: any, next: any) => {
+    if ((await hasModuleLayer(req.user, "notices", "notice_create")) || (await hasModuleLayer(req.user, "notices", "notice_edit"))) return next();
+    res.status(403).json({ error: "You don't have permission to write notices. Ask your Superadmin to grant it." });
+  };
+  app.post("/api/notices/files", authenticateToken, requireAdmin, requireModule("notices"), canWriteNotices, rawUpload, async (req: any, res) => {
     try {
       const kind: NoticeFileKind = req.query.kind === "image" ? "image" : "file";
       const mimetype = String(req.query.type || req.headers["content-type"] || "").toLowerCase().split(";")[0].trim();
@@ -669,11 +674,15 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
     if (v.target_type === "specific") for (const uid of v.userIds) await queryDB("INSERT INTO notice_targets (notice_id, user_id) VALUES (?, ?)", [noticeId, uid]);
   };
 
-  app.post("/api/notices", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
+  app.post("/api/notices", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_create"), async (req: any, res) => {
     try {
       const v = await readNoticeBody(req, res);
       if (!v) return;
-      const isActive = req.body.is_active === false ? 0 : 1;
+      // Without Publish it is saved as a draft (no schedule, take-down or pin)
+      // for someone who may publish it.
+      const mayPublish = await hasModuleLayer(req.user, "notices", "notice_publish");
+      if (!mayPublish) Object.assign(v, { publish_at: null, expire_at: null, pinned: 0 });
+      const isActive = req.body.is_active === false || !mayPublish ? 0 : 1;
       const result = await queryDB(
         `INSERT INTO notices (title, content_html, lottie_json, lottie_url, target_type, is_active, created_by, priority, publish_at, expire_at,
                               pinned, require_ack, send_push, send_email, remind_unread, new_joiners, audience_json)
@@ -687,19 +696,25 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       const n: any = ((await queryDB(NOTICE_SELECT + " WHERE id = ?", [noticeId])) || [])[0];
       // Out now if it is live; a scheduled one goes out at its time (noticeJobs).
       if (n && isLive(n)) await announce(n, req.user.id);
-      res.status(201).json({ id: noticeId, status: n ? statusOf(n) : "live" });
+      res.status(201).json({ id: noticeId, status: n ? statusOf(n) : "live", draft_only: !mayPublish });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.put("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
+  app.put("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_edit"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const existing: any[] = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
       const v = await readNoticeBody(req, res);
       if (!v) return;
+      // When it goes out, comes down and the pin are Publish's: without it
+      // they stay as they were.
+      if (!(await hasModuleLayer(req.user, "notices", "notice_publish"))) {
+        const ex = existing[0];
+        Object.assign(v, { publish_at: toDbDateTime(ex.publish_at), expire_at: toDbDateTime(ex.expire_at), pinned: Number(ex.pinned) ? 1 : 0 });
+      }
       // An email ticked by someone else stays as it was for an editor without the right.
       await queryDB(
         `UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ?, priority = ?, publish_at = ?, expire_at = ?,
@@ -724,7 +739,7 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
 
   // Publish / pause — pulls a notice down (or brings it back) without losing
   // it or who has read it.
-  app.put("/api/notices/:id/active", authenticateToken, requireAdmin, requireModule("notices"), async (req: any, res) => {
+  app.put("/api/notices/:id/active", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_publish"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
@@ -743,7 +758,7 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
     }
   });
 
-  app.delete("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), async (req, res) => {
+  app.delete("/api/notices/:id", authenticateToken, requireAdmin, requireModule("notices"), requireModuleLayer("notices", "notice_delete"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
