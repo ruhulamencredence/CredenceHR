@@ -64,3 +64,21 @@ PASS HR Reports column is labelled "Contact No."
 PASS Vehicle -> Drivers employee list: office Contact No. (01999000222)
 PASS Vehicle -> Drivers list: no personal mobile
 ```
+
+## Leave Summary: the head cut out around the leave card, every theme
+
+The coloured head of the Leave Summary card is now cut out around the inner
+leave card with an 8px gap (src/lib/leaveCarve.ts, a CSS mask redrawn when
+either changes size) in every theme and colour mode — before, only on the
+Stone & Olive branch.
+
+`scripts/leave-carve-all-themes.cjs` (mobile 390px and desktop 1440px; the
+head's mask was set in every case):
+
+```
+mobile/desktop  Orange · Light, Default · Light, Apple Glow · Light, Mono · Light,
+                Orange · Light Glass, Orange · Dark, Orange · Dark Glass   mask: true
+```
+
+Screens: `carve-all-mobile.png`, `carve-all-desktop.png`. In Dark Glass the head
+has no colour of its own, so there is nothing to see cut.
