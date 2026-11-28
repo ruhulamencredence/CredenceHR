@@ -3,10 +3,10 @@
 // typed, "Same as <day before>", Cancel puts an edited bill back, then a
 // Review step with the total by category, and Submit files the claim with
 // every bill on its own date. Phone, and the same with the keyboard open.
-// Dev server: BASE (default :3300 — the claude/attendance-device-rule worktree).
+// Dev server: BASE (default :3200).
 const { chromium } = require('/opt/node-tools/node_modules/playwright/index.js');
 const { execSync } = require('child_process');
-const B = process.env.BASE || 'http://localhost:3300', OUT = process.argv[2] || '/tmp';
+const B = process.env.BASE || 'http://localhost:3200', OUT = process.argv[2] || '/tmp';
 const sql = (q) => execSync(`mysql -h127.0.0.1 -ucred -pcredpass admin_ui -N -e ${JSON.stringify(q)}`).toString().trim();
 let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
 (async () => {

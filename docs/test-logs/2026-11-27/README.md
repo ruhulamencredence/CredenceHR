@@ -1,11 +1,11 @@
-# 2026-11-27 — Bill Claim, day by day (branch `claude/attendance-device-rule`)
+# 2026-11-27 — Bill Claim, day by day
 
 New Bill Claim form: a card per day of the From–To range, a chip per category
 adds a bill already dated, one bar above the keyboard while a bill is typed,
 "Same as <day before>", then a Review step and Submit. Same rules, routes and
 server checks as before.
 
-`scripts/bill-claim-by-day-ui.cjs` (phone 390×844, dev server of this branch):
+`scripts/bill-claim-by-day-ui.cjs` (phone 390×844, dev server :3200; first written on `claude/attendance-device-rule`, brought here 28 Nov):
 
 ```
 PASS From two days ago to today → 3 day cards
