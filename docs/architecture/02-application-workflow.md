@@ -1400,3 +1400,7 @@ Check In/Out ইম্পোর্ট ফাইলে এখন ঐচ্ছি�
 ## Department team: "Skip the Head of Department" (২৮ নভেম্বর)
 
 Departments → Edit → Teams-এ প্রতিটা team-এ নতুন টিক "Skip the Head of Department" (`department_teams.skip_head`, শুরুতে বন্ধ)। চালু থাকলে ওই team-এর লোকের (team-এর সদস্য, বা "everyone else" team হলে কোনো team-এ নেই এমন লোক) নতুন আবেদনে Head of Department-এর ধাপ থাকে না: Supervisor → Approval Template (`teamSkipsHead`, `resolveHeadApprover` — `server.ts`)। Direct Supervisor থাকলেও team-এর নিয়মই চলে। যে আবেদন আগে থেকে Head-এর ধাপে আছে বা Head-এর ধাপ নিয়ে তৈরি হয়েছে, সুইচ পরে চালু করলেও সে Head-এর কাছেই যায় (`keepTeamRule`)। Departments তালিকায় ওই team-এর পাশে "skips Head" দেখায়। বদলাতে আগের মতোই Departments মডিউল + `edit_add` layer লাগে (UI ও API)।
+
+## Dashboard My Attendance: সংশোধিত In দেখায় (২৮ নভেম্বর)
+
+Dashboard-এর My Attendance কার্ড আর "Checked in at …" চিপ (`dayPicture` — `/api/attendance/day-status`, `/api/attendance/today-summary`) আগে GPS অবস্থান ছাড়া কোনো In গুনত না, যাতে অফিস মেশিনের পাঞ্চ থেকে কপি হওয়া সারি দুবার না আসে। ফলে Timesheet থেকে অনুমোদিত Correction বা Admin-এর দেওয়া In (এগুলোতে GPS থাকে না) Timesheet-এ দেখাত, কিন্তু Dashboard "Not checked in" বলত। এখন GPS ছাড়া সারি শুধু তখনই বাদ যায় যখন ঠিক সেই মিনিটে মেশিনের পাঞ্চ আছে (তখন পাঞ্চটাই In); বাকিগুলো In হিসেবে গোনা হয়।
