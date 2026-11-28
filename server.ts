@@ -80,7 +80,7 @@ import { registerSimInventoryRoutes } from "./SimInventory";
 import { registerAttendanceAdminEditRoutes } from "./AttendanceAdminEdit";
 import { ensureOvertimeSchema, registerOvertimeRoutes } from "./OvertimeRoutes";
 import { ensureGuardSchema, registerGuardRoutes } from "./GuardRoutes";
-import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead } from "./DepartmentTeams";
+import { ensureDepartmentTeamsSchema, registerDepartmentTeamsRoutes, resolveTeamSupervisor, resolveDepartmentHead, teamSkipsHead } from "./DepartmentTeams";
 import { ensureTrackingScopeSchema } from "./TrackingScope";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensureAttendanceProjectsSchema, registerAttendanceProjectRoutes } from "./AttendanceProjects";
@@ -495,7 +495,9 @@ const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins", "punch_rules"] as con
 // email, and adding / removing animations in the shared Animation library
 // (using one from it only needs the module) — all only when ticked
 // (EXPLICIT_ONLY_LAYERS in src/types.ts).
-const NOTICE_LAYER_KEYS = ["read", "notice_read_report", "notice_email", "notice_animations"] as const;
+// Notices: each operation its own layer (28 Nov 2026) — "read" is viewing;
+// create / edit / publish / delete are explicit-only (no saved layers = view only).
+const NOTICE_LAYER_KEYS = ["read", "notice_create", "notice_edit", "notice_publish", "notice_delete", "notice_read_report", "notice_email", "notice_animations"] as const;
 // Bill Claim: "read" = the module as it was; "on_behalf" = file a
 // Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
@@ -891,9 +893,13 @@ async function resolveDepartmentSupervisor(employeeUserId: number): Promise<numb
 // The Head of Department step (DepartmentTeams.ts): after the Supervisor,
 // always, when the employee's Department has a Head — skipped when the Head
 // is the requester, is already the Supervisor step, or can't act any more.
-async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null): Promise<number | null> {
+// keepTeamRule: a request already waiting on the Head keeps that step when its
+// team is later set to skip the Head (the switch is for new requests only).
+async function resolveHeadApprover(employeeUserId: number, supervisorId: number | null, keepTeamRule = false): Promise<number | null> {
   const head = await resolveDepartmentHead(queryDB, employeeUserId);
   if (!head || head === supervisorId) return null;
+  // Their team is set to "Skip the Head of Department" (Departments -> team).
+  if (!keepTeamRule && (await teamSkipsHead(queryDB, employeeUserId))) return null;
   if ((await inactiveUserIds([head])).has(head)) return null;
   return head;
 }
@@ -1350,7 +1356,7 @@ async function reconcileOneApproval(r: any): Promise<number> {
   if (onHeadStep(r)) {
     const stored = Number(r.head_step_user_id);
     const storedGone = (await inactiveUserIds([stored])).has(stored);
-    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null);
+    const desired = await resolveHeadApprover(requester, r.supervisor_step_user_id ? Number(r.supervisor_step_user_id) : null, true);
     if (desired === stored && !storedGone) return changed;
     const who = await whoName();
     const oldName = await nameOf(stored);
@@ -3237,7 +3243,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "merge_projects" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "mail_signature" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "merge_accounts" | "merge_projects" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "approval_sheet" | "month_compare" | "top_sheet" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "mail_signature" | "roster_manage" | "break_manage" | "feedback_resolve" | "punch_rules" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete" | "requisitions" | "email_candidates" | "edit_candidates" | "manage_drivers" | "manage_vehicles" | "notice_read_report" | "notice_create" | "notice_edit" | "notice_publish" | "notice_delete" | "notice_email" | "hrd_review" | "notice_animations" | "salary_amounts" | "ot_rules" | "ot_approve" | "guard_posts" | "quick_reports" | "quick_ot" | "p360_access") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -3268,6 +3274,8 @@ async function startServer() {
             ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
             : moduleKey === "bill_claim"
               ? ["read", "rules_readers"]
+            : moduleKey === "notices"
+              ? ["read"]
             : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
               ? ["read"]
               : moduleKey === "mobile_bill"
@@ -3310,6 +3318,8 @@ async function startServer() {
         ? [...PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete"), "emp_headcount"]
         : moduleKey === "bill_claim"
           ? ["read", "rules_readers"]
+        : moduleKey === "notices"
+          ? ["read"]
         : moduleKey === "editlog" || moduleKey === "office_attendance" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "break_time" || moduleKey === "user_feedback" || moduleKey === "document_vault" || moduleKey === "recruitment" || moduleKey === "vehicle_management"
           ? ["read"]
           : moduleKey === "mobile_bill"

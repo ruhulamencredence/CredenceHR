@@ -41,6 +41,8 @@ interface Team {
   name: string;
   supervisor_user_id: string;
   everyone_else: boolean;
+  // Requests of this team skip the Head of Department step.
+  skip_head: boolean;
   member_ids: number[];
   auto: AutoRule[];
 }
@@ -91,6 +93,7 @@ export const DepartmentTeamsEditor = forwardRef<
             name: t.name,
             supervisor_user_id: t.supervisor_user_id ? String(t.supervisor_user_id) : '',
             everyone_else: !!t.everyone_else,
+            skip_head: !!t.skip_head,
             member_ids: t.member_ids || [],
             auto: t.auto || []
           }));
@@ -111,7 +114,7 @@ export const DepartmentTeamsEditor = forwardRef<
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           head_user_id: headUserId,
-          teams: teams.map((t) => ({ id: t.id, name: t.name.trim(), supervisor_user_id: t.supervisor_user_id ? Number(t.supervisor_user_id) : null, everyone_else: t.everyone_else, member_ids: t.member_ids, auto: t.auto }))
+          teams: teams.map((t) => ({ id: t.id, name: t.name.trim(), supervisor_user_id: t.supervisor_user_id ? Number(t.supervisor_user_id) : null, everyone_else: t.everyone_else, skip_head: t.skip_head, member_ids: t.member_ids, auto: t.auto }))
         })
       });
       const data = await res.json().catch(() => null);
@@ -172,7 +175,7 @@ export const DepartmentTeamsEditor = forwardRef<
             onClick={() => {
               const key = `n${++seq}`;
               // On top, open, and the name box focused — no scrolling down to find it.
-              setTeams((ts) => [{ key, id: null, name: '', supervisor_user_id: '', everyone_else: false, member_ids: [], auto: [] }, ...(ts || [])]);
+              setTeams((ts) => [{ key, id: null, name: '', supervisor_user_id: '', everyone_else: false, skip_head: false, member_ids: [], auto: [] }, ...(ts || [])]);
               setOpenKeys((o) => new Set([...o, key]));
               setFocusKey(key);
             }}
@@ -201,6 +204,7 @@ export const DepartmentTeamsEditor = forwardRef<
                     {` · ${t.member_ids.length} ${t.member_ids.length === 1 ? 'member' : 'members'}`}
                     {t.auto.length > 0 && ` · new joiners at ${t.auto.length} ${t.auto.length === 1 ? 'project' : 'projects'}`}
                     {t.everyone_else && ' · everyone else'}
+                    {t.skip_head && <span className="text-orange-700 font-semibold"> · skips Head</span>}
                   </span>
                 </span>
               </button>
@@ -316,6 +320,18 @@ export const DepartmentTeamsEditor = forwardRef<
               />
               <span>
                 Also everyone else in {departmentName} (people in no other team, new hires too)
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-orange-600"
+                aria-label={`${t.name || 'This team'} skips the Head of Department`}
+                checked={t.skip_head}
+                onChange={(e) => set(t.key, { skip_head: e.target.checked })}
+              />
+              <span>
+                <b>Skip the Head of Department</b> — this team's requests go from its Supervisor straight to the Approval Template
               </span>
             </label>
             </>)}

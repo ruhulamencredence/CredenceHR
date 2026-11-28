@@ -672,7 +672,7 @@ const PersonalTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onE
           <Field label="Religion" value={p.religion} />
           <Field label="Nationality" value={p.nationality} />
           <Field label="NID" value={p.nid} />
-          <Field label="Mobile" value={p.phone} />
+          <Field label="Contact No." value={p.phone} />
           <Field label="Office email" value={p.email} />
           <Field label="Personal email" value={p.personal_email} />
           <Field label="Device PIN" value={p.zk_device_pin} />

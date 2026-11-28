@@ -291,6 +291,24 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add asset_assignments.${col}: ` + err.message);
     }
   }
+  // A handover / return through an Employee used to copy their personal mobile
+  // (all_employees.mobile). The personal number is shown only in Admin Panel ->
+  // Employees, so saved copies become the office Contact No. (phone), or empty.
+  // An outsider's typed number ("other") is left alone. Idempotent.
+  for (const [kind, empCol, mobCol] of [
+    ["handed_to_kind", "handed_to_employee_id", "handed_to_mobile"],
+    ["return_via_kind", "return_via_employee_id", "return_via_mobile"]
+  ]) {
+    try {
+      await dbPool.query(
+        `UPDATE asset_assignments a JOIN all_employees e ON e.id = a.${empCol}
+            SET a.${mobCol} = NULLIF(TRIM(e.phone), '')
+          WHERE a.${kind} = 'employee' AND e.mobile IS NOT NULL AND TRIM(e.mobile) <> '' AND a.${mobCol} = e.mobile AND NOT (e.phone <=> e.mobile)`
+      );
+    } catch (err: any) {
+      console.warn(`⚠️ Could not replace saved personal mobiles in asset_assignments.${mobCol}: ` + err.message);
+    }
+  }
 }
 
 // Title of the alert the requester gets for each kind of operation.
@@ -719,9 +737,9 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     if (kind === "self") return { kind, employeeId: null, name: null, mobile: null };
     if (kind === "employee") {
       const id = Number(raw?.employee_id);
-      const e: any[] = id ? (await queryDB("SELECT id, name, mobile, phone FROM all_employees WHERE id = ?", [id])) || [] : [];
+      const e: any[] = id ? (await queryDB("SELECT id, name, phone FROM all_employees WHERE id = ?", [id])) || [] : [];
       if (!e.length) throw Object.assign(new Error(`${label}: pick the employee.`), { statusCode: 400 });
-      return { kind, employeeId: Number(e[0].id), name: String(e[0].name || "").slice(0, 150), mobile: String(e[0].mobile || e[0].phone || "").slice(0, 30) || null };
+      return { kind, employeeId: Number(e[0].id), name: String(e[0].name || "").slice(0, 150), mobile: String(e[0].phone || "").slice(0, 30) || null };
     }
     const name = String(raw?.name ?? "").trim().slice(0, 150);
     const mobile = String(raw?.mobile ?? "").trim().slice(0, 30);

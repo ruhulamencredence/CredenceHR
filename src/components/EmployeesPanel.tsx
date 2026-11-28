@@ -1282,10 +1282,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
   // Tooltip on the Department cell below — who that Department's Supervisor
   // is (if any), so the Admin doesn't have to jump to the Departments tab
   // just to see who'd auto-approve this Employee's requests first.
-  const departmentSupervisorLabel = (departmentId: number | null | undefined) => {
-    if (!departmentId) return '';
-    const d = departments.find((x) => x.id === departmentId);
-    return d?.supervisor_name ? `Supervisor: ${d.supervisor_name}` : '';
+  // Head of the Department and who this person reports to (their requests'
+  // first approver: Direct Supervisor, else their team's Supervisor, else the
+  // Head — not when their team skips the Head).
+  const departmentSupervisorLabel = (departmentId: number | null | undefined, reportsTo?: string | null) => {
+    const d = departmentId ? departments.find((x) => x.id === departmentId) : null;
+    return [d?.head_name ? `Head: ${d.head_name}` : '', `Reports to: ${reportsTo || 'Not set'}`].filter(Boolean).join('\n');
   };
 
   // The search waits for a pause in typing; any change of search / status / size goes back to page 1.
@@ -1497,7 +1499,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user, onO
                     </td>
                     <td className="px-2.5 py-3 text-xs text-slate-700 min-w-[90px] max-w-[150px]">
                       {emp.department ? (
-                        <span className="inline-flex items-start gap-1" title={departmentSupervisorLabel(emp.department_id)}>
+                        <span className="inline-flex items-start gap-1" title={departmentSupervisorLabel(emp.department_id, emp.reports_to_name)}>
                           <Building2 className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />{emp.department}
                         </span>
                       ) : '—'}

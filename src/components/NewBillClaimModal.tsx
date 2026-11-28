@@ -25,10 +25,15 @@ export interface BillClaimDraft {
   description: string;
   selectedRefs: Record<number, string>;
   fileName: string | null;
+  // Names of the receipts picked on each bill (by bill key) — the files
+  // themselves can't be kept on the phone, so they're asked for again.
+  receiptNames?: Record<number, string[]>;
 }
 import { Spinner } from './Spinner';
 
 import { SearchSelect } from './Combobox';
+import { AttachmentViewer } from './AttachmentViewer';
+import { Camera, FileText } from 'lucide-react';
 interface NewBillClaimModalProps {
   token: string;
   onClose: () => void;
@@ -66,6 +71,18 @@ interface BillDraft {
 
 let nextBillKey = 1;
 const newBill = (date: string): BillDraft => ({ key: nextBillKey++, category_id: '', bill_date: date, amount: '', description: '' });
+// A bill's receipt: one already on the claim being edited (id), or a new file.
+interface Receipt {
+  key: number;
+  id?: number;
+  name: string;
+  type: string;
+  file?: File;
+  url?: string; // preview of a new photo
+}
+let nextReceiptKey = 1;
+const MAX_RECEIPTS = 3;
+const isPdf = (r: { type: string; name: string }) => /pdf/i.test(r.type) || /\.pdf$/i.test(r.name);
 const money = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Several bills per claim, each with its own Category, Date (inside the
@@ -110,6 +127,20 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   const [editing, setEditing] = useState<number | null>(null);
   const [snapshot, setSnapshot] = useState<{ bill: BillDraft; refs: Record<number, string> } | null>(null);
   const [editError, setEditError] = useState('');
+  // Each bill's receipts, by bill key (the bills themselves stay plain text so
+  // they can be kept as a draft on the phone).
+  const [receipts, setReceipts] = useState<Record<number, Receipt[]>>({});
+  const [receiptSnapshot, setReceiptSnapshot] = useState<Receipt[] | null>(null);
+  const receiptInput = useRef<HTMLInputElement>(null);
+  const [viewing, setViewing] = useState<{ list: Receipt[]; index: number } | null>(null);
+  function receiptNamesOf(): Record<number, string[]> {
+    const out: Record<number, string[]> = {};
+    for (const [k, list] of Object.entries(receipts)) {
+      const names = list.filter((r) => r.file).map((r) => r.name);
+      if (names.length) out[Number(k)] = names;
+    }
+    return out;
+  }
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
@@ -121,7 +152,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   // the saved claim; Claim on Behalf is someone else's).
   const useDraft = !editClaim && !onBehalfOf;
   const [draftReady, setDraftReady] = useState(false);
-  const [restored, setRestored] = useState<{ fileName: string | null } | null>(null);
+  const [restored, setRestored] = useState<{ fileName: string | null; receipts?: number } | null>(null);
 
   // Completed Check In/Out (check-in/out) the User can attach to this claim,
   // each with its own Amount — a check-in/out can only ever be referenced once,
@@ -153,14 +184,20 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           setFromDate(day(editClaim.from_date));
           setToDate(day(editClaim.to_date));
           const cats: { id: number; name: string }[] = data.categories || [];
-          const lines = (editClaim.items || []).map((it) => ({
-            key: nextBillKey++,
-            category_id: String(cats.find((c) => c.id === it.category_id)?.id ?? cats.find((c) => c.name === it.category_name)?.id ?? ''),
-            bill_date: day(it.bill_date),
-            amount: String(it.amount),
-            description: it.description || ''
-          }));
+          const kept: Record<number, Receipt[]> = {};
+          const lines = (editClaim.items || []).map((it) => {
+            const key = nextBillKey++;
+            if (it.files?.length) kept[key] = it.files.map((f) => ({ key: nextReceiptKey++, id: f.id, name: f.file_name, type: f.file_mimetype }));
+            return {
+              key,
+              category_id: String(cats.find((c) => c.id === it.category_id)?.id ?? cats.find((c) => c.name === it.category_name)?.id ?? ''),
+              bill_date: day(it.bill_date),
+              amount: String(it.amount),
+              description: it.description || ''
+            };
+          });
           setBills(lines);
+          setReceipts(kept);
           setDescription(editClaim.description || '');
           const refs: Record<number, string> = {};
           for (const r of editClaim.claim_refs || []) refs[r.claim_id] = String(r.amount);
@@ -176,7 +213,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             setBills(d.bills);
             setDescription(d.description || '');
             setSelectedRefs(d.selectedRefs || {});
-            setRestored({ fileName: d.fileName || null });
+            setRestored({ fileName: d.fileName || null, receipts: Object.values(d.receiptNames || {}).reduce((n, l) => n + l.length, 0) });
           } else {
             setFromDate(data.today);
             setToDate(data.today);
@@ -197,17 +234,18 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   useEffect(() => {
     if (!useDraft || !draftReady) return;
     const t = setTimeout(() => {
-      const draft: BillClaimDraft = { open: true, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null };
+      const draft: BillClaimDraft = { open: true, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null, receiptNames: receiptNamesOf() };
       saveDraft(BILL_CLAIM_DRAFT, draft);
     }, 300);
     return () => clearTimeout(t);
-  }, [useDraft, draftReady, fromDate, toDate, bills, description, selectedRefs, file, restored]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useDraft, draftReady, fromDate, toDate, bills, description, selectedRefs, file, restored, receipts]);
   // Closing on purpose: an empty form leaves nothing behind; a started one
   // stays as a draft for next time (not reopened by itself).
   const close = () => {
     if (useDraft && draftReady) {
       const started = description.trim() || Object.keys(selectedRefs).length || bills.some((b) => b.amount || b.category_id || b.description);
-      if (started) saveDraft(BILL_CLAIM_DRAFT, { open: false, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null });
+      if (started) saveDraft(BILL_CLAIM_DRAFT, { open: false, fromDate, toDate, bills, description, selectedRefs, fileName: file?.name || restored?.fileName || null, receiptNames: receiptNamesOf() });
       else clearDraft(BILL_CLAIM_DRAFT);
     }
     onClose();
@@ -219,6 +257,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     setFromDate(day);
     setToDate(day);
     setBills([]);
+    setReceipts({});
     setEditing(null);
     setStep('bills');
     setDescription('');
@@ -237,7 +276,50 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   const transportBill = bills.find(isTransportBill) || null;
 
   const updateBill = (key: number, patch: Partial<BillDraft>) => setBills((prev) => prev.map((b) => (b.key === key ? { ...b, ...patch } : b)));
-  const removeBill = (key: number) => setBills((prev) => prev.filter((b) => b.key !== key));
+  const removeBill = (key: number) => {
+    setBills((prev) => prev.filter((b) => b.key !== key));
+    setReceipts((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+  // A bill's receipts; whether its category needs one (Bill Claim Policy →
+  // Bill categories → Receipt, while category limits are enforced — the
+  // server checks the same).
+  const receiptsOf = (b: BillDraft) => receipts[b.key] || [];
+  const needsBillReceipt = (b: BillDraft) =>
+    !!policy?.values.enforce_category_limits && !!categories.find((c) => String(c.id) === b.category_id)?.receipt_required;
+  const addReceipts = (key: number, picked: FileList | null) => {
+    if (!picked?.length) return;
+    const list = receipts[key] || [];
+    const room = MAX_RECEIPTS - list.length;
+    const add: Receipt[] = [];
+    let problem = '';
+    for (const f of Array.from(picked)) {
+      if (add.length >= room) {
+        problem = `At most ${MAX_RECEIPTS} receipts per bill.`;
+        break;
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        problem = `${f.name}: a receipt must be 5MB or smaller.`;
+        continue;
+      }
+      if (!/^image\//.test(f.type) && f.type !== 'application/pdf') {
+        problem = `${f.name}: a receipt must be a photo or a PDF.`;
+        continue;
+      }
+      add.push({ key: nextReceiptKey++, name: f.name, type: f.type, file: f, url: /^image\//.test(f.type) ? URL.createObjectURL(f) : undefined });
+    }
+    setEditError(problem);
+    if (add.length) setReceipts((prev) => ({ ...prev, [key]: [...(prev[key] || []), ...add] }));
+    if (receiptInput.current) receiptInput.current.value = '';
+  };
+  const removeReceipt = (key: number, rkey: number) =>
+    setReceipts((prev) => ({ ...prev, [key]: (prev[key] || []).filter((r) => r.key !== rkey) }));
+  const missingReceipts = bills.filter((b) => needsBillReceipt(b) && receiptsOf(b).length === 0);
+  const allReceipts: { bill: BillDraft; r: Receipt }[] = bills.flatMap((b) => receiptsOf(b).map((r) => ({ bill: b, r })));
 
   // Changing the range pulls any bill date that falls outside it back inside,
   // and drops picked check-in/outs that are now outside it.
@@ -317,9 +399,10 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
   const billsTotal = bills.reduce((sum, b) => sum + billAmount(b), 0);
   const claimTotal = billsTotal;
   const receiptAbove = Number(policy?.values.attachment_required_above) || 0;
-  const needsReceipt =
-    (receiptAbove > 0 && claimTotal > receiptAbove) ||
-    (!!policy?.values.enforce_category_limits && bills.some((b) => categories.find((c) => String(c.id) === b.category_id)?.receipt_required));
+  // A category's receipt goes on each of its bills (receiptsOf); the claim
+  // itself needs one only over the "receipt above" amount, and a bill's
+  // receipt counts for that too.
+  const needsReceipt = receiptAbove > 0 && claimTotal > receiptAbove && !Object.values(receipts).some((l) => l.length > 0);
 
   // ---- Day-by-day form ----------------------------------------------------
   // Every date of the From–To range (a range is a few days; capped anyway).
@@ -356,6 +439,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
     const b = bills.find((x) => x.key === key);
     if (!b) return;
     setSnapshot({ bill: { ...b }, refs: { ...selectedRefs } });
+    setReceiptSnapshot(receipts[key] ? [...receipts[key]] : null);
     setEditError('');
     setError('');
     setEditing(key);
@@ -368,6 +452,12 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
       const before = snapshot.bill;
       setBills((prev) => prev.map((b) => (b.key === before.key ? before : b)));
       setSelectedRefs(snapshot.refs);
+      setReceipts((prev) => {
+        const next = { ...prev };
+        if (receiptSnapshot) next[before.key] = receiptSnapshot;
+        else delete next[before.key];
+        return next;
+      });
     } else removeBill(editing);
     setEditing(null);
     setSnapshot(null);
@@ -486,14 +576,13 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
           />
         </div>
-        {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null || cat.receipt_required) && (
+        {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.daily_limit != null || cat.monthly_limit != null) && (
           <p className="text-[10px] text-slate-500">
             {cat.limits_for ? `For ${cat.limits_for}: ` : ''}
             {[
               cat.max_per_bill != null ? `up to ${money(cat.max_per_bill)} per bill` : '',
               cat.daily_limit != null ? `${money(cat.daily_limit)} a day` : '',
-              cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
-              cat.receipt_required ? 'receipt needed' : ''
+              cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : ''
             ]
               .filter(Boolean)
               .join(' · ')}
@@ -565,6 +654,61 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
             )}
           </div>
         )}
+        {/* This bill's receipts: photo or PDF, up to MAX_RECEIPTS. */}
+        <div data-testid="bill-receipts">
+          <div className="text-[11px] font-semibold text-slate-600">
+            {needsBillReceipt(b) ? 'Receipt *' : 'Receipt (optional)'}
+            <span className="font-normal text-slate-400"> · photo or PDF, up to {MAX_RECEIPTS}</span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {receiptsOf(b).map((r, k) => (
+              <div key={r.key} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setViewing({ list: receiptsOf(b), index: k })}
+                  aria-label={`Open receipt ${r.name}`}
+                  className="w-16 h-16 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden flex flex-col items-center justify-center text-slate-500"
+                >
+                  {r.url ? (
+                    <img src={r.url} alt="" className="w-full h-full object-cover object-top" />
+                  ) : (
+                    <>
+                      <FileText className="w-5 h-5" />
+                      <span className="mt-0.5 px-1 max-w-full truncate text-[9px] font-semibold">{isPdf(r) ? 'PDF' : r.name}</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeReceipt(b.key, r.key)}
+                  aria-label={`Remove receipt ${r.name}`}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900/85 text-white flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+            {receiptsOf(b).length < MAX_RECEIPTS && (
+              <label
+                className={`w-16 h-16 rounded-xl border-[1.5px] border-dashed flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold cursor-pointer ${
+                  needsBillReceipt(b) && receiptsOf(b).length === 0 ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-blue-300 bg-blue-50 text-blue-700'
+                }`}
+              >
+                <Camera className="w-5 h-5" />
+                Add
+                <input
+                  ref={receiptInput}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  className="hidden"
+                  aria-label={`Bill ${n} receipt`}
+                  onChange={(e) => addReceipts(b.key, e.target.files)}
+                />
+              </label>
+            )}
+          </div>
+        </div>
         {editError && (
           <p className="text-[11px] font-semibold text-rose-600" role="alert">
             {editError}
@@ -635,6 +779,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
       if (policy.values.enforce_category_limits && cat?.max_per_bill != null && amt > cat.max_per_bill) {
         return `Bill ${n}: ${cat.name} bills can be at most ${money(cat.max_per_bill)} each.`;
       }
+      if (needsBillReceipt(b) && receiptsOf(b).length === 0) return `${cat?.name || `Bill ${n}`} on ${formatDate(b.bill_date)} needs its receipt — tap the bill and add a photo or PDF.`;
     }
     for (const v of Object.values(selectedRefs)) {
       const amt = Number(v);
@@ -666,6 +811,21 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
         });
       }
 
+      const asBase64 = (f: File) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+          reader.onerror = () => reject(new Error(`Could not read ${f.name}.`));
+          reader.readAsDataURL(f);
+        });
+      const billFiles = await Promise.all(
+        bills.map(async (b) => {
+          const list = receiptsOf(b);
+          const files = [];
+          for (const r of list) if (r.file) files.push({ file_base64: await asBase64(r.file), file_name: r.name, file_mimetype: r.file.type || 'application/octet-stream' });
+          return { files, keep_file_ids: list.filter((r) => r.id).map((r) => r.id as number) };
+        })
+      );
       const res = await fetch(apiUrl(editId ? `/api/bill-claims/${editId}/edit` : behalfBase || '/api/bill-claims'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -673,11 +833,14 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
           claim_date: claimDate,
           from_date: fromDate,
           to_date: toDate,
-          items: bills.map((b) => ({
+          items: bills.map((b, i) => ({
             category_id: Number(b.category_id),
             bill_date: b.bill_date,
             amount: billAmount(b),
-            description: b.description.trim() || undefined
+            description: b.description.trim() || undefined,
+            // Each bill's receipts (new) and the ones already on the claim (kept).
+            files: billFiles[i].files,
+            keep_file_ids: billFiles[i].keep_file_ids
           })),
           description: description.trim() || undefined,
           ...(hasRefs
@@ -756,6 +919,7 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
               <span className="flex-1">
                 Your unsent claim was brought back.
                 {restored.fileName && !file ? ` Attach "${restored.fileName}" again before submitting.` : ''}
+                {restored.receipts ? ` Add the bills' receipts again (${restored.receipts}) — photos can't be kept on the phone.` : ''}
               </span>
               <button type="button" onClick={startOver} className="shrink-0 font-semibold text-emerald-700 hover:underline">
                 Start over
@@ -885,16 +1049,20 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                           const cat = categories.find((c) => String(c.id) === b.category_id);
                           if (editing === b.key) return <React.Fragment key={b.key}>{renderEditor(b, n)}</React.Fragment>;
                           const refCount = refsDriveBill(b) ? Object.keys(selectedRefs).length : 0;
+                          const rc = receiptsOf(b).length;
+                          const missing = needsBillReceipt(b) && rc === 0;
                           return (
                             <button
                               key={b.key}
                               type="button"
                               onClick={() => startEdit(b.key)}
-                              aria-label={`Bill ${n}: ${cat?.name || 'no category'} ${money(billAmount(b))} — edit`}
-                              className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-slate-300"
+                              aria-label={`Bill ${n}: ${cat?.name || 'no category'} ${money(billAmount(b))}${missing ? ', receipt needed' : rc ? `, ${rc} receipt${rc === 1 ? '' : 's'}` : ''} — edit`}
+                              className={`w-full flex items-center gap-2 text-left px-3 py-2 rounded-xl bg-white border hover:border-slate-300 ${missing ? 'border-rose-300' : 'border-slate-200'}`}
                             >
                               <span className="min-w-0 flex-1 truncate text-xs">
                                 <span className={`font-semibold ${cat ? 'text-slate-800' : 'text-rose-600'}`}>{cat?.name || 'Choose a category'}</span>
+                                {rc > 0 && <span className="ml-1.5 inline-block align-middle text-[10px] font-semibold px-1.5 py-px rounded-full bg-emerald-100 text-emerald-800">📎 {rc}</span>}
+                                {missing && <span className="ml-1.5 inline-block align-middle text-[10px] font-semibold px-1.5 py-px rounded-full bg-rose-100 text-rose-700">📎 receipt needed</span>}
                                 {refCount > 0 ? (
                                   <span className="text-slate-400"> · {refCount} check-in/out{refCount === 1 ? '' : 's'}</span>
                                 ) : b.description ? (
@@ -950,6 +1118,16 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                 </span>
                 <span className="font-bold text-slate-900" data-testid="bill-claim-total">{money(claimTotal)}</span>
               </div>
+              {missingReceipts.length > 0 && editing === null && (
+                <p className="mt-2 text-[11.5px] leading-snug text-rose-700 bg-rose-50 rounded-xl px-3 py-2" data-testid="receipts-missing">
+                  {missingReceipts.length === 1 ? '1 bill still needs its receipt' : `${missingReceipts.length} bills still need their receipts`} —{' '}
+                  {missingReceipts
+                    .slice(0, 3)
+                    .map((b) => `${categories.find((c) => String(c.id) === b.category_id)?.name || 'Bill'} on ${formatDate(b.bill_date).slice(0, 6)}`)
+                    .join(', ')}
+                  . Tap it to add.
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-4" data-testid="bill-claim-review">
@@ -974,6 +1152,47 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                 </table>
               </div>
 
+              {(allReceipts.length > 0 || bills.some(needsBillReceipt)) && (
+                <div data-testid="review-receipts">
+                  <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-0.5">
+                    <span>Receipts</span>
+                    <span>
+                      {allReceipts.length} file{allReceipts.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  {bills.map((b) => {
+                    const list = receiptsOf(b);
+                    const cat = categories.find((c) => String(c.id) === b.category_id);
+                    const label = `${cat?.name || 'Bill'} · ${formatDate(b.bill_date).slice(0, 6)}`;
+                    if (!list.length && !needsBillReceipt(b)) {
+                      return (
+                        <div key={b.key} className="flex items-center gap-2.5 py-1.5 border-b border-slate-100 text-[13px] text-slate-400">
+                          <span className="w-7 h-7 rounded-lg border border-dashed border-slate-200 shrink-0" />
+                          {label}
+                          <span className="ml-auto">not needed</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <button
+                        key={b.key}
+                        type="button"
+                        onClick={() => list.length && setViewing({ list, index: 0 })}
+                        className="w-full flex items-center gap-2.5 py-1.5 border-b border-slate-100 text-[13px] text-left text-slate-800"
+                      >
+                        <span className="w-7 h-7 rounded-lg border border-slate-200 bg-slate-50 overflow-hidden shrink-0 flex items-center justify-center">
+                          {list[0]?.url ? <img src={list[0].url} alt="" className="w-full h-full object-cover object-top" /> : <FileText className="w-3.5 h-3.5 text-slate-400" />}
+                        </span>
+                        {label}
+                        <span className={`ml-auto font-semibold ${list.length ? '' : 'text-rose-600'}`}>
+                          {list.length ? `${list.length} file${list.length === 1 ? '' : 's'}` : 'needed'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div>
                 <label className="block text-[11px] font-semibold text-slate-500 mb-1">Description (optional)</label>
                 <textarea
@@ -988,7 +1207,11 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                  {needsReceipt ? 'Receipt * (this claim needs one — image/PDF, up to 5MB)' : 'Attachment (optional, image/PDF, up to 5MB)'}
+                  {needsReceipt
+                    ? 'Receipt * (this claim needs one — image/PDF, up to 5MB)'
+                    : allReceipts.length || bills.some(needsBillReceipt)
+                      ? 'Other attachment (optional, image/PDF, up to 5MB)'
+                      : 'Attachment (optional, image/PDF, up to 5MB)'}
                 </label>
                 <label className="flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
                   <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
@@ -1015,7 +1238,8 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
                   <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
                     All dates are inside {formatDate(minDate)} – {formatDate(maxDate)}
-                    {locked.size ? ' and none is in another claim' : ''}.
+                    {locked.size ? ' and none is in another claim' : ''}
+                    {bills.some(needsBillReceipt) ? ', and every bill that needs a receipt has one' : ''}.
                   </span>
                 </div>
               )}
@@ -1091,6 +1315,30 @@ export const NewBillClaimModal: React.FC<NewBillClaimModalProps> = ({ token, onC
         )}
       </div>
       </div>
+      {viewing && viewing.list[viewing.index] && (
+        <AttachmentViewer
+          token={token}
+          src={
+            viewing.list[viewing.index].id && editId
+              ? `/api/bill-claims/${editId}/item-files/${viewing.list[viewing.index].id}`
+              : ''
+          }
+          load={viewing.list[viewing.index].file ? () => Promise.resolve(viewing.list[viewing.index].file as Blob) : undefined}
+          type={viewing.list[viewing.index].type}
+          name={viewing.list[viewing.index].name}
+          nav={
+            viewing.list.length > 1
+              ? {
+                  index: viewing.index,
+                  count: viewing.list.length,
+                  onPrev: () => setViewing((v) => (v ? { ...v, index: Math.max(0, v.index - 1) } : v)),
+                  onNext: () => setViewing((v) => (v ? { ...v, index: Math.min(v.list.length - 1, v.index + 1) } : v))
+                }
+              : undefined
+          }
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>,
     document.body
   );

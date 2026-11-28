@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৮টি টেবিল, ৩০১৮টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৯টি টেবিল, ৩০২৬টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -2629,6 +2629,19 @@ Unique: `unique_user_department`(user_id,department)
 | `reason` | text | হ্যাঁ |  | |
 | `version` | int(11) | না | default 1 | |
 | `snapshot_json` | mediumtext | হ্যাঁ |  | |
+| `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+
+### `bill_claim_item_files`
+
+| কলাম | ধরন | Null | মান/কী | সম্পর্ক |
+|---|---|---|---|---|
+| `id` | int(11) | না | PK auto_increment | |
+| `bill_claim_id` | int(11) | না |  | FK → `bill_claims.id` |
+| `item_id` | int(11) | হ্যাঁ |  | |
+| `file_name` | varchar(255) | না |  | |
+| `file_mimetype` | varchar(100) | না |  | |
+| `file_size` | int(11) | না | default 0 | |
+| `file_data` | longblob | না |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 
 ### `bill_claim_items`

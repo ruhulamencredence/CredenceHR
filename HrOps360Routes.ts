@@ -1135,7 +1135,8 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
           religion: e.religion || null,
           email: e.email || null,
           personal_email: e.personal_email || null,
-          phone: e.mobile || e.phone || null,
+          // Office Contact No. only — the personal mobile stays in Admin Panel -> Employees.
+          phone: e.phone || null,
           telephone: e.telephone || null,
           present_address: [e.present_address, e.present_city, e.present_state, e.present_zip, e.present_country].filter(Boolean).join(", ") || null,
           permanent_address: [e.permanent_address, e.permanent_city, e.permanent_state, e.permanent_zip, e.permanent_country].filter(Boolean).join(", ") || null,

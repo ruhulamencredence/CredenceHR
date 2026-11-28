@@ -98,7 +98,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'merge_accounts' | 'merge_projects' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'rules_readers' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'mail_signature' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'md_calendar' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit' | 'close_short' | 'mpr_followup' | 'pickups' | 'trip_report' | 'p360_access';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'merge_accounts' | 'merge_projects' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'payroll_view' | 'live' | 'on_behalf' | 'rules_readers' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'mail_signature' | 'roster_manage' | 'break_manage' | 'feedback_resolve' | 'punch_rules' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete' | 'requisitions' | 'email_candidates' | 'edit_candidates' | 'import_employees' | 'import_leave' | 'import_movement_claims' | 'import_bill_claims' | 'import_attendance' | 'import_office_attendance' | 'manage_drivers' | 'manage_vehicles' | 'dept_summary' | 'approval_sheet' | 'month_compare' | 'top_sheet' | 'custom_report' | 'notice_read_report' | 'notice_create' | 'notice_edit' | 'notice_publish' | 'notice_delete' | 'notice_email' | 'hrd_review' | 'notice_animations' | 'md_people' | 'md_attendance' | 'md_money' | 'md_approvals' | 'md_projects' | 'md_recruitment' | 'md_fleet' | 'md_calendar' | 'salary_amounts' | 'ot_rules' | 'ot_approve' | 'guard_posts' | 'quick_reports' | 'quick_ot' | 'tracking_schedule' | 'emp_headcount' | 'emp_export' | 'hr_headcount' | 'hr_emp_export' | 'sim_inventory' | 'attendance_edit' | 'close_short' | 'mpr_followup' | 'pickups' | 'trip_report' | 'p360_access';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -186,9 +186,15 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'sim_inventory', label: 'SIM Inventory (history)' }
   ],
   // Office Attendance -> Unlinked PINs (edits Employees: explicit only).
-  // Notices: who has read it (report, send again) and email — only when ticked.
+  // Notices: each operation its own tick (28 Nov 2026) — view, new, edit,
+  // publish, delete; who has read it and email as before. All but View are
+  // explicit-only (see EXPLICIT_ONLY_LAYERS).
   notices: [
-    { key: 'read', label: 'Write & publish notices' },
+    { key: 'read', label: 'View notices' },
+    { key: 'notice_create', label: 'New notice & Duplicate' },
+    { key: 'notice_edit', label: 'Edit' },
+    { key: 'notice_publish', label: 'Publish / Pause / Take down / Pin' },
+    { key: 'notice_delete', label: 'Delete' },
     { key: 'notice_read_report', label: 'Who has read it (report & send again)' },
     { key: 'notice_email', label: 'Send notices by email' },
     { key: 'notice_animations', label: 'Animation library (add / remove)' }
@@ -354,7 +360,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'merge_accounts', 'merge_projects', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'mail_signature', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit', 'close_short', 'mpr_followup', 'pickups', 'trip_report', 'p360_access'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['notice_create', 'notice_edit', 'notice_publish', 'notice_delete', 'permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'merge_accounts', 'merge_projects', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'mail_signature', 'roster_manage', 'break_manage', 'feedback_resolve', 'punch_rules', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete', 'requisitions', 'email_candidates', 'edit_candidates', 'import_employees', 'import_leave', 'import_movement_claims', 'import_bill_claims', 'import_attendance', 'import_office_attendance', 'manage_drivers', 'manage_vehicles', 'notice_read_report', 'notice_email', 'hrd_review', 'notice_animations', 'md_money', 'salary_amounts', 'ot_rules', 'ot_approve', 'guard_posts', 'tracking_schedule', 'emp_export', 'hr_emp_export', 'attendance_edit', 'close_short', 'mpr_followup', 'pickups', 'trip_report', 'p360_access'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -468,6 +474,8 @@ export interface Employee {
   user_id?: number | null;
   // Office Attendance (ZKTeco) device PIN — matches zk_attendance_logs punches to this Employee.
   zk_device_pin?: string | null;
+  // Who their requests go to first (GET /api/employees): Direct Supervisor, else team Supervisor, else Head (not when the team skips the Head).
+  reports_to_name?: string | null;
 
   // --- Employee Info tab ---
   middle_name?: string | null;
@@ -651,7 +659,7 @@ export interface Department {
   // Supervisor, then the Head, then the workflow.
   head_user_id?: number | null;
   head_name?: string | null;
-  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; members: number }[];
+  teams?: { id: number; name: string; supervisor_user_id: number | null; supervisor_name: string | null; everyone_else: boolean; skip_head?: boolean; members: number }[];
 }
 
 
@@ -1818,6 +1826,14 @@ export interface BillClaimItem {
   bill_date: string; // YYYY-MM-DD
   amount: number;
   description?: string | null;
+  // The bill's own receipts (names only; the file is fetched when opened).
+  files?: BillClaimItemFile[];
+}
+export interface BillClaimItemFile {
+  id: number;
+  file_name: string;
+  file_mimetype: string;
+  file_size?: number;
 }
 
 // Bill Claim Policy (Admin Panel -> Claims/Bill/Disbursement -> Bill Claim Policy).

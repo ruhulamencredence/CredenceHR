@@ -266,6 +266,22 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (s
     KEY idx_uci_date (bill_date),
     FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE
   )`);
+  // A bill's own receipts (photo / PDF), up to MAX_FILES_PER_BILL per bill.
+  // item_id follows the bill: an edit writes the bills again and moves the
+  // kept receipts to the new rows (BillClaimRoutes saveItemFiles).
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_item_files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bill_claim_id INT NOT NULL,
+    item_id INT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_mimetype VARCHAR(100) NOT NULL,
+    file_size INT NOT NULL DEFAULT 0,
+    file_data LONGBLOB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_bcif_claim (bill_claim_id),
+    KEY idx_bcif_item (item_id),
+    FOREIGN KEY (bill_claim_id) REFERENCES bill_claims(id) ON DELETE CASCADE
+  )`);
   await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_policy_history (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     company_ref INT NOT NULL,
@@ -706,6 +722,8 @@ export interface BillLineInput {
   bill_date?: any;
   amount?: any;
   description?: any;
+  // How many receipts this bill carries (new + kept) — per-bill receipts only.
+  file_count?: any;
 }
 export interface CheckedLine {
   category_id: number | null;
@@ -729,6 +747,10 @@ export async function checkClaimBills(
     lines: BillLineInput[];
     extraTotal: number;
     hasAttachment: boolean;
+    // The form sends receipts with each bill (items[].files): a category that
+    // needs a receipt needs it on every one of its bills. Older forms send one
+    // file for the whole claim, checked the old way.
+    perBillReceipts?: boolean;
     // Editing an existing claim: its own id (its dates and its share of the
     // monthly limits don't count against it) and the day it was first filed.
     editingClaimId?: number | null;
@@ -795,10 +817,20 @@ export async function checkClaimBills(
   if (Number(policy.max_claim_total) > 0 && total > Number(policy.max_claim_total)) {
     return { error: `A claim can add up to at most ${fmt(Number(policy.max_claim_total))}.` };
   }
-  const needsFile =
-    (Number(policy.attachment_required_above) > 0 && total > Number(policy.attachment_required_above)) ||
-    (policy.enforce_category_limits && lines.some((l) => categories.find((c) => c.id === l.category_id)?.receipt_required));
-  if (needsFile && !args.hasAttachment) return { error: "Attach the receipt — this claim needs one." };
+  const overThreshold = Number(policy.attachment_required_above) > 0 && total > Number(policy.attachment_required_above);
+  if (args.perBillReceipts) {
+    const counts = args.lines.map((l) => Math.max(0, Math.floor(Number(l?.file_count) || 0)));
+    if (policy.enforce_category_limits) {
+      for (let i = 0; i < lines.length; i++) {
+        const cat = categories.find((c) => c.id === lines[i].category_id);
+        if (cat?.receipt_required && !counts[i]) return { error: `Bill ${i + 1}: attach the receipt for ${cat.name} (photo or PDF).` };
+      }
+    }
+    if (overThreshold && !args.hasAttachment && !counts.some((c) => c > 0)) return { error: "Attach the receipt — this claim needs one." };
+  } else {
+    const needsFile = overThreshold || (policy.enforce_category_limits && lines.some((l) => categories.find((c) => c.id === l.category_id)?.receipt_required));
+    if (needsFile && !args.hasAttachment) return { error: "Attach the receipt — this claim needs one." };
+  }
 
   // Daily / monthly limit per category: this claim plus the user's other
   // claims (not rejected) for bills on the same day / in the same month.
@@ -844,12 +876,38 @@ export async function checkClaimBills(
   return { lines, total, categorySummary };
 }
 
+export const MAX_FILES_PER_BILL = 3;
+export interface ItemFileMeta {
+  id: number;
+  file_name: string;
+  file_mimetype: string;
+  file_size: number;
+}
+/** The receipts of these claims' bills (no file data), by bill (item) id. */
+export async function itemFilesOf(queryDB: QueryDB, claimIds: number[]): Promise<Map<number, ItemFileMeta[]>> {
+  const out = new Map<number, ItemFileMeta[]>();
+  if (!claimIds.length) return out;
+  const rows: any[] =
+    (await queryDB(
+      `SELECT id, item_id, file_name, file_mimetype, file_size FROM bill_claim_item_files WHERE bill_claim_id IN (${claimIds.map(() => "?").join(",")}) ORDER BY id`,
+      claimIds
+    ).catch(() => [])) || [];
+  for (const r of rows) {
+    if (r.item_id == null) continue;
+    const list = out.get(Number(r.item_id)) || [];
+    list.push({ id: Number(r.id), file_name: r.file_name, file_mimetype: r.file_mimetype, file_size: Number(r.file_size) || 0 });
+    out.set(Number(r.item_id), list);
+  }
+  return out;
+}
+
 /** Adds `items` (bill lines) to each claim row. */
 export async function attachClaimItems(queryDB: QueryDB, rows: any[]): Promise<any[]> {
   if (!rows.length) return rows;
   const ids = rows.map((r) => Number(r.id));
   const items: any[] =
     (await queryDB(`SELECT * FROM bill_claim_items WHERE bill_claim_id IN (${ids.map(() => "?").join(",")}) ORDER BY bill_date, id`, ids)) || [];
+  const files = await itemFilesOf(queryDB, ids);
   const by: Record<number, any[]> = {};
   for (const i of items) {
     (by[Number(i.bill_claim_id)] ||= []).push({
@@ -858,7 +916,8 @@ export async function attachClaimItems(queryDB: QueryDB, rows: any[]): Promise<a
       category_name: i.category_name,
       bill_date: dhakaDate(i.bill_date),
       amount: Number(i.amount),
-      description: i.description ?? null
+      description: i.description ?? null,
+      files: files.get(Number(i.id)) || []
     });
   }
   return rows.map((r) => ({ ...r, items: by[Number(r.id)] || [] }));

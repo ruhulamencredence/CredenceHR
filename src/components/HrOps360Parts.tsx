@@ -672,7 +672,7 @@ function dossierTables(d: DossierData, picked: Set<string>): { title: string; he
         ['Religion', p.religion || ''],
         ['Nationality', p.nationality || ''],
         ['NID', p.nid || ''],
-        ['Mobile', p.phone || ''],
+        ['Contact No.', p.phone || ''],
         ['Email', [p.email, p.personal_email].filter(Boolean).join(', ')],
         ['Present address', p.present_address || ''],
         ['Permanent address', p.permanent_address || ''],

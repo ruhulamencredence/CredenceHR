@@ -3,10 +3,10 @@
 // typed, "Same as <day before>", Cancel puts an edited bill back, then a
 // Review step with the total by category, and Submit files the claim with
 // every bill on its own date. Phone, and the same with the keyboard open.
-// Dev server: BASE (default :3300 — the claude/attendance-device-rule worktree).
+// Dev server: BASE (default :3200).
 const { chromium } = require('/opt/node-tools/node_modules/playwright/index.js');
 const { execSync } = require('child_process');
-const B = process.env.BASE || 'http://localhost:3300', OUT = process.argv[2] || '/tmp';
+const B = process.env.BASE || 'http://localhost:3200', OUT = process.argv[2] || '/tmp';
 const sql = (q) => execSync(`mysql -h127.0.0.1 -ucred -pcredpass admin_ui -N -e ${JSON.stringify(q)}`).toString().trim();
 let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
 (async () => {
@@ -14,6 +14,9 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
   const [uid, email] = sql(`SELECT u.id,u.email FROM users u JOIN departments d ON d.head_user_id=u.id WHERE d.id=${dept}`).split('\t');
   sql(`UPDATE users SET can_view_bill_claims=1 WHERE id=${uid}`);
   sql(`DELETE FROM bill_claim_items WHERE bill_claim_id IN (SELECT id FROM bill_claims WHERE user_id=${uid}); DELETE FROM bill_claim_references WHERE bill_claim_id IN (SELECT id FROM bill_claims WHERE user_id=${uid}); DELETE FROM bill_claims WHERE user_id=${uid}`);
+  // The rules' current version (made on first read after the policy changes).
+  const pre = await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password: 'Demo#2026pass' }) })).json();
+  await fetch(B + '/api/bill-claim-rules/mine', { headers: { Authorization: 'Bearer ' + pre.token } });
   const ver = Number(sql('SELECT MAX(id) FROM bill_claim_rule_versions'));
   sql(`DELETE FROM bill_claim_rule_reads WHERE user_id=${uid}; INSERT INTO bill_claim_rule_reads (company_ref,user_id,version_id,action,created_at) VALUES (1,${uid},${ver},'confirm',NOW())`);
   const a = await (await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identifier: email, password: 'Demo#2026pass' }) })).json();

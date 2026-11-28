@@ -35,11 +35,14 @@ export const NoticeContent: React.FC<{ html: string; token: string; className?: 
   return <div ref={ref} className={`${NOTICE_CONTENT_CLASS} ${className}`} dangerouslySetInnerHTML={{ __html: clean }} />;
 };
 
-export const NoticeCover: React.FC<{ file: NoticeFile | null | undefined; token: string; className?: string; localUrl?: string | null }> = ({
+// fit 'contain': the whole picture, never cropped (a designed cover often has
+// its own words on it); 'cover' (default) fills a fixed-size box, for list cards.
+export const NoticeCover: React.FC<{ file: NoticeFile | null | undefined; token: string; className?: string; localUrl?: string | null; fit?: 'cover' | 'contain' }> = ({
   file,
   token,
   className = '',
-  localUrl
+  localUrl,
+  fit = 'cover'
 }) => {
   const [src, setSrc] = useState<string | null>(localUrl || null);
   useEffect(() => {
@@ -54,7 +57,7 @@ export const NoticeCover: React.FC<{ file: NoticeFile | null | undefined; token:
     };
   }, [file?.url, token, localUrl]);
   if (!file && !localUrl) return null;
-  return src ? <img src={src} alt="" className={`w-full object-cover ${className}`} /> : <div className={`w-full bg-gradient-to-br from-violet-200 to-pink-200 ${className}`} />;
+  return src ? <img src={src} alt="" className={`w-full ${fit === 'contain' ? 'object-contain' : 'object-cover'} ${className}`} /> : <div className={`w-full bg-gradient-to-br from-violet-200 to-pink-200 ${className}`} />;
 };
 
 export const NoticeAttachments: React.FC<{ files: NoticeFile[]; token: string; compact?: boolean }> = ({ files, token, compact }) => {

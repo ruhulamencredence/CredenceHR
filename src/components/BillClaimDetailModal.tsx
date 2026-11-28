@@ -164,7 +164,7 @@ export const BillClaimDetailModal: React.FC<BillClaimDetailModalProps> = ({ clai
             </div>
           </div>
 
-          <ClaimBillLines items={claim.items} />
+          <ClaimBillLines items={claim.items} token={token} fileSrc={(f) => `/api/bill-claims/${claim.id}/item-files/${f}`} />
 
           {claim.claim_refs && claim.claim_refs.length > 0 && (
             <div>
