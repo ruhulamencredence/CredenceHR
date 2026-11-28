@@ -90,13 +90,16 @@ function buildSections(p: MyBillClaimPolicy, lang: Lang): Section[] {
     if (c.max_per_bill != null) limits.push({ label: c.name, value: taka(c.max_per_bill), unit: bn ? 'প্রতি bill' : 'per bill' });
     if (c.monthly_limit != null) limits.push({ label: c.name, value: taka(c.monthly_limit), unit: bn ? 'মাসে' : 'a month' });
   });
-  limits.push({ label: bn ? 'Bill' : 'Bills', value: n(Number(v.max_bills_per_claim) || 20), unit: bn ? 'এক claim-এ' : 'per claim' });
   if (Number(v.max_claim_total) > 0) limits.push({ label: bn ? 'মোট' : 'Total', value: taka(Number(v.max_claim_total)), unit: bn ? 'এক claim-এ' : 'per claim' });
-  const money: [Mark, string][] = [];
+  // Only taka amounts here; how many bills and the receipts are their own section.
+  if (limits.length) out.push({ icon: '💳', tint: 'bg-violet-50', title: bn ? 'আপনার টাকার সীমা' : 'Your money limits', limits });
+
+  const billItems: [Mark, string][] = [];
+  billItems.push(['i', bn ? `এক claim-এ সর্বোচ্চ <b>${n(Number(v.max_bills_per_claim) || 20)}টা bill</b>।` : `Up to <b>${Number(v.max_bills_per_claim) || 20} bills</b> in one claim.`]);
   const receipts = enforce ? p.categories.filter((c) => c.receipt_required).map((c) => esc(c.name)) : [];
-  if (receipts.length) money.push(['do', bn ? `রসিদ লাগবে: <b>${receipts.join(', ')}</b> (ছবি / PDF, ৫MB পর্যন্ত)।` : `A receipt is needed for <b>${receipts.join(', ')}</b> (photo / PDF, up to 5MB).`]);
-  if (Number(v.attachment_required_above) > 0) money.push(['do', bn ? `মোট ${taka(Number(v.attachment_required_above))}-এর বেশি হলে রসিদ লাগবে।` : `A receipt is needed when the claim is over ${taka(Number(v.attachment_required_above))}.`]);
-  out.push({ icon: '💳', tint: 'bg-violet-50', title: bn ? 'আপনার টাকার সীমা' : 'Your money limits', limits, items: money });
+  if (receipts.length) billItems.push(['do', bn ? `রসিদ লাগবে: <b>${receipts.join(', ')}</b> (ছবি / PDF, ৫MB পর্যন্ত)।` : `A receipt is needed for <b>${receipts.join(', ')}</b> (photo / PDF, up to 5MB).`]);
+  if (Number(v.attachment_required_above) > 0) billItems.push(['do', bn ? `মোট ${taka(Number(v.attachment_required_above))}-এর বেশি হলে রসিদ লাগবে।` : `A receipt is needed when the claim is over ${taka(Number(v.attachment_required_above))}.`]);
+  out.push({ icon: '🧾', tint: 'bg-amber-50', title: bn ? 'Bill আর রসিদ' : 'Bills and receipts', items: billItems });
 
   const layer = Number(v.edit_lock_layer) || 1;
   const after: [Mark, string][] = [];
