@@ -176,6 +176,7 @@
   "bill_claim_categories",
   "bill_claim_department_access",
   "bill_claim_history",
+  "bill_claim_item_files",
   "bill_claim_items",
   "bill_claim_policy_history",
   "bill_claim_policy_settings",

@@ -11,7 +11,7 @@
 //   GET /api/approval-details?type=<source_type>&id=<source_id>
 //     -> { type, type_label, title, status, submitted_at, requester, fields,
 //          table, attachments, locations, timeline }
-//   GET /api/approval-details/file?type=&id=   the request's attachment
+//   GET /api/approval-details/file?type=&id=[&file=]   the request's attachment (file = a Bill Claim bill's receipt)
 //
 // Who may open one: the person who asked; anyone in its approval chain —
 // past, current or still to come (Supervisor, Head, Template Layer,
@@ -273,7 +273,8 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
     let title = TYPE_LABEL[type] || type;
     let fields: { label: string; value: string }[] = [];
     let table: { columns: string[]; rows: string[][] } | null = null;
-    let attachments: { label: string }[] = [];
+    // file: a bill's own receipt (bill_claim_item_files id) — opened with ?file=
+    let attachments: { label: string; file?: number }[] = [];
     let locations: { label: string; lat: number; lng: number; place?: string | null }[] = [];
     const t = type === "leave_reliever" || type === "leave_direct" ? "leave_application" : type;
     const loc = (label: string, lat: any, lng: any, place?: any) => {
@@ -296,8 +297,23 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
         ["Status", r.status]
       ]);
       const items: any[] = (await queryDB("SELECT * FROM bill_claim_items WHERE bill_claim_id = ? ORDER BY bill_date, id", [Number(r.id)]).catch(() => [])) || [];
-      if (items.length) table = { columns: ["Date", "Category", "Description", "Amount"], rows: items.map((i) => [d(i.bill_date) || "—", i.category_name || "—", i.description || "—", money(i.amount) || "—"]) };
-      if (r.file_name) attachments = [{ label: r.file_name }];
+      const files: any[] = (await queryDB("SELECT id, item_id, file_name FROM bill_claim_item_files WHERE bill_claim_id = ? ORDER BY id", [Number(r.id)]).catch(() => [])) || [];
+      const filesOf = (itemId: number) => files.filter((f) => Number(f.item_id) === itemId);
+      if (items.length)
+        table = {
+          columns: files.length ? ["Date", "Category", "Description", "Amount", "Receipt"] : ["Date", "Category", "Description", "Amount"],
+          rows: items.map((i) => {
+            const row = [d(i.bill_date) || "—", i.category_name || "—", i.description || "—", money(i.amount) || "—"];
+            if (files.length) row.push(filesOf(Number(i.id)).length ? `📎 ${filesOf(Number(i.id)).length}` : "—");
+            return row;
+          })
+        };
+      // Each bill's receipts, labelled by its bill; then the claim's own file.
+      for (const i of items) {
+        const fs = filesOf(Number(i.id));
+        fs.forEach((f, k) => attachments.push({ label: `${i.category_name} · ${d(i.bill_date)}${fs.length > 1 ? ` (${k + 1})` : ""}`, file: Number(f.id) }));
+      }
+      if (r.file_name) attachments.push({ label: r.file_name });
     } else if (t === "attendance_correction") {
       const proj = await projectName(r.project_id);
       title = `Attendance correction — ${d(r.attendance_date)}`;
@@ -579,7 +595,11 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
       if (!ok) return;
       const f = FILES[ok.type];
       if (!f) return res.status(404).json({ error: "No attachment." });
-      const row = await one(`SELECT ${f.data} AS data, ${f.name} AS name, ${f.mime} AS mime FROM ${f.table} WHERE id = ?`, [ok.id]);
+      const fileId = Number(req.query.file);
+      const row =
+        ok.type === "bill_claim" && Number.isFinite(fileId) && fileId > 0
+          ? await one("SELECT file_data AS data, file_name AS name, file_mimetype AS mime FROM bill_claim_item_files WHERE id = ? AND bill_claim_id = ?", [fileId, ok.id])
+          : await one(`SELECT ${f.data} AS data, ${f.name} AS name, ${f.mime} AS mime FROM ${f.table} WHERE id = ?`, [ok.id]);
       if (!row?.data) return res.status(404).json({ error: "No attachment." });
       const buffer: Buffer = Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data);
       res.setHeader("Content-Type", row.mime || "application/octet-stream");

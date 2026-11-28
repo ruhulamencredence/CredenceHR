@@ -1467,7 +1467,7 @@ const AdminBillClaimDetailModal: React.FC<{
 
               {claim.description && <p className="text-xs text-slate-600">{claim.description}</p>}
 
-              <ClaimBillLines items={claim.items} />
+              <ClaimBillLines items={claim.items} token={token} fileSrc={(f) => `/api/bill-claims/${claim.id}/item-files/${f}`} />
 
               {hasRefs && (
                 <div className="space-y-1">

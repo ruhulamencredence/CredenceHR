@@ -97,7 +97,13 @@ function buildSections(p: MyBillClaimPolicy, lang: Lang): Section[] {
   const billItems: [Mark, string][] = [];
   billItems.push(['i', bn ? `এক claim-এ সর্বোচ্চ <b>${n(Number(v.max_bills_per_claim) || 20)}টা bill</b>।` : `Up to <b>${Number(v.max_bills_per_claim) || 20} bills</b> in one claim.`]);
   const receipts = enforce ? p.categories.filter((c) => c.receipt_required).map((c) => esc(c.name)) : [];
-  if (receipts.length) billItems.push(['do', bn ? `রসিদ লাগবে: <b>${receipts.join(', ')}</b> (ছবি / PDF, ৫MB পর্যন্ত)।` : `A receipt is needed for <b>${receipts.join(', ')}</b> (photo / PDF, up to 5MB).`]);
+  if (receipts.length)
+    billItems.push([
+      'do',
+      bn
+        ? `<b>${receipts.join(', ')}</b>-এর প্রতিটা bill-এ নিজের রসিদ লাগবে — bill-এর ভেতরেই ছবি বা PDF দিন (প্রতিটা ৫MB পর্যন্ত, এক bill-এ ৩টা পর্যন্ত)।`
+        : `Every <b>${receipts.join(', ')}</b> bill needs its own receipt — add a photo or PDF on the bill itself (up to 5MB each, 3 per bill).`
+    ]);
   if (Number(v.attachment_required_above) > 0) billItems.push(['do', bn ? `মোট ${taka(Number(v.attachment_required_above))}-এর বেশি হলে রসিদ লাগবে।` : `A receipt is needed when the claim is over ${taka(Number(v.attachment_required_above))}.`]);
   out.push({ icon: '🧾', tint: 'bg-amber-50', title: bn ? 'Bill আর রসিদ' : 'Bills and receipts', items: billItems });
 

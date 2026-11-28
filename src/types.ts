@@ -1820,6 +1820,14 @@ export interface BillClaimItem {
   bill_date: string; // YYYY-MM-DD
   amount: number;
   description?: string | null;
+  // The bill's own receipts (names only; the file is fetched when opened).
+  files?: BillClaimItemFile[];
+}
+export interface BillClaimItemFile {
+  id: number;
+  file_name: string;
+  file_mimetype: string;
+  file_size?: number;
 }
 
 // Bill Claim Policy (Admin Panel -> Claims/Bill/Disbursement -> Bill Claim Policy).

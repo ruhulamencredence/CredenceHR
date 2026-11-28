@@ -29,7 +29,9 @@
 import { requestApprovalReconcile } from "./approvalReconcile";
 import type { Express } from "express";
 import { isAppSession } from "./SessionSecurity";
-import { checkClaimBills, loadCategories, categoriesFor, hasReadCurrentRules, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
+import { checkClaimBills, loadCategories, categoriesFor, hasReadCurrentRules, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn, MAX_FILES_PER_BILL } from "./BillClaimPolicy";
+// A bill's receipts in a request: kept (ids already on the claim) and new.
+type LineFiles = { keep: number[]; add: { name: string; mime: string; buffer: Buffer }[] };
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./BillClaimHistory";
 
 interface BillClaimRouteDeps {
@@ -962,6 +964,35 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
     return rows.map((r: any) => ({ ...r, claim_refs: byClaim[Number(r.id)] || [] }));
   }
 
+  // The bills' receipts after the bills were (re)written: kept ones move to
+  // their bill's new row, new ones are added, and on an edit the ones left
+  // out are deleted. null = an older form that sent no per-bill receipts —
+  // nothing changes.
+  async function saveItemFiles(claimId: number, itemIds: number[], files: LineFiles[] | null, editing: boolean) {
+    if (!files) return;
+    for (let i = 0; i < files.length && i < itemIds.length; i++) {
+      const itemId = itemIds[i];
+      if (!Number.isFinite(itemId)) continue;
+      const { keep, add } = files[i];
+      if (keep.length) {
+        await queryDB(`UPDATE bill_claim_item_files SET item_id = ? WHERE bill_claim_id = ? AND id IN (${keep.map(() => "?").join(",")})`, [itemId, claimId, ...keep]);
+      }
+      for (const f of add) {
+        await queryDB(
+          "INSERT INTO bill_claim_item_files (bill_claim_id, item_id, file_name, file_mimetype, file_size, file_data) VALUES (?, ?, ?, ?, ?, ?)",
+          [claimId, itemId, f.name, f.mime, f.buffer.length, f.buffer]
+        );
+      }
+    }
+    if (editing) {
+      const live = itemIds.filter((n) => Number.isFinite(n));
+      await queryDB(
+        `DELETE FROM bill_claim_item_files WHERE bill_claim_id = ? AND (item_id IS NULL${live.length ? ` OR item_id NOT IN (${live.map(() => "?").join(",")})` : " OR 1 = 1"})`,
+        [claimId, ...live]
+      );
+    }
+  }
+
   // The save half of an edit (see submitBillClaim): the checks have passed;
   // rewrite the claim, its bills and check-in/out references, record the
   // change, and put it (back) in front of the right approver.
@@ -978,7 +1009,8 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
     fileBuffer: Buffer | null,
     refs: { claim_id: number; amount: number }[],
     dates: { from: string; to: string },
-    actor: { id: number; name: string }
+    actor: { id: number; name: string },
+    itemFiles: LineFiles[] | null = null
   ) {
     const id = Number(editing.id);
     const { file_name, file_mimetype } = req.body || {};
@@ -996,12 +1028,15 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       [dates.from, dates.to, claimCategory, amt, desc, ...fileParams, id]
     );
     await queryDB("DELETE FROM bill_claim_items WHERE bill_claim_id = ?", [id]);
+    const itemIds: number[] = [];
     for (const l of checked.lines) {
-      await queryDB(
+      const ins = await queryDB(
         "INSERT INTO bill_claim_items (bill_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
         [id, l.category_id, l.category_name, l.bill_date, l.amount, l.description]
       );
+      itemIds.push(Number(ins?.insertId));
     }
+    await saveItemFiles(id, itemIds, itemFiles, true);
     const oldRefs: any[] = await queryDB("SELECT claim_id, amount FROM bill_claim_references WHERE bill_claim_id = ?", [id]);
     await queryDB("DELETE FROM bill_claim_references WHERE bill_claim_id = ?", [id]);
     try {
@@ -1198,10 +1233,45 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       // removed (remove_file).
       const keepOldFile = !!editing && !fileBuffer && !req.body?.remove_file && !!editing.file_data;
 
+      // Each bill's own receipts (items[].files new, items[].keep_file_ids
+      // already on the claim being edited). Sent by the current form only;
+      // an older form's one claim file is checked the old way.
+      const perBillReceipts = usesItems && items.some((it: any) => Array.isArray(it?.files) || Array.isArray(it?.keep_file_ids));
+      let itemFiles: LineFiles[] | null = null;
+      if (perBillReceipts) {
+        const owned = new Set<number>(
+          editing ? (((await queryDB("SELECT id FROM bill_claim_item_files WHERE bill_claim_id = ?", [Number(editing.id)])) || []) as any[]).map((r) => Number(r.id)) : []
+        );
+        itemFiles = [];
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i] || {};
+          const keep = (Array.isArray(it.keep_file_ids) ? it.keep_file_ids : []).map(Number).filter((n: number) => owned.has(n));
+          const add: { name: string; mime: string; buffer: Buffer }[] = [];
+          for (const f of Array.isArray(it.files) ? it.files : []) {
+            if (!f || typeof f.file_base64 !== "string" || !f.file_base64) continue;
+            const mime = String(f.file_mimetype || "").toLowerCase();
+            if (!/^image\/(png|jpe?g|webp|heic|heif)$/.test(mime) && mime !== "application/pdf") {
+              return res.status(400).json({ error: `Bill ${i + 1}: a receipt must be a photo or a PDF.` });
+            }
+            const buffer = Buffer.from(f.file_base64, "base64");
+            if (buffer.length > MAX_BILL_CLAIM_FILE_BYTES) return res.status(400).json({ error: `Bill ${i + 1}: each receipt must be 5MB or smaller.` });
+            add.push({ name: String(f.file_name || "receipt").slice(0, 255), mime, buffer });
+          }
+          if (keep.length + add.length > MAX_FILES_PER_BILL) {
+            return res.status(400).json({ error: `Bill ${i + 1}: at most ${MAX_FILES_PER_BILL} receipts per bill.` });
+          }
+          itemFiles.push({ keep, add });
+        }
+      }
+
       // Bill Claim Policy (BillClaimPolicy.ts): dates, closed dates, limits,
       // categories, receipts. When references are attached and no bills, the
       // Claim Amount is their sum (older app versions).
-      let lines = usesItems ? items : refs.length > 0 ? [] : [{ category, bill_date: from, amount, description: desc }];
+      let lines = usesItems
+        ? items.map((it: any, i: number) => (itemFiles ? { ...it, file_count: itemFiles[i].keep.length + itemFiles[i].add.length } : it))
+        : refs.length > 0
+          ? []
+          : [{ category, bill_date: from, amount, description: desc }];
       // With bills, check-in/out references belong to a Transport bill and
       // ARE its amount — the claim total counts them once, not on top of it.
       let extraTotal = refsTotal;
@@ -1237,6 +1307,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
         lines,
         extraTotal,
         hasAttachment: !!fileBuffer || keepOldFile,
+        perBillReceipts,
         editingClaimId: editing ? Number(editing.id) : null,
         firstFiled: editing ? dhakaDate(editing.first_submitted_at || editing.created_at) : null
       });
@@ -1253,7 +1324,7 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       }
 
       if (editing) {
-        return await saveClaimEdit(req, res, editing, editMode!, editRequest, checked, claimCategory, amt, desc, fileBuffer, refs, { from, to }, actor || claimant);
+        return await saveClaimEdit(req, res, editing, editMode!, editRequest, checked, claimCategory, amt, desc, fileBuffer, refs, { from, to }, actor || claimant, itemFiles);
       }
       const result = await queryDB(
         `INSERT INTO bill_claims
@@ -1288,12 +1359,15 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       }
 
       try {
+        const itemIds: number[] = [];
         for (const l of checked.lines) {
-          await queryDB(
+          const ins = await queryDB(
             "INSERT INTO bill_claim_items (bill_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
             [result.insertId, l.category_id, l.category_name, l.bill_date, l.amount, l.description]
           );
+          itemIds.push(Number(ins?.insertId));
         }
+        await saveItemFiles(Number(result.insertId), itemIds, itemFiles, false);
       } catch (itemErr: any) {
         await queryDB("DELETE FROM bill_claims WHERE id = ?", [result.insertId]);
         throw itemErr;
@@ -1729,6 +1803,31 @@ export function registerBillClaimRoutes(app: Express, deps: BillClaimRouteDeps) 
       const buffer: Buffer = Buffer.isBuffer(uc.file_data) ? uc.file_data : Buffer.from(uc.file_data);
       res.setHeader("Content-Type", uc.file_mimetype || "application/octet-stream");
       res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(uc.file_name || `claim_${uc.id}`)}"`);
+      res.send(buffer);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // One receipt of one bill — the same people as the claim's own attachment
+  // (the owner, an Admin with Bill Claim); approvers open it through
+  // /api/approval-details/file?file=.
+  app.get("/api/bill-claims/:id/item-files/:fileId", authenticateToken, async (req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT id, user_id FROM bill_claims WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Claim not found" });
+      const uc = rows[0];
+      if (Number(uc.user_id) !== Number(req.user.id) && req.user.role !== "superadmin") {
+        if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Not authorized" });
+        const modules = await getAdminModules(req.user.id);
+        if (!modules.includes("bill_claim")) return res.status(403).json({ error: "Not authorized" });
+      }
+      const f = ((await queryDB("SELECT file_name, file_mimetype, file_data FROM bill_claim_item_files WHERE id = ? AND bill_claim_id = ?", [req.params.fileId, uc.id])) || [])[0];
+      if (!f) return res.status(404).json({ error: "Receipt not found" });
+      const buffer: Buffer = Buffer.isBuffer(f.file_data) ? f.file_data : Buffer.from(f.file_data);
+      res.setHeader("Content-Type", f.file_mimetype || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(f.file_name || `receipt_${req.params.fileId}`)}"`);
+      res.setHeader("Cache-Control", "private, no-store");
       res.send(buffer);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

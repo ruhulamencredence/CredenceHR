@@ -380,7 +380,7 @@ export const BillClaimsReviewPanel: React.FC<BillClaimsReviewPanelProps> = ({ to
                   ) : (
                     <>
                       {c.description && <p className="text-xs text-slate-600 mt-1 max-w-md">{c.description}</p>}
-                      <ClaimBillLines items={c.items} compact />
+                      <ClaimBillLines items={c.items} compact token={token} fileSrc={(f) => `/api/bill-claims/${c.id}/item-files/${f}`} />
                       {c.claim_refs && c.claim_refs.length > 0 && (
                         <div className="mt-1.5 space-y-1 max-w-md">
                           {c.claim_refs.map((r) => (
