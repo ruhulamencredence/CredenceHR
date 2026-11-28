@@ -286,6 +286,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>কর্মীর ব্যক্তিগত মোবাইল নম্বর কে দেখতে পারে?</td>
+<td>শুধু Admin Panel → Employees (<code>employees</code> module) যাঁর আছে। My Team, HR 360, HR Reports, Employee Directory, Vehicle, Asset, SIM — সব জায়গায় শুধু office Contact No.; office নম্বর না থাকলে কিছুই দেখায় না। Server-এ বাদ দেওয়া, তাই API থেকেও পাওয়া যায় না; আগে ride / asset handover-এ সেভ হওয়া কপিও office নম্বরে বদলানো হয়েছে (<code>MyTeamRoutes.ts</code>, <code>HrOps360Routes.ts</code>, <code>HrOpsReportsRoutes.ts</code>, <code>VehicleManagementRoutes.ts</code>, <code>AssetManagementRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>Bill Claim-এর রসিদ (প্রতিটা bill-এর ছবি / PDF) কে খুলতে পারে?</td>
 <td>claim যাঁর, Bill Claim module যাঁর আছে, আর সেই claim-এর approval chain-এর লোক — বাকিরা 403। রসিদ থাকে ডাটাবেসে (<code>bill_claim_item_files</code>), claim মুছলে সাথে মুছে যায়; শুধু ছবি বা PDF, ৫ MB পর্যন্ত, এক bill-এ ৩টা — server-এ যাচাই। যে category-তে রসিদ লাগে, রসিদ ছাড়া server claim নেয় না। ফোনে খসড়া থাকলেও রসিদের ফাইল ফোনে রাখা হয় না (<code>BillClaimRoutes.ts</code>, <code>ApprovalDetailsRoutes.ts</code>)।</td>
 <td>✅</td>
