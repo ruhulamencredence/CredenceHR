@@ -187,7 +187,7 @@ export const VehicleDriversPanel: React.FC<{ vehicles: VehicleLite[]; onChanged?
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500 bg-slate-50 border-b">
               <th className="px-4 py-2.5">Driver</th>
-              <th className="px-4 py-2.5">Mobile</th>
+              <th className="px-4 py-2.5">Contact No.</th>
               <th className="px-4 py-2.5">License</th>
               <th className="px-4 py-2.5">Usual vehicles</th>
               <th className="px-4 py-2.5">Now</th>

@@ -89,7 +89,7 @@ interface VehicleManagementRouteDeps {
 export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> {
   if (!dbPool) return;
   // Inventory -> Drivers: who may drive the company's vehicles. Always an
-  // Employee (all_employees.id) — name, mobile and department come from the
+  // Employee (all_employees.id) — name, office Contact No. and department come from the
   // Employee record; only the driving license and the usual vehicle are kept
   // here. license_alerted_for = the expiry date already warned about, so the
   // 30-day warning goes once per license.
@@ -388,6 +388,19 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       }
     }
   }
+  // Rides used to copy the driver's personal mobile (all_employees.mobile) into
+  // driver_mobile. The personal number is shown only in Admin Panel ->
+  // Employees, so saved copies become the office Contact No. (phone), or empty.
+  // Idempotent: once replaced nothing matches any more.
+  try {
+    await dbPool.query(
+      `UPDATE vehicle_requisitions r JOIN all_employees e ON e.user_id = r.driver_user_id
+          SET r.driver_mobile = NULLIF(TRIM(e.phone), '')
+        WHERE e.mobile IS NOT NULL AND TRIM(e.mobile) <> '' AND r.driver_mobile = e.mobile AND NOT (e.phone <=> e.mobile)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not replace saved driver personal mobiles: " + err.message);
+  }
 }
 
 export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps): { expireOverdueRides: () => Promise<void> } {
@@ -436,7 +449,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const rows: any[] =
       (await queryDB(
         `SELECT d.*, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, e.is_active AS employee_active,
-                COALESCE(e.mobile, e.phone, e.telephone) AS mobile, v.vehicle_no AS usual_vehicle_no, v.model AS usual_vehicle_model
+                e.phone AS mobile, v.vehicle_no AS usual_vehicle_no, v.model AS usual_vehicle_model
            FROM vehicle_drivers d
            JOIN all_employees e ON e.id = d.employee_id
            LEFT JOIN vehicles v ON v.id = d.usual_vehicle_id
@@ -540,7 +553,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     try {
       const rows: any[] =
         (await queryDB(
-          `SELECT e.id, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, COALESCE(e.mobile, e.phone, e.telephone) AS mobile
+          `SELECT e.id, e.name, e.employee_id AS employee_code, e.designation, e.department, e.user_id, e.phone AS mobile
              FROM all_employees e
             WHERE e.is_active = 1 AND NOT EXISTS (SELECT 1 FROM vehicle_drivers d WHERE d.employee_id = e.id)
             ORDER BY e.name ASC`
@@ -1103,11 +1116,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (d.license_state === "expired") throw new Error(`${d.name}'s driving license has expired — update it in Inventory -> Drivers first.`);
     }
     // all_employees.user_id is how EmployeeDirectoryRoutes.ts links a login
-    // account to its contact number(s); mobile/phone/telephone are all
-    // optional there, so fall back through them for a display number.
+    // account to its office Contact No. (phone). The personal mobile is never
+    // shown outside Admin Panel -> Employees.
     const employeeRows: any = await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [driverUserId]);
     const employeeRow = employeeRows[0] || {};
-    const driverMobile = employeeRow.mobile || employeeRow.phone || employeeRow.telephone || "";
+    const driverMobile = employeeRow.phone || "";
 
     return { vehicleId, driverUserId, driverName: driverUser.name as string, driverMobile: driverMobile as string, vehicle };
   }
