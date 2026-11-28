@@ -10,7 +10,7 @@ import { ActiveNotice } from '../types';
 import { apiUrl } from '../lib/api';
 import { ModulePath } from './ModulePath';
 import { LoadingBlock } from './LoadingBlock';
-import { NoticeCover, CoverChips, PRIORITY_TILE, noticeText, noticeWhen, readMinutes } from './notice/NoticeParts';
+import { NoticeCover, NoticeBadges, PRIORITY_TILE, noticeText, noticeWhen, readMinutes } from './notice/NoticeParts';
 import { NoticeDetail } from './notice/NoticeDetail';
 
 interface NoticeBoardProps {
@@ -103,14 +103,17 @@ const FeatureCard: React.FC<CardProps> = ({ n, token, text, onOpen, onAck, ackin
     className="block w-full text-left rounded-[26px] overflow-hidden bg-white/90 border border-white shadow-[0_18px_36px_-22px_rgba(76,29,149,0.45)] mb-2.5"
   >
     {(n.cover || coverLocalUrl) && (
-      <span className="relative block">
-        <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} className="h-40 md:h-48" />
-        <span className="absolute left-3 top-3">
-          <CoverChips priority={n.priority} pinned={false} />
-        </span>
+      // The whole cover (not cropped) — the badge goes under it, not on it.
+      <span className="block bg-slate-100">
+        <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} fit="contain" className="h-auto max-h-72" />
       </span>
     )}
     <span className="block px-4 pt-3 pb-3.5">
+      {(n.cover || coverLocalUrl) && n.priority && n.priority !== 'normal' && (
+        <span className="block mb-1.5">
+          <NoticeBadges priority={n.priority} pinned={false} />
+        </span>
+      )}
       <span className="block text-[16.5px] font-extrabold tracking-tight text-slate-900 leading-snug">{n.title}</span>
       <span className="block mt-1">
         <Meta n={n} />

@@ -15,7 +15,7 @@ import { CheckCircle2, ChevronLeft, Download } from 'lucide-react';
 import type { ActiveNotice, NoticeFile } from '../../types';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { downloadNoticeFile, fileSize } from '../../lib/noticeFilesClient';
-import { CoverChips, NoticeBadges, NoticeContent, NoticeCover, PRIORITY_TILE, noticeWhenFull, readMinutes } from './NoticeParts';
+import { NoticeBadges, NoticeContent, NoticeCover, PRIORITY_TILE, noticeWhenFull, readMinutes } from './NoticeParts';
 
 const initials = (name?: string | null) =>
   String(name || 'HR')
@@ -74,7 +74,7 @@ export const AttachmentCards: React.FC<{ files: NoticeFile[]; token: string }> =
   );
 };
 
-// The notice itself — cover with the title on it, who posted it, the text,
+// The notice itself — the cover (whole) with the title under it, who posted it, the text,
 // the attachments. Shared by the full view and the composer's preview.
 export const NoticeArticle: React.FC<{ notice: ActiveNotice; token: string; coverLocalUrl?: string | null }> = ({ notice: n, token, coverLocalUrl }) => {
   const priority = n.priority || 'important';
@@ -84,12 +84,13 @@ export const NoticeArticle: React.FC<{ notice: ActiveNotice; token: string; cove
   return (
     <>
             {hero ? (
-              <div className="relative">
-                <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} className="h-[300px] md:h-[240px]" />
-                <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-indigo-950/80 pointer-events-none" />
-                <div className="absolute left-5 right-5 bottom-10 text-white">
-                  <CoverChips priority={priority} pinned={n.pinned} />
-                  <h2 className="text-2xl font-extrabold leading-tight tracking-tight mt-2 drop-shadow">{n.title}</h2>
+              // The whole cover, uncropped, with the title and badges under it —
+              // not written over it (a designed cover has its own words).
+              <div>
+                <NoticeCover file={n.cover} localUrl={coverLocalUrl} token={token} fit="contain" className="h-auto max-h-[60vh] bg-slate-100" />
+                <div className="px-5 pt-4">
+                  <NoticeBadges priority={priority} pinned={n.pinned} />
+                  <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-slate-900 mt-2">{n.title}</h2>
                 </div>
               </div>
             ) : (
@@ -103,7 +104,7 @@ export const NoticeArticle: React.FC<{ notice: ActiveNotice; token: string; cove
                 <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-slate-900 mt-2">{n.title}</h2>
               </div>
             )}
-            <div className={`relative px-5 pb-6 ${hero ? '-mt-6 pt-5 rounded-t-[28px] bg-[#fbfaff]' : 'pt-3'}`}>
+            <div className="relative px-5 pb-6 pt-3">
               <div className="flex items-center gap-3 pb-3.5 border-b border-slate-200/70">
                 <span className="w-10 h-10 rounded-[13px] shrink-0 flex items-center justify-center text-white text-sm font-extrabold bg-gradient-to-br from-violet-400 to-violet-700">{initials(n.from_name)}</span>
                 <span className="min-w-0">
@@ -155,7 +156,7 @@ export const NoticeDetail: React.FC<{
             type="button"
             onClick={onClose}
             aria-label="Back"
-            className={`absolute top-3.5 left-3.5 w-10 h-10 rounded-full flex items-center justify-center z-10 ${hero ? 'bg-white/25 border border-white/60 backdrop-blur-md text-white' : 'liquid-glass-chip text-slate-600'}`}
+            className="absolute top-3.5 left-3.5 w-10 h-10 rounded-full flex items-center justify-center z-10 liquid-glass-chip text-slate-600 shadow-sm"
             style={{ marginTop: 'env(safe-area-inset-top)' }}
           >
             <ChevronLeft className="w-5 h-5" />
