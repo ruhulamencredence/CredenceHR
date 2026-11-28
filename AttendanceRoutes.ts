@@ -250,9 +250,19 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     type Side = { at: any; source: "remote" | "office" | "offsite"; place: string | null; project_id: number | null; row: any | null };
     let inS: Side | null = null;
     // A row's check_in_at copied from an office punch (Check Out with only an
-    // office In) has no GPS fix — that In is the office punch itself.
+    // office In) has no GPS fix — that In is the office punch itself, so it is
+    // skipped when the machine has a punch at that same minute. Any other In
+    // without a GPS fix is one set by hand — an approved Timesheet correction
+    // or an Admin's edit — and counts (Timesheet already counted it; the
+    // Dashboard used to say "Not checked in").
+    const minuteOf = (v: any) => {
+      const x = t(v);
+      return Number.isFinite(x) ? Math.floor(x / 60000) : NaN;
+    };
+    const punchMinutes = new Set(punches.map((pu) => minuteOf(pu.punch_time)));
     for (const r of rows) {
-      if (!r.check_in_at || r.check_in_lat == null) continue;
+      if (!r.check_in_at) continue;
+      if (r.check_in_lat == null && punchMinutes.has(minuteOf(r.check_in_at))) continue;
       if (!inS || t(r.check_in_at) < t(inS.at))
         inS = r.check_in_place
           ? { at: r.check_in_at, source: "offsite", place: r.check_in_place, project_id: Number(r.project_id), row: r }

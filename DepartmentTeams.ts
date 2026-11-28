@@ -18,8 +18,9 @@
 //      Supervisor) if set; else THEIR OWN team's Supervisor
 //      (resolveTeamSupervisor). Never another team's Supervisor. A person in
 //      no team has no Supervisor step.
-//   2. Head of Department — always, when the Department has a Head (not when
-//      the Head is the requester or already the Supervisor step).
+//   2. Head of Department — when the Department has a Head (not when the Head
+//      is the requester or already the Supervisor step, and not when the
+//      person's own team has "Skip the Head of Department" on, skip_head).
 //   3. The Approval Template's layers, as before.
 //
 // Once (startup marker department_teams_from_supervisor): every Department
@@ -63,6 +64,9 @@ export async function ensureDepartmentTeamsSchema(dbPool: any): Promise<void> {
     }
   };
   const dup = ["ER_DUP_FIELDNAME"];
+  // 1 = this team's requests skip the Head of Department step (Supervisor,
+  // then straight to the Approval Template). Per team, off by default.
+  await run("department_teams.skip_head", "ALTER TABLE department_teams ADD COLUMN skip_head TINYINT(1) NOT NULL DEFAULT 0", dup);
   await run("departments.head_user_id", "ALTER TABLE departments ADD COLUMN head_user_id INT NULL", dup);
   await run("approval_requests.head_step_user_id", "ALTER TABLE approval_requests ADD COLUMN head_step_user_id INT NULL", dup);
   await run(
@@ -224,6 +228,25 @@ export async function resolveDepartmentHead(queryDB: QueryDB, employeeUserId: nu
   }
 }
 
+// Does the employee's own team (their team, else their Department's "everyone
+// else" team — the same team resolveTeamSupervisor uses) skip the Head step?
+export async function teamSkipsHead(queryDB: QueryDB, employeeUserId: number): Promise<boolean> {
+  try {
+    const e = ((await queryDB("SELECT id, department_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1", [employeeUserId])) || [])[0];
+    if (!e) return false;
+    const own = ((await queryDB(
+      `SELECT t.skip_head FROM department_team_members m JOIN department_teams t ON t.id = m.team_id WHERE m.employee_id = ? AND t.is_active = 1 LIMIT 1`,
+      [e.id]
+    )) || [])[0];
+    const team =
+      own ||
+      ((await queryDB("SELECT skip_head FROM department_teams WHERE department_id = ? AND everyone_else = 1 AND is_active = 1 LIMIT 1", [e.department_id])) || [])[0];
+    return Number(team?.skip_head) === 1;
+  } catch {
+    return false;
+  }
+}
+
 // Every employee (all_employees.id) -> the login of their team's Supervisor,
 // for screens that list "my team" (OT Approval). Employees in no team are
 // left out.
@@ -248,6 +271,49 @@ export async function teamSupervisorByEmployee(queryDB: QueryDB): Promise<Map<nu
       const t = own || catchAll.get(Number(e.department_id));
       const sup = Number(t?.supervisor_user_id);
       if (sup && sup !== Number(e.user_id)) out.set(Number(e.id), sup);
+    }
+  } catch {
+    // no teams yet
+  }
+  return out;
+}
+
+// Every employee (all_employees.id) -> the login they report to when no
+// Direct Supervisor is set for them (callers check that first): their team's
+// Supervisor, else the Head of their Department — not when their team has
+// "Skip the Head of Department" on. Never the employee themself. The same
+// line an approval request takes (resolveTeamSupervisor + resolveHeadApprover),
+// so Service Book, Employee 360, Employees and the Directory agree with it.
+export async function reportingLineByEmployee(queryDB: QueryDB): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  try {
+    const [emps, teams, members, depts]: any[] = await Promise.all([
+      queryDB("SELECT id, department_id, user_id FROM all_employees"),
+      queryDB("SELECT id, department_id, supervisor_user_id, everyone_else, skip_head FROM department_teams WHERE is_active = 1"),
+      queryDB("SELECT team_id, employee_id FROM department_team_members"),
+      queryDB("SELECT id, head_user_id FROM departments WHERE is_active = 1")
+    ]);
+    const teamById = new Map<number, any>((teams || []).map((t: any) => [Number(t.id), t]));
+    const catchAll = new Map<number, any>();
+    for (const t of teams || []) if (Number(t.everyone_else) === 1) catchAll.set(Number(t.department_id), t);
+    const memberOf = new Map<number, any>();
+    for (const m of members || []) {
+      const t = teamById.get(Number(m.team_id));
+      if (t) memberOf.set(Number(m.employee_id), t);
+    }
+    const headOf = new Map<number, number>();
+    for (const d of depts || []) if (d.head_user_id) headOf.set(Number(d.id), Number(d.head_user_id));
+    for (const e of emps || []) {
+      const self = Number(e.user_id) || 0;
+      const t = memberOf.get(Number(e.id)) || (e.department_id != null ? catchAll.get(Number(e.department_id)) : undefined);
+      const sup = Number(t?.supervisor_user_id) || 0;
+      if (sup && sup !== self) {
+        out.set(Number(e.id), sup);
+        continue;
+      }
+      if (Number(t?.skip_head) === 1) continue;
+      const head = e.department_id != null ? headOf.get(Number(e.department_id)) || 0 : 0;
+      if (head && head !== self) out.set(Number(e.id), head);
     }
   } catch {
     // no teams yet
@@ -321,6 +387,7 @@ export function registerDepartmentTeamsRoutes(app: Express, deps: RegisterDepart
           supervisor_user_id: t.supervisor_user_id == null ? null : Number(t.supervisor_user_id),
           supervisor_name: t.supervisor_user_id ? userName.get(Number(t.supervisor_user_id)) || null : null,
           everyone_else: Number(t.everyone_else) === 1,
+          skip_head: Number(t.skip_head) === 1,
           member_ids: (members || []).filter((m: any) => Number(m.team_id) === Number(t.id) && poolIds.has(Number(m.employee_id))).map((m: any) => Number(m.employee_id)),
           auto: (rules || []).filter((r: any) => Number(r.team_id) === Number(t.id)).map((r: any) => ({ branch: r.branch, department_id: r.department_id == null ? null : Number(r.department_id) }))
         }));
@@ -376,6 +443,7 @@ export function registerDepartmentTeamsRoutes(app: Express, deps: RegisterDepart
         if (!sup) throw bad(`Pick the Supervisor of "${name}".`);
         if (!userIds.has(sup)) throw bad(`The Supervisor of "${name}" was not found.`);
         const everyoneElse = !!t?.everyone_else;
+        const skipHead = !!t?.skip_head;
         if (everyoneElse) catchAll++;
         const ids: number[] = (Array.isArray(t?.member_ids) ? t.member_ids : []).map(Number);
         if (ids.length > 2000) throw bad(`Too many people in "${name}".`);
@@ -392,7 +460,7 @@ export function registerDepartmentTeamsRoutes(app: Express, deps: RegisterDepart
           if (dep && !deptIds.has(dep)) throw bad(`A new-joiner rule of "${name}" names a Department that was not found.`);
           if (!auto.some((x) => x.branch.toLowerCase() === branch.toLowerCase() && x.department_id === dep)) auto.push({ branch, department_id: dep });
         }
-        return { id: t?.id ? Number(t.id) : null, name, sup, everyoneElse, ids, auto };
+        return { id: t?.id ? Number(t.id) : null, name, sup, everyoneElse, skipHead, ids, auto };
       });
       if (catchAll > 1) throw bad('Only one team can hold "everyone else in the Department".');
       const existing: any[] = (await queryDB("SELECT id FROM department_teams WHERE department_id = ?", [d.id])) || [];
@@ -403,8 +471,8 @@ export function registerDepartmentTeamsRoutes(app: Express, deps: RegisterDepart
       for (const x of existing) if (!keep.has(Number(x.id))) await queryDB("DELETE FROM department_teams WHERE id = ?", [x.id]);
       for (const t of clean) {
         let id = t.id;
-        if (id) await queryDB("UPDATE department_teams SET name = ?, supervisor_user_id = ?, everyone_else = ?, is_active = 1 WHERE id = ?", [t.name, t.sup, t.everyoneElse ? 1 : 0, id]);
-        else id = Number(((await queryDB("INSERT INTO department_teams (department_id, name, supervisor_user_id, everyone_else) VALUES (?, ?, ?, ?)", [d.id, t.name, t.sup, t.everyoneElse ? 1 : 0])) as any).insertId);
+        if (id) await queryDB("UPDATE department_teams SET name = ?, supervisor_user_id = ?, everyone_else = ?, skip_head = ?, is_active = 1 WHERE id = ?", [t.name, t.sup, t.everyoneElse ? 1 : 0, t.skipHead ? 1 : 0, id]);
+        else id = Number(((await queryDB("INSERT INTO department_teams (department_id, name, supervisor_user_id, everyone_else, skip_head) VALUES (?, ?, ?, ?, ?)", [d.id, t.name, t.sup, t.everyoneElse ? 1 : 0, t.skipHead ? 1 : 0])) as any).insertId);
         await queryDB("DELETE FROM department_team_members WHERE team_id = ?", [id]);
         if (t.ids.length) {
           // A person moved here from a team of another Department leaves it.
