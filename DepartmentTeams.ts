@@ -278,6 +278,49 @@ export async function teamSupervisorByEmployee(queryDB: QueryDB): Promise<Map<nu
   return out;
 }
 
+// Every employee (all_employees.id) -> the login they report to when no
+// Direct Supervisor is set for them (callers check that first): their team's
+// Supervisor, else the Head of their Department — not when their team has
+// "Skip the Head of Department" on. Never the employee themself. The same
+// line an approval request takes (resolveTeamSupervisor + resolveHeadApprover),
+// so Service Book, Employee 360, Employees and the Directory agree with it.
+export async function reportingLineByEmployee(queryDB: QueryDB): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  try {
+    const [emps, teams, members, depts]: any[] = await Promise.all([
+      queryDB("SELECT id, department_id, user_id FROM all_employees"),
+      queryDB("SELECT id, department_id, supervisor_user_id, everyone_else, skip_head FROM department_teams WHERE is_active = 1"),
+      queryDB("SELECT team_id, employee_id FROM department_team_members"),
+      queryDB("SELECT id, head_user_id FROM departments WHERE is_active = 1")
+    ]);
+    const teamById = new Map<number, any>((teams || []).map((t: any) => [Number(t.id), t]));
+    const catchAll = new Map<number, any>();
+    for (const t of teams || []) if (Number(t.everyone_else) === 1) catchAll.set(Number(t.department_id), t);
+    const memberOf = new Map<number, any>();
+    for (const m of members || []) {
+      const t = teamById.get(Number(m.team_id));
+      if (t) memberOf.set(Number(m.employee_id), t);
+    }
+    const headOf = new Map<number, number>();
+    for (const d of depts || []) if (d.head_user_id) headOf.set(Number(d.id), Number(d.head_user_id));
+    for (const e of emps || []) {
+      const self = Number(e.user_id) || 0;
+      const t = memberOf.get(Number(e.id)) || (e.department_id != null ? catchAll.get(Number(e.department_id)) : undefined);
+      const sup = Number(t?.supervisor_user_id) || 0;
+      if (sup && sup !== self) {
+        out.set(Number(e.id), sup);
+        continue;
+      }
+      if (Number(t?.skip_head) === 1) continue;
+      const head = e.department_id != null ? headOf.get(Number(e.department_id)) || 0 : 0;
+      if (head && head !== self) out.set(Number(e.id), head);
+    }
+  } catch {
+    // no teams yet
+  }
+  return out;
+}
+
 export interface RegisterDepartmentTeamsDeps {
   authenticateToken: any;
   requireAdmin: any;

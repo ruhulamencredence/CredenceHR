@@ -468,6 +468,8 @@ export interface Employee {
   user_id?: number | null;
   // Office Attendance (ZKTeco) device PIN — matches zk_attendance_logs punches to this Employee.
   zk_device_pin?: string | null;
+  // Who their requests go to first (GET /api/employees): Direct Supervisor, else team Supervisor, else Head (not when the team skips the Head).
+  reports_to_name?: string | null;
 
   // --- Employee Info tab ---
   middle_name?: string | null;
