@@ -148,6 +148,21 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     return { project, distance };
   }
 
+  // How sure the phone was of the spot (metres, its own estimate). Kept next to
+  // the punch by a separate small UPDATE — a failure here never fails a punch.
+  const accuracyOf = (body: any): number | null => {
+    const a = Number(body?.accuracy_m);
+    return body?.accuracy_m != null && Number.isFinite(a) && a >= 0 ? Math.min(99999, Math.round(a)) : null;
+  };
+  const saveAccuracy = async (table: "attendance" | "attendance_corrections", col: string, id: number, acc: number | null) => {
+    if (acc == null || !id) return;
+    try {
+      await queryDB(`UPDATE ${table} SET ${col} = ? WHERE id = ?`, [acc, id]);
+    } catch (err: any) {
+      console.warn(`Could not save the GPS accuracy (${table}.${col}): ` + err.message);
+    }
+  };
+
   function parseAttendanceCoords(body: any): { project_id: number; lat: number; lng: number; remarks: string | null } | { error: string } {
     const project_id = Number(body.project_id);
     const lat = Number(body.latitude);
@@ -403,6 +418,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         [req.user.id, target.p.id, today, remarks, lat, lng, dist, place.slice(0, 255)]
       );
       correctionId = r.insertId;
+      await saveAccuracy("attendance_corrections", "in_accuracy_m", correctionId, accuracyOf(req.body));
     } else {
       if (pendingIn.length) {
         // The In is itself waiting for approval: the Out joins that request.
@@ -415,6 +431,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
                   remarks = CONCAT(COALESCE(remarks, ''), ?) WHERE id = ? AND status = 'pending'`,
           [lat, lng, dist, place.slice(0, 255), `\n${remarks}`, pendingIn[0].id]
         );
+        await saveAccuracy("attendance_corrections", "out_accuracy_m", Number(pendingIn[0].id), accuracyOf(req.body));
         res.json({ success: true, pending: true, place, project_name: target.p.project_name });
         return true;
       }
@@ -452,6 +469,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         [req.user.id, projectForOut, today, remarks, lat, lng, dist, place.slice(0, 255)]
       );
       correctionId = r.insertId;
+      await saveAccuracy("attendance_corrections", "out_accuracy_m", correctionId, accuracyOf(req.body));
     }
     // The same approval chain as Timesheet -> Correct Attendance (and a
     // Bill claim): the employee's Supervisor, then their Approval
@@ -553,6 +571,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         );
         attendanceId = insertResult.insertId;
       }
+      await saveAccuracy("attendance", "check_in_accuracy_m", attendanceId, accuracyOf(req.body));
       await createApprovalRequest("attendance", "check_in", attendanceId, req.user.id);
       res.json({ success: true, distance_m: distance, radius_m: Number(project.location_radius), project_name: project.project_name });
     } catch (err: any) {
@@ -678,6 +697,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
                   check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ?, check_out_place = NULL WHERE id = ?`,
           [lat, lng, distance, remarks, outProject, existing[0].id]
         );
+        await saveAccuracy("attendance", "check_out_accuracy_m", Number(existing[0].id), accuracyOf(req.body));
         await queryDB("DELETE FROM approval_requests WHERE source_type = 'attendance' AND event_type = 'check_out' AND source_id = ?", [existing[0].id]);
         await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
         return res.json({ success: true, updated: true, distance_m: distance, radius_m: Number(project.location_radius), project_name: project.project_name });
@@ -688,6 +708,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           "UPDATE attendance SET check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_distance_m = ?, check_out_remarks = ?, check_out_project_id = ?, check_out_place = NULL WHERE id = ?",
           [lat, lng, distance, remarks, outProject, existing[0].id]
         );
+        await saveAccuracy("attendance", "check_out_accuracy_m", Number(existing[0].id), accuracyOf(req.body));
         await createApprovalRequest("attendance", "check_out", existing[0].id, req.user.id);
       } else {
         // No Remote row yet — only reachable when Office Attendance already
@@ -698,6 +719,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           "INSERT INTO attendance (user_id, project_id, attendance_date, check_in_at, check_out_at, check_out_lat, check_out_lng, check_out_distance_m, check_out_remarks) VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?)",
           [req.user.id, project_id, today, officeCheckInAt, lat, lng, distance, remarks]
         );
+        await saveAccuracy("attendance", "check_out_accuracy_m", Number(insertResult.insertId), accuracyOf(req.body));
         await createApprovalRequest("attendance", "check_out", insertResult.insertId, req.user.id);
       }
       res.json({ success: true, distance_m: distance, radius_m: Number(project.location_radius), project_name: project.project_name });

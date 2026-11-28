@@ -9,7 +9,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, GOOD_ACCURACY_M, type AttendanceFix } from '../lib/attendanceFix';
+import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, GOOD_ACCURACY_M, fixQuality, weakFixBlocks, weakFixText, refineWindowMs, isAndroidApp, useGpsWarm, type AttendanceFix } from '../lib/attendanceFix';
 import { X, MapPin, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl } from '../lib/api';
@@ -132,7 +132,7 @@ async function getCurrentCoords(fresh = false): Promise<AttendanceFix> {
       throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
     }
     // The APK's own fix says whether it is fake GPS (mock location).
-    const fix = await nativeAttendanceFix(fresh ? 0 : 30000);
+    const fix = await nativeAttendanceFix(fresh ? 0 : 5000);
     if (fix) return fix;
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy };
@@ -168,6 +168,9 @@ export default function AttendanceMapConfirm({
   token
 }: AttendanceMapConfirmProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  // The phone keeps its GPS awake while this popup is open, so the readings
+  // below are GPS fixes, not Wi-Fi / tower guesses (attendanceFix.ts).
+  useGpsWarm();
   const keyboard = useKeyboardGap();
   // The map gets smaller while the keyboard is up; Leaflet redraws its tiles for the new size.
   useEffect(() => {
@@ -353,41 +356,49 @@ export default function AttendanceMapConfirm({
 
   // A coarse first fix (cell towers / Wi-Fi) is often hundreds of metres off:
   // read fresh GPS every 1.5 s, keep the most accurate, stop once it is within
-  // GOOD_ACCURACY_M or after REFINE_MS. A fix without an accuracy figure (some
-  // browsers) is taken once, as before.
-  useEffect(() => {
-    if (!refining) return;
-    let gone = false;
-    const REFINE_MS = 15000;
+  // GOOD_ACCURACY_M or after the window (40 s in the Android app, where a cold
+  // GPS needs a while to lock; 15 s elsewhere). A browser that is not getting
+  // any better (a desktop with Wi-Fi only) or gives no accuracy figure stops
+  // sooner. Runs at the start, and again when the location button finds the
+  // fix still weak.
+  // Each run has its own number: starting another run (or leaving the popup)
+  // makes the older one stop, without touching the screen's state.
+  const runRef = useRef(0);
+  const refine = async (from: AttendanceFix) => {
+    const mine = ++runRef.current;
+    const stale = () => runRef.current !== mine;
+    setRefining(true);
+    const windowMs = refineWindowMs();
     const start = Date.now();
-    let best = coords;
+    let best = from;
     let flat = 0;
-    (async () => {
-      while (!gone && Date.now() - start < REFINE_MS) {
-        try {
-          const f = await getCurrentCoords(true);
-          if (gone) return;
-          if (f.mock) {
-            setLocateError(MOCK_LOCATION_MESSAGE);
-            break;
-          }
-          if ((f.accuracy ?? Infinity) < (best.accuracy ?? Infinity) - 2 || best.accuracy == null) {
-            best = f;
-            flat = 0;
-            showFix(f);
-          } else flat += 1;
-          // Good enough, no accuracy figure, or not getting any better (a
-          // desktop with Wi-Fi only): stop waiting.
-          if (goodFix(best) || f.accuracy == null || flat >= 3) break;
-        } catch {
+    try {
+      while (!stale() && Date.now() - start < windowMs) {
+        const f = await getCurrentCoords(true);
+        if (stale()) return;
+        if (f.mock) {
+          setLocateError(MOCK_LOCATION_MESSAGE);
           break;
         }
+        if ((f.accuracy ?? Infinity) < (best.accuracy ?? Infinity) - 2 || best.accuracy == null) {
+          best = f;
+          flat = 0;
+          showFix(f);
+        } else flat += 1;
+        // Good enough, no accuracy figure, or (browser) not getting any better.
+        if (goodFix(best) || f.accuracy == null || (!isAndroidApp() && flat >= 3)) break;
         await new Promise((r) => window.setTimeout(r, 1500));
       }
-      if (!gone) setRefining(false);
-    })();
+    } catch {
+      // keep the best fix so far
+    } finally {
+      if (!stale()) setRefining(false);
+    }
+  };
+  useEffect(() => {
+    if (refining) void refine(coords);
     return () => {
-      gone = true;
+      runRef.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -404,6 +415,7 @@ export default function AttendanceMapConfirm({
       const fresh = await getCurrentCoords(true);
       if (fresh.mock) throw new Error(MOCK_LOCATION_MESSAGE);
       showFix(fresh);
+      if (!goodFix(fresh)) void refine(fresh);
       if (mapRef.current) {
         const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
         if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
@@ -441,14 +453,18 @@ export default function AttendanceMapConfirm({
   // One line on the map: where you stand against the area.
   const accText = liveCoords.accuracy != null ? ` (GPS ±${Math.round(liveCoords.accuracy)} m)` : '';
   const poorFix = liveCoords.accuracy != null && liveCoords.accuracy > GOOD_ACCURACY_M;
+  // Way off (a Wi-Fi / tower guess): say so on every line, even "inside".
+  const weakFix = fixQuality(liveCoords.accuracy) === 'weak';
+  const weakTail = weakFix ? `. ${weakFixText(Number(liveCoords.accuracy))}` : '';
+  const blocked = weakFixBlocks(liveCoords.accuracy);
   const status: { tone: 'ok' | 'warn' | 'bad' | 'plain'; text: string } = refining && !inside
     ? { tone: 'plain', text: `Finding your exact location…${accText}` }
     : !hasSite
-    ? { tone: 'plain', text: `No site location set for ${project.project_name}` }
+    ? { tone: 'plain', text: `No site location set for ${project.project_name}${weakTail}` }
     : !hasRadius
-      ? { tone: 'plain', text: `${formatDistance(distance as number)} from ${project.location_label || project.project_name} · no area set` }
+      ? { tone: 'plain', text: `${formatDistance(distance as number)} from ${project.location_label || project.project_name} · no area set${weakTail}` }
       : inside
-        ? { tone: 'ok', text: `You're inside ${project.project_name}'s area · ${formatDistance(distance as number)}` }
+        ? { tone: weakFix ? 'warn' : 'ok', text: `You're inside ${project.project_name}'s area · ${formatDistance(distance as number)}${weakFix ? weakTail : poorFix ? accText : ''}` }
         : offsite
           ? { tone: 'warn', text: `${formatDistance(distance as number)} from ${project.project_name} — goes for approval${poorFix ? `${accText}. GPS is weak here — if you are at the site, step near a window or outside, turn on Wi-Fi, then tap ⊙` : ''}` }
           : { tone: 'bad', text: `${formatDistance(distance as number)} away — outside the ${formatDistance(Number(project.location_radius))} area${poorFix ? `${accText}. GPS is weak here — step near a window or outside, turn on Wi-Fi, then tap ⊙` : ''}` };
@@ -571,11 +587,11 @@ export default function AttendanceMapConfirm({
               <button
                 type="button"
                 onClick={() => onConfirm(remarks.trim())}
-                disabled={submitting || refining || (offsite && !remarks.trim())}
+                disabled={submitting || refining || blocked || (offsite && !remarks.trim())}
                 className="liquid-glass-button h-12 rounded-full text-[15px] font-bold inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:active:scale-100"
               >
                 {(submitting || refining) && <Spinner size={16} />}
-                {refining ? 'Locating…' : 'Submit'}
+                {refining ? 'Locating…' : blocked ? 'Weak GPS' : 'Submit'}
               </button>
             </div>
           </div>

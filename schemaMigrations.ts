@@ -1168,6 +1168,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add attendance.check_in_remarks/check_out_remarks columns: " + err.message);
   }
+  await addAccuracyColumns(dbPool, 'attendance', ['check_in_accuracy_m', 'check_out_accuracy_m']);
   // Employee Tracking (Admin Panel -> Employee Tracking, ADMIN_MODULE_KEYS
   // "tracking") — every location ping the APK's background service sends while
   // it's running (see POST /api/tracking/ping), roughly every 5-10 minutes,
@@ -1577,6 +1578,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure claims table exists: " + err.message);
   }
+  await addAccuracyColumns(dbPool, 'claims', ['check_in_accuracy_m', 'check_out_accuracy_m']);
   // "Bill Claim" — Admin Panel tab restricted to the Superadmin and any
   // Admin the Superadmin explicitly grants the "bill_claim" module to (see
   // ADMIN_MODULE_KEYS). One BILL groups several conveyance/travel line ITEMS for a
@@ -2110,6 +2112,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure attendance_corrections table exists: " + err.message);
   }
+  await addAccuracyColumns(dbPool, 'attendance_corrections', ['in_accuracy_m', 'out_accuracy_m']);
   // Self Service -> Leave Management — one row per Admin/User account holding how
   // many days of each leave type they currently have left. A missing row just
   // means 0 for all three (see GET/PUT /api/leave-balances below); it's only
@@ -2651,5 +2654,19 @@ async function repairBlankTemplateRequestTypes(dbPool: any): Promise<void> {
     }
   } catch (err: any) {
     console.warn("⚠️ Could not repair blank approval template Request Types: " + err.message);
+  }
+}
+
+// How sure the phone was of the spot (metres, its own estimate) for each Remote
+// Attendance punch, off-site request and Check In/Out — kept next to the
+// coordinates so a wrong-looking place can be told apart from a good GPS fix.
+// Written by a separate small UPDATE after the punch (never part of it).
+async function addAccuracyColumns(dbPool: any, table: string, cols: string[]) {
+  for (const col of cols) {
+    try {
+      await dbPool.query(`ALTER TABLE ${table} ADD COLUMN ${col} INT NULL`);
+    } catch (err: any) {
+      if (err.code !== 'ER_DUP_FIELDNAME') console.warn(`⚠️ Could not add ${table}.${col}: ` + err.message);
+    }
   }
 }

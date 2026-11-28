@@ -82,3 +82,39 @@ mobile/desktop  Orange · Light, Default · Light, Apple Glow · Light, Mono · 
 
 Screens: `carve-all-mobile.png`, `carve-all-desktop.png`. In Dark Glass the head
 has no colour of its own, so there is nothing to see cut.
+
+## GPS: a weak fix no longer passes for the place (Remote Attendance + Check In/Out)
+
+**Reported:** on Android, Check In/Out and Remote Attendance sometimes show a wrong
+current location; logging out and in shows the right one.
+**Cause (from the code):** after ~15 minutes sitting still the phone's tracking drops to
+low power (`DutyTrackingService`, idle mode), so the GPS is asleep. The next Check
+In/Out takes one reading, which a cold phone answers with a Wi-Fi / tower guess;
+the app took it as the place and let Submit through. Login restarts tracking in its
+active (high-accuracy) mode — the GPS is warm again, hence the cure. The database
+already holds the phone's own view of this (`tracking_device_state.mode`, `precise_granted`).
+
+**Fix:** `src/lib/attendanceFix.ts` (quality rules, GPS warm-up), `AttendanceMapConfirm.tsx`
+and `CheckInOutMap.tsx` (keep reading until good, show ±N m, hold Submit on the Android app
+while weak), `LocationAccessPlugin.java` (`warmUp` / `stopWarm`, stops itself in 60 s),
+`AttendanceRoutes.ts` / `MovementClaimRoutes.ts` (store `accuracy_m`), `schemaMigrations.ts`
+(6 columns), `ApprovalDetailsRoutes.ts` (shows it to approvers).
+
+`scripts/gps-weak-fix.cjs` — the same test run before and after the fix, on the real app code
+with a stand-in for the Android side (`scripts/fake-android-bridge.cjs` runs Capacitor's own
+Android bridge script and answers its location calls: a GPS that stays weak, one that
+warms up 1500 -> 400 -> 120 -> 12 m, and a browser without GPS):
+
+- BEFORE (`gps-weak-fix-BEFORE.txt`): **25 checks failed** — with a ±1500 m fix the map said
+  "You're inside Head Office's area · 15 m" and Submit stayed on; Check In/Out showed only
+  an address; no warm-up; no accuracy stored.
+- AFTER (`gps-weak-fix-AFTER.txt`): **ALL PASS** (42 checks, 0 failed).
+
+Screens: `gps-cmp-attendance.png`, `gps-cmp-checkinout.png` (before | after, same weak fix).
+Also run after the change: `../2026-11-23/scripts/attendance-popup-ui.cjs` — ALL PASS.
+
+**Not tested here:** the Java (`LocationAccessPlugin.java`) — there is no Android SDK in this
+environment. It was checked for syntax only (javac parser) and written after the same
+patterns `DutyTrackingService.java` uses; it compiles for real at the next APK build. The
+app side works with the old APK too (the warm-up call is then skipped).
+

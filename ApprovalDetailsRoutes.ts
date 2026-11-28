@@ -337,8 +337,10 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
         ["Check out was off site", yesNo(r.offsite_out)],
         ["Check in place", r.in_place],
         ["Check in distance", r.in_distance_m != null ? `${Math.round(Number(r.in_distance_m))} m from the project` : null],
+        ["Check in GPS accuracy", r.in_accuracy_m != null ? `±${Number(r.in_accuracy_m)} m` : null],
         ["Check out place", r.out_place],
         ["Check out distance", r.out_distance_m != null ? `${Math.round(Number(r.out_distance_m))} m from the project` : null],
+        ["Check out GPS accuracy", r.out_accuracy_m != null ? `±${Number(r.out_accuracy_m)} m` : null],
         ["Reason", r.remarks],
         ["Note", inNote],
         ["Status", r.status]
@@ -475,10 +477,12 @@ export function registerApprovalDetailsRoutes(app: Express, deps: Deps) {
         ["Checked in", r.check_in_at ? dt(r.check_in_at) : null],
         ["Check in place", r.check_in_place],
         ["Check in distance", r.check_in_distance_m != null ? `${Math.round(Number(r.check_in_distance_m))} m from the project` : null],
+        ["Check in GPS accuracy", r.check_in_accuracy_m != null ? `±${Number(r.check_in_accuracy_m)} m` : null],
         ["Check in note", r.check_in_remarks],
         ["Checked out", r.check_out_at ? dt(r.check_out_at) : null],
         ["Check out place", r.check_out_place],
         ["Check out distance", r.check_out_distance_m != null ? `${Math.round(Number(r.check_out_distance_m))} m from the project` : null],
+        ["Check out GPS accuracy", r.check_out_accuracy_m != null ? `±${Number(r.check_out_accuracy_m)} m` : null],
         ["Check out note", r.check_out_remarks]
       ]);
       loc("Check in", r.check_in_lat, r.check_in_lng, r.check_in_place);

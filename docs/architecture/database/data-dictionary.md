@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৯টি টেবিল, ৩০২৬টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২৭৯টি টেবিল, ৩০৩২টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1038,6 +1038,8 @@ Unique: `uq_onb_doc`(application_id,doc_type)
 | `check_in_remarks` | text | হ্যাঁ |  | |
 | `check_out_remarks` | text | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `check_in_accuracy_m` | int(11) | হ্যাঁ |  | |
+| `check_out_accuracy_m` | int(11) | হ্যাঁ |  | |
 | `check_out_first_at` | timestamp | হ্যাঁ |  | |
 | `check_out_update_count` | int(11) | না | default 0 | |
 | `check_out_project_id` | int(11) | হ্যাঁ |  | |
@@ -1083,6 +1085,8 @@ Unique: `unique_user_project_date`(user_id,project_id,attendance_date)
 | `reviewed_at` | timestamp | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `in_accuracy_m` | int(11) | হ্যাঁ |  | |
+| `out_accuracy_m` | int(11) | হ্যাঁ |  | |
 | `offsite_in` | tinyint(1) | না | default 0 | |
 | `offsite_out` | tinyint(1) | না | default 0 | |
 | `in_lat` | decimal(10,7) | হ্যাঁ |  | |
@@ -2798,6 +2802,8 @@ Unique: `unique_user_department`(user_id,department)
 | `check_out_remarks` | text | হ্যাঁ |  | |
 | `distance_km` | decimal(10,2) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `check_in_accuracy_m` | int(11) | হ্যাঁ |  | |
+| `check_out_accuracy_m` | int(11) | হ্যাঁ |  | |
 
 ### `conveyance_bill_items`
 

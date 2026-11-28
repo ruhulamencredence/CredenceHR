@@ -32,9 +32,11 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { scrollFocusedFieldIntoView, useKeyboardGap } from '../lib/useKeyboardInset';
 import { Capacitor } from '@capacitor/core';
 import { useMdUp } from '../lib/useMdUp';
+import { fixQuality, weakFixBlocks, weakFixText, refineWindowMs, isAndroidApp, useGpsWarm, GOOD_ACCURACY_M, MOCK_LOCATION_MESSAGE } from '../lib/attendanceFix';
 import { Spinner } from './Spinner';
 
-type Coords = { latitude: number; longitude: number };
+// accuracy = how sure the phone is of the spot, in metres.
+type Coords = { latitude: number; longitude: number; accuracy?: number };
 // A Project's site (muted gray, so it never reads as you or your Check In).
 const projectPinIcon = L.divIcon({
   className: '',
@@ -87,6 +89,9 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   const wide = useMdUp();
   const kb = useKeyboardGap();
   const kbOpen = !wide && kb.open;
+  // The phone keeps its GPS awake while this map is open, so the readings are
+  // GPS fixes, not Wi-Fi / tower guesses (attendanceFix.ts).
+  useGpsWarm();
   const auth = { Authorization: `Bearer ${token}` };
   const [open, setOpen] = useState<ClaimRecord | null | undefined>(undefined); // undefined = loading
   const [coords, setCoords] = useState<Coords | null>(null);
@@ -121,19 +126,53 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A cold phone first gives a Wi-Fi / tower guess, often far off: keep
+  // reading GPS every 1.5 s, keep the most accurate, stop once it is within
+  // GOOD_ACCURACY_M or after the window (40 s in the Android app, where a cold
+  // GPS needs a while to lock; 15 s elsewhere). A browser that is not getting
+  // any better (a desktop with Wi-Fi only) or gives no accuracy figure stops
+  // sooner. Same idea as the In / Out Time map (AttendanceMapConfirm.tsx).
+  // Each run has its own number: starting another run (or leaving the map)
+  // makes the older one stop, without touching the screen's state.
+  const runRef = useRef(0);
   const locate = async () => {
+    const mine = ++runRef.current;
+    const stale = () => runRef.current !== mine;
     setLocating(true);
     setGpsError('');
+    const windowMs = refineWindowMs();
+    const startedAt = Date.now();
+    let best: Coords | null = null;
+    let flat = 0;
     try {
-      setCoords(await getCurrentCoords());
+      for (let n = 0; !stale() && Date.now() - startedAt < windowMs; n++) {
+        const f = await getCurrentCoords(n > 0);
+        if (stale()) return;
+        if (f.mock) {
+          setCoords(null);
+          setGpsError(MOCK_LOCATION_MESSAGE);
+          return;
+        }
+        if (!best || best.accuracy == null || (f.accuracy ?? Infinity) < best.accuracy - 2) {
+          best = { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy };
+          flat = 0;
+          setCoords(best);
+        } else flat += 1;
+        if ((best.accuracy != null && best.accuracy <= GOOD_ACCURACY_M) || f.accuracy == null || (!isAndroidApp() && flat >= 3)) break;
+        await new Promise((r) => window.setTimeout(r, 1500));
+      }
     } catch (e: any) {
-      setGpsError(e?.message || "Couldn't get your location.");
+      // A first good-enough reading stays; only a miss on the very first one is an error.
+      if (!best && !stale()) setGpsError(e?.message || "Couldn't get your location.");
     } finally {
-      setLocating(false);
+      if (!stale()) setLocating(false);
     }
   };
   useEffect(() => {
     void locate();
+    return () => {
+      runRef.current++;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -143,12 +182,16 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
     let alive = true;
     setAddress(null);
     const q = `lat=${coords.latitude}&lng=${coords.longitude}`;
-    fetch(apiUrl(`/api/vehicles/places/reverse?${q}`), { headers: auth })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => alive && setAddress(d?.label || ''))
-      .catch(() => alive && setAddress(''));
+    // A run of improving fixes asks for the address once, not for each.
+    const t = window.setTimeout(() => {
+      fetch(apiUrl(`/api/vehicles/places/reverse?${q}`), { headers: auth })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && setAddress(d?.label || ''))
+        .catch(() => alive && setAddress(''));
+    }, 700);
     return () => {
       alive = false;
+      window.clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords?.latitude, coords?.longitude]);
@@ -157,6 +200,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   const boxRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const hereRef = useRef<L.Marker | null>(null);
+  const accRef = useRef<L.Circle | null>(null);
   const lineRef = useRef<L.Polyline | null>(null);
   const startRef = useRef<L.Marker | null>(null);
   // Puts you (and on Check Out the Check In pin) in view — again whenever the
@@ -180,6 +224,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
       map.remove();
       mapRef.current = null;
       hereRef.current = startRef.current = null;
+      accRef.current = null;
       lineRef.current = null;
     };
   }, []);
@@ -190,6 +235,15 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
       const at: L.LatLngTuple = [coords.latitude, coords.longitude];
       if (hereRef.current) hereRef.current.setLatLng(at);
       else hereRef.current = L.marker(at, { icon: hereIcon(), zIndexOffset: 500 }).addTo(map);
+      // The phone's own "somewhere in here" circle around the blue dot.
+      const acc = Number(coords.accuracy);
+      if (Number.isFinite(acc) && acc > 0) {
+        if (accRef.current) accRef.current.setLatLng(at).setRadius(acc);
+        else accRef.current = L.circle(at, { radius: acc, color: '#2563eb', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.08, interactive: false }).addTo(map);
+      } else if (accRef.current) {
+        accRef.current.remove();
+        accRef.current = null;
+      }
     }
     if (start && !startRef.current) startRef.current = L.marker([start.latitude, start.longitude], { icon: startIcon() }).addTo(map).bindPopup('Checked in here');
     if (start && coords) {
@@ -205,7 +259,7 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
     map.invalidateSize();
     fitRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coords?.latitude, coords?.longitude, open]);
+  }, [coords?.latitude, coords?.longitude, coords?.accuracy, open]);
   useEffect(() => {
     mapRef.current?.invalidateSize();
   }, [wide]);
@@ -251,7 +305,14 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
     setError('');
     try {
       const url = kind === 'in' ? '/api/claims/check-in' : `/api/claims/${open!.id}/check-out`;
-      const body = { ...(kind === 'in' ? { purpose: purpose.trim() } : {}), latitude: coords.latitude, longitude: coords.longitude, remarks: remarks.trim() || undefined };
+      const body = {
+        ...(kind === 'in' ? { purpose: purpose.trim() } : {}),
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        // How sure the phone was of this spot (metres) — kept with the Check In/Out.
+        ...(coords.accuracy != null && Number.isFinite(coords.accuracy) ? { accuracy_m: Math.round(coords.accuracy) } : {}),
+        remarks: remarks.trim() || undefined
+      };
       const res = await fetch(apiUrl(url), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Could not check ${kind}.`);
@@ -265,7 +326,10 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
   };
 
   const ready = !!coords && open !== undefined;
-  const canSubmit = ready && !submitting && (kind === 'out' || !!purpose.trim());
+  const quality = fixQuality(coords?.accuracy);
+  // The Android app does not take a weak fix (a Wi-Fi / tower guess); a browser may, with the warning.
+  const weakBlocked = weakFixBlocks(coords?.accuracy);
+  const canSubmit = ready && !submitting && !weakBlocked && (kind === 'out' || !!purpose.trim());
 
   const panel = (
     <div className="px-4 sm:px-5 pt-1 pb-1 flex flex-col gap-3">
@@ -292,6 +356,11 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
               <span className="block truncate text-[11.5px] text-slate-500 font-mono">
                 {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
               </span>
+              {coords.accuracy != null && (
+                <span className={`block text-[11.5px] font-semibold ${quality === 'good' ? 'text-emerald-600' : quality === 'fair' ? 'text-amber-600' : 'text-rose-600'}`}>
+                  GPS ±{Math.round(coords.accuracy)} m{locating && quality !== 'good' ? ' · finding a better fix…' : quality === 'good' ? ' · good' : ''}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -301,6 +370,12 @@ export const CheckInOutMap: React.FC<{ token: string; onClose: () => void; onDon
           </button>
         )}
       </div>
+
+      {coords && quality === 'weak' && (
+        <p className="text-[13px] text-rose-700 bg-rose-50 rounded-2xl px-3.5 py-2.5" role="status">
+          {weakFixText(Number(coords.accuracy))}
+        </p>
+      )}
 
       {kind === 'out' && travelled != null && (
         <div className="flex items-center gap-2 text-[13px] font-semibold px-3.5 py-2.5 rounded-2xl bg-blue-50 text-blue-700">

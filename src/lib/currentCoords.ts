@@ -5,6 +5,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
+import { nativeAttendanceFix, ROUGH_ACCURACY_M, type AttendanceFix } from './attendanceFix';
 
 // Same geolocation flow AttendanceCard.tsx / AuthScreen.tsx already use:
 // Capacitor's plugin on the native Android app build, plain
@@ -23,20 +24,26 @@ export function lastKnownCoords(): { latitude: number; longitude: number } | nul
   }
   return null;
 }
-function rememberFix(c: { latitude: number; longitude: number }) {
+function rememberFix<T extends { latitude: number; longitude: number; accuracy?: number }>(c: T): T {
+  // A Wi-Fi / tower guess is not where you were: not kept for the next map.
+  if (c.accuracy != null && c.accuracy > ROUGH_ACCURACY_M) return c;
   try {
-    localStorage.setItem(LAST_FIX_KEY, JSON.stringify({ ...c, at: Date.now() }));
+    localStorage.setItem(LAST_FIX_KEY, JSON.stringify({ latitude: c.latitude, longitude: c.longitude, at: Date.now() }));
   } catch {
     // storage unavailable
   }
   return c;
 }
 
-// A fix the phone took in the last 30 seconds is accepted as is (you are
-// still there) — much quicker than waiting for a new satellite fix.
-const MAX_FIX_AGE_MS = 30000;
+// A fix the phone took in the last few seconds is accepted as is (you are
+// still there). Not longer: an older one can be a Wi-Fi / tower guess from
+// the phone's idle tracking, and a few tens of seconds is a long way on foot.
+const MAX_FIX_AGE_MS = 5000;
 
-export async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+// fresh = a new reading only (no fix the phone kept from earlier).
+// accuracy = the phone's own error estimate in metres; mock = fake GPS
+// (Android app only — the phone says so).
+export async function getCurrentCoords(fresh = false): Promise<AttendanceFix> {
   if (Capacitor.isNativePlatform()) {
     let status: string;
     try {
@@ -54,8 +61,11 @@ export async function getCurrentCoords(): Promise<{ latitude: number; longitude:
     if (status !== 'granted') {
       throw new Error('Location permission is required for Check In/Out. Please allow location access and try again.');
     }
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: MAX_FIX_AGE_MS });
-    return rememberFix({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+    // The APK's own fix: with its accuracy, and whether it is fake GPS.
+    const fix = await nativeAttendanceFix(fresh ? 0 : MAX_FIX_AGE_MS);
+    if (fix) return rememberFix(fix);
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: fresh ? 0 : MAX_FIX_AGE_MS });
+    return rememberFix({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
   }
 
   return new Promise((resolve, reject) => {
@@ -64,9 +74,9 @@ export async function getCurrentCoords(): Promise<{ latitude: number; longitude:
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve(rememberFix({ latitude: pos.coords.latitude, longitude: pos.coords.longitude })),
+      (pos) => resolve(rememberFix({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy })),
       () => reject(new Error("Couldn't get your location. Please allow location access and try again.")),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: MAX_FIX_AGE_MS }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: fresh ? 0 : MAX_FIX_AGE_MS }
     );
   });
 }

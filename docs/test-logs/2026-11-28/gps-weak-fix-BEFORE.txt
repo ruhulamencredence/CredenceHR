@@ -1,0 +1,54 @@
+--- android-weak
+FAIL android-weak: the app asks the phone to warm its GPS up when In Time opens
+  status: You're inside Head Office's area · 15 m
+FAIL android-weak: the weak fix is named on the map (±1500 m)
+FAIL android-weak: the map says the position may be wrong
+FAIL android-weak: Submit stays off on a weak fix after the retry window
+PASS android-weak: a good fix (±10 m) turns Submit on
+PASS android-weak: …and the map says inside the area
+PASS android-weak: the In Time was recorded
+FAIL android-weak: the fix's accuracy is stored with the In Time (no column)
+FAIL android-weak: the phone is told to stop the warm-up when the popup closes
+FAIL android-weak: …and when Check In/Out opens
+  check-in/out says: Check In Going out for office work? Check in where you start, check out when you finish. Bay, Gulshan 1 23.780700, 90.407500 Purpose Remarks (optional) Check In here
+FAIL android-weak: Check In/Out names the weak fix (±1500 m)
+FAIL android-weak: Check In/Out says the position may be wrong
+FAIL android-weak: Check In here stays off on a weak fix
+PASS android-weak: a good fix (±10 m) turns Check In here on
+PASS android-weak: the Check In was recorded
+FAIL android-weak: the fix's accuracy is stored with the Check In (no column)
+FAIL android-weak: the phone is told to stop the warm-up when Check In/Out closes
+PASS android-weak: no page errors []
+--- android-warm
+FAIL android-warm: the app asks the phone to warm its GPS up when In Time opens
+  status: You're inside Head Office's area · 15 m
+PASS android-warm: Submit unlocks by itself once the GPS is good
+PASS android-warm: the map ends on the good fix, inside the area
+PASS android-warm: the In Time was recorded
+FAIL android-warm: the fix's accuracy is stored with the In Time (no column)
+FAIL android-warm: the phone is told to stop the warm-up when the popup closes
+FAIL android-warm: …and when Check In/Out opens
+  check-in/out says: Check In Going out for office work? Check in where you start, check out when you finish. Bay, Gulshan 1 23.780700, 90.407500 Purpose Remarks (optional) Check In here
+PASS android-warm: Check In here unlocks by itself once the GPS is good
+FAIL android-warm: Check In/Out shows the good fix (±12 m)
+PASS android-warm: the Check In was recorded
+FAIL android-warm: the fix's accuracy is stored with the Check In (no column)
+FAIL android-warm: the phone is told to stop the warm-up when Check In/Out closes
+PASS android-warm: no page errors []
+--- web
+  status: You're inside Head Office's area · 15 m
+FAIL web: the weak fix is named on the map (±1500 m)
+FAIL web: the map says the position may be wrong
+PASS web: a browser has no GPS — Submit stays possible, with the warning
+PASS web: the In Time was recorded
+FAIL web: the fix's accuracy is stored with the In Time (no column)
+  check-in/out says: Check In Going out for office work? Check in where you start, check out when you finish. Bay, Gulshan 1 23.780700, 90.407500 Purpose Remarks (optional) Check In here
+FAIL web: Check In/Out names the weak fix (±1500 m)
+FAIL web: Check In/Out says the position may be wrong
+PASS web: Check In here stays possible, with the warning
+PASS web: the Check In was recorded
+FAIL web: the fix's accuracy is stored with the Check In (no column)
+PASS web: no page errors []
+accuracy columns: attendance = NULL | claims = NULL
+25 FAILED
+exit 1

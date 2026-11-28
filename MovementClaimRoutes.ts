@@ -63,6 +63,22 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
     return { lat, lng, remarks };
   }
 
+  // How sure the phone was of the spot (metres, its own estimate), kept next to
+  // the coordinates by a separate small UPDATE — a failure here never fails the
+  // Check In/Out.
+  const accuracyOf = (body: any): number | null => {
+    const a = Number(body?.accuracy_m);
+    return body?.accuracy_m != null && Number.isFinite(a) && a >= 0 ? Math.min(99999, Math.round(a)) : null;
+  };
+  const saveAccuracy = async (col: "check_in_accuracy_m" | "check_out_accuracy_m", id: number, acc: number | null) => {
+    if (acc == null || !id) return;
+    try {
+      await queryDB(`UPDATE claims SET ${col} = ? WHERE id = ?`, [acc, id]);
+    } catch (err: any) {
+      console.warn(`Could not save the GPS accuracy (claims.${col}): ` + err.message);
+    }
+  };
+
   app.post("/api/claims/check-in", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
     try {
       const purpose = typeof req.body?.purpose === "string" ? req.body.purpose.trim().slice(0, 255) : "";
@@ -80,6 +96,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         "INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_lat, check_in_lng, check_in_remarks) VALUES (?, ?, 'open', NOW(), ?, ?, ?)",
         [req.user.id, purpose, lat, lng, remarks]
       );
+      await saveAccuracy("check_in_accuracy_m", Number(result.insertId), accuracyOf(req.body));
       // Check In/Out are never routed through the Approval Chain — a User's
       // Check In/Out here needs no Admin/Approver sign-off (unlike Remote
       // Attendance above, which still does). See attachApprovalStatuses: with no
@@ -117,6 +134,7 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
         "UPDATE claims SET status = 'completed', check_out_at = NOW(), check_out_lat = ?, check_out_lng = ?, check_out_remarks = ?, distance_km = ? WHERE id = ?",
         [lat, lng, remarks, distanceKm, id]
       );
+      await saveAccuracy("check_out_accuracy_m", Number(id), accuracyOf(req.body));
       // No Approval Chain for Check In/Out — see the matching note on check-in above.
       res.json({ success: true, distance_km: distanceKm });
     } catch (err: any) {

@@ -8,7 +8,7 @@ import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useCachedState } from '../lib/screenCache';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, type AttendanceFix } from '../lib/attendanceFix';
+import { nativeAttendanceFix, MOCK_LOCATION_MESSAGE, warmUpGps, stopWarmGps, type AttendanceFix } from '../lib/attendanceFix';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, ShieldCheck } from 'lucide-react';
 import { Project } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
@@ -402,6 +402,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
     // it's simply that one (the server still checks the distance).
     setWorking(kind);
     setMessage(null);
+    // GPS awake from the tap on (the popup keeps it so while it is open).
+    void warmUpGps();
     try {
       const coords = await getCurrentCoords();
       if (coords.mock) throw new Error(MOCK_LOCATION_MESSAGE);
@@ -409,6 +411,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
       setProjectId(at.projectId);
       setPending({ kind, coords, offsite: at.offsite });
     } catch (err: any) {
+      void stopWarmGps();
       setMessage({ type: 'error', text: err.message || `Failed to check ${kind}` });
     } finally {
       setWorking(null);
@@ -433,7 +436,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects:
           longitude: coords.longitude,
           remarks: remarks || undefined,
           // From the APK's own fix (lib/attendanceFix.ts); the server refuses a mock one.
-          ...(coords.mock !== undefined ? { mock: coords.mock, accuracy_m: coords.accuracy ?? null } : {}),
+          ...(coords.mock !== undefined ? { mock: coords.mock } : {}),
+          // How sure the phone was of this spot (metres) — kept with the punch.
+          ...(coords.accuracy != null && Number.isFinite(coords.accuracy) ? { accuracy_m: Math.round(coords.accuracy) } : {}),
           ...(pending.offsite ? { offsite: true } : {})
         })
       });

@@ -8,12 +8,17 @@ import android.content.pm.PackageManager;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.content.ContextCompat;
 import androidx.core.location.LocationManagerCompat;
 import com.google.android.gms.location.CurrentLocationRequest;
 import com.google.android.gms.location.Granularity;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
 import com.google.android.gms.tasks.CancellationTokenSource;
@@ -193,8 +198,8 @@ public class LocationAccessPlugin extends Plugin {
     // One fresh position for Remote Attendance Check In / Out
     // (src/lib/attendanceFix.ts), with whether it came from a mock-location
     // ("fake GPS") app — Capacitor's Geolocation plugin doesn't say. The
-    // server refuses a mock fix. A fix taken in the last maxAgeMs (30 s) is
-    // accepted as is, so it's as quick as before.
+    // server refuses a mock fix. A fix taken in the last maxAgeMs is accepted
+    // as is (the page asks for 0 when it wants a fresh reading).
     @SuppressLint("MissingPermission")
     @PluginMethod
     public void getCurrentFix(PluginCall call) {
@@ -231,6 +236,76 @@ public class LocationAccessPlugin extends Plugin {
         } catch (SecurityException e) {
             call.reject("Location permission is required to mark attendance. Please allow location access and try again.", "PERMISSION");
         }
+    }
+
+    // Keeps the phone's GPS awake while a screen that needs a position is open
+    // (the In / Out Time popup, the Check In/Out map). A phone that has been
+    // sitting still has its GPS asleep — everyday tracking drops to low power
+    // after 15 minutes — so the first reading is a Wi-Fi / tower guess,
+    // hundreds of metres off. A high-accuracy request kept registered wakes
+    // the GPS, and the readings that follow (getCurrentFix) are GPS fixes
+    // within seconds. It stops by itself after durationMs (a minute at most),
+    // on stopWarm and when the app is destroyed, so it is never left running.
+    private static final long WARM_MAX_MS = 60 * 1000;
+    private LocationCallback warmCallback;
+    private final Handler warmHandler = new Handler(Looper.getMainLooper());
+    private final Runnable warmStop = this::stopWarmNow;
+
+    @SuppressLint("MissingPermission")
+    @PluginMethod
+    public void warmUp(PluginCall call) {
+        if (!hasForeground()) {
+            call.resolve();
+            return;
+        }
+        Integer asked = call.getInt("durationMs", 45000);
+        long ms = Math.max(5000L, Math.min(WARM_MAX_MS, asked == null ? 45000L : asked.longValue()));
+        synchronized (this) {
+            if (warmCallback == null) {
+                LocationRequest req = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                    .setMinUpdateIntervalMillis(500)
+                    .build();
+                LocationCallback cb = new LocationCallback() {
+                    @Override
+                    public void onLocationResult(LocationResult result) {
+                        // Nothing to do with these fixes: the request itself keeps the GPS awake.
+                    }
+                };
+                try {
+                    LocationServices.getFusedLocationProviderClient(getContext()).requestLocationUpdates(req, cb, Looper.getMainLooper());
+                    warmCallback = cb;
+                } catch (SecurityException e) {
+                    // Permission taken away meanwhile: nothing to warm up.
+                }
+            }
+        }
+        warmHandler.removeCallbacks(warmStop);
+        warmHandler.postDelayed(warmStop, ms);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopWarm(PluginCall call) {
+        stopWarmNow();
+        call.resolve();
+    }
+
+    private synchronized void stopWarmNow() {
+        warmHandler.removeCallbacks(warmStop);
+        if (warmCallback != null) {
+            try {
+                LocationServices.getFusedLocationProviderClient(getContext()).removeLocationUpdates(warmCallback);
+            } catch (Exception ignore) {
+                // already gone
+            }
+            warmCallback = null;
+        }
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        stopWarmNow();
+        super.handleOnDestroy();
     }
 
     // The phone's Location (GPS) switch.
