@@ -25,10 +25,10 @@ interface FixPlugin {
 }
 const LocationAccess = registerPlugin<FixPlugin>('LocationAccess');
 
-export async function nativeAttendanceFix(): Promise<AttendanceFix | null> {
+export async function nativeAttendanceFix(maxAgeMs = 30000): Promise<AttendanceFix | null> {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return null;
   try {
-    const f = await LocationAccess.getCurrentFix({ maxAgeMs: 30000, timeoutMs: 15000 });
+    const f = await LocationAccess.getCurrentFix({ maxAgeMs, timeoutMs: 15000 });
     if (!Number.isFinite(f?.latitude) || !Number.isFinite(f?.longitude)) return null;
     return { latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy, mock: f.mock === true };
   } catch (e: any) {
@@ -37,6 +37,11 @@ export async function nativeAttendanceFix(): Promise<AttendanceFix | null> {
     throw new Error(e?.message || "Couldn't get your location. Please try again.");
   }
 }
+
+// A fix this close (metres, the phone's own accuracy estimate) is trusted for
+// the attendance area; a coarser one (cell towers / Wi-Fi, often hundreds of
+// metres off) is refined first — see AttendanceMapConfirm.tsx.
+export const GOOD_ACCURACY_M = 30;
 
 export const MOCK_LOCATION_MESSAGE =
   'Fake GPS is on on this phone (a mock-location app). Turn it off — and in Developer options set "Select mock location app" to Nothing — then try again.';

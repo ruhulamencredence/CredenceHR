@@ -1392,3 +1392,11 @@ Bill Claim-এর মতো Check In/Out মডিউলেও এখন Users �
 ## HR Data Import: Check In/Out-এ Location (২৬ নভেম্বর)
 
 Check In/Out ইম্পোর্ট ফাইলে এখন ঐচ্ছিক "Location (Latitude, Longitude)" কলাম আছে (`23.7196951, 90.4238284` ধরনের, ম্যাপ থেকে কপি করা)। এটা Check In-এর `check_in_lat/lng`-এ যায়, আর সারিতে Check Out থাকলে Check Out-এও (আলাদা "Check Out Location" দিলে সেটা)। ভুল ফরম্যাট হলে ওই সারি পরিষ্কার বার্তায় ব্যর্থ হয়, বাকিগুলো চলে। কলাম না থাকলে আগের মতোই, ম্যাপে পিন থাকে না। আগের মতো `import_movement_claims` layer লাগে (`DataImportRoutes.ts`)।
+
+## In / Out Time ম্যাপ: প্রথম মোটা অবস্থান নিজে থেকে ঠিক হয় (২৬ নভেম্বর)
+
+ফোনের প্রথম GPS fix প্রায়ই মোবাইল টাওয়ার / Wi-Fi থেকে আসে, কয়েকশো মিটার ভুল। আগে In / Out Time-এর ম্যাপ সেটাই ধরে রাখত, ফলে এলাকার ভেতরে দাঁড়িয়েও "491 m away — outside the area" দেখাত, যতক্ষণ না কর্মী নিজে লোকেশন বোতাম চাপতেন। এখন ফোনের নিজের নির্ভুলতা (± মিটার) দেখা হয়: ±৩০ মিটারের চেয়ে মোটা হলে ম্যাপ "Finding your exact location… (GPS ±X m)" দেখায়, ১.৫ সেকেন্ড পরপর নতুন GPS পড়ে (অ্যাপে আগের-রাখা fix নয়), সবচেয়ে নির্ভুলটা রাখে, আর ±৩০ মিটারে পৌঁছালে, ৩ বার উন্নতি না হলে বা ১৫ সেকেন্ডে থামে — ততক্ষণ Submit "Locating…"। নীল বিন্দুর চারপাশে নির্ভুলতার বৃত্ত আঁকা থাকে। প্রতিটা ভালো fix-এ Project আর off-site (অনুমোদনে যাবে কি না) আবার হিসাব হয় (`AttendanceCard.tsx` `placeOf`) — আগে প্রথম মোটা fix-ই এটা ঠিক করে দিত, তাই ভেতরে দাঁড়িয়েও কেউ "অনুমোদনে যাবে" পেতেন। শেষেও GPS দুর্বল থাকলে বার্তায় ±X m আর জানালা / বাইরে / Wi-Fi-এর পরামর্শ আসে। পাঠানো হয় শেষ দেখানো অবস্থান; সার্ভারের নিয়ম বদলায়নি (`AttendanceMapConfirm.tsx`, `attendanceFix.ts` `GOOD_ACCURACY_M`)।
+
+## Department team: "Skip the Head of Department" (২৮ নভেম্বর)
+
+Departments → Edit → Teams-এ প্রতিটা team-এ নতুন টিক "Skip the Head of Department" (`department_teams.skip_head`, শুরুতে বন্ধ)। চালু থাকলে ওই team-এর লোকের (team-এর সদস্য, বা "everyone else" team হলে কোনো team-এ নেই এমন লোক) নতুন আবেদনে Head of Department-এর ধাপ থাকে না: Supervisor → Approval Template (`teamSkipsHead`, `resolveHeadApprover` — `server.ts`)। Direct Supervisor থাকলেও team-এর নিয়মই চলে। যে আবেদন আগে থেকে Head-এর ধাপে আছে বা Head-এর ধাপ নিয়ে তৈরি হয়েছে, সুইচ পরে চালু করলেও সে Head-এর কাছেই যায় (`keepTeamRule`)। Departments তালিকায় ওই team-এর পাশে "skips Head" দেখায়। বদলাতে আগের মতোই Departments মডিউল + `edit_add` layer লাগে (UI ও API)।

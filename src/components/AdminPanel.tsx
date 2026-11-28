@@ -7934,6 +7934,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               {d.teams.map((t) => (
                                 <span key={t.id}>
                                   <b>{t.name}</b> · {t.supervisor_name || '—'} · {t.everyone_else ? `${t.members} + everyone else` : t.members}
+                                  {t.skip_head && <span className="ml-1.5 px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 text-[10.5px] font-semibold">skips Head</span>}
                                 </span>
                               ))}
                             </span>
