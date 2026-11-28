@@ -234,6 +234,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>Check In/Out বা Remote Attendance-এ GPS ভুল জায়গা দিলে কীভাবে বোঝা যায়, আর ঠেকানো যায় কি?</td>
+<td>প্রতিটা punch-এর সাথে ফোনের জানানো নিখুঁততা (±মিটার) সংরক্ষণ হয় ও approval-এর বিস্তারিতে দেখায় (<code>attendance</code>/<code>claims</code>/<code>attendance_corrections</code>-এর <code>…_accuracy_m</code>)। Android app-এ ১০০ m-এর বেশি ভুল fix (Wi-Fi/টাওয়ারের অনুমান) থাকলে Submit চালু হয় না, GPS ভালো হলে নিজে খোলে। এটা ব্যবহারকারীকে ভুল punch থেকে বাঁচানোর ব্যবস্থা, ঠগবাজি আটকানোর নয় — সেটার জন্য server project-বৃত্তের দূরত্ব, Fake GPS প্রত্যাখ্যান আর approval chain দেখে (<code>AttendanceRoutes.ts</code>, <code>MovementClaimRoutes.ts</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>কেউ Fake GPS app দিয়ে Employee Tracking-এ ভুয়া জায়গা দেখাতে পারে?</td>
 <td>নতুন APK-এ এমন প্রতিটা point ধরা পড়ে (Android-এর mock-location চিহ্ন) — map-এ লাল "!", live board-এ লাল ring, route ও Stay Report-এ গোনা হয় না। Root করা ফোনে চিহ্নটাও লুকানো সম্ভব, তাই এটা সতর্কসংকেত, প্রমাণ নয়। Remote Attendance-এর Check In / Out-এও নতুন APK fake GPS ধরলে punch হয় না (সার্ভারও ফেরায়, চেষ্টা <code>attendance_mock_attempts</code>-এ থাকে); web browser ও পুরনো APK থেকে এই যাচাই হয় না।</td>
 <td>⚠️ আংশিক</td>
